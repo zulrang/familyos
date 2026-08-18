@@ -1,0 +1,28 @@
+{
+  "name": "familyos",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "biome check",
+    "format": "biome format --write",
+    "check:calendar": "node --experimental-strip-types src/lib/calendar.check.ts",
+    "check:recurrence": "node --experimental-strip-types src/lib/recurrence.check.ts"
+  },
+  "dependencies": {
+    "next": "16.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.2",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "babel-plugin-react-compiler": "1.0.0",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.33.2"
+}

@@ -1,0 +1,6 @@
+*{box-sizing:border-box}
+body{margin:0;font-family:var(--font-sans);font-size:var(--fs-body);color:var(--text-body);background:var(--surface-app);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:var(--fw-semibold);color:var(--text-title);margin:0}
+a{color:var(--brand-blue);text-decoration:none}
+a:hover{color:var(--brand-blue-press);text-decoration:underline}
+button{font-family:inherit}

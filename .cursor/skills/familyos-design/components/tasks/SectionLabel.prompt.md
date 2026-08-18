@@ -1,0 +1,3 @@
+```jsx
+<SectionLabel>Morning</SectionLabel>
+```

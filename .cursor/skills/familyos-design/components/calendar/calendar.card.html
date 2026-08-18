@@ -1,0 +1,18 @@
+<!-- @dsCard group="Components" viewport="700x360" name="Calendar" subtitle="Events, all-day bands, day headers, now line" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css"><script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script><script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script><script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script><script src="../../_ds_bundle.js"></script><style>body{margin:0;background:var(--surface-screen);font-family:var(--font-sans)}#root{padding:16px;display:flex;flex-direction:column;gap:12px}</style></head><body><div id="root"></div><script type="text/babel">
+const {Icon,Button,IconButton,Fab,Badge,Avatar,AvatarStack,Checkbox,StatPill,ProgressBar,NavRail,AppHeader,MemberChip,EventCard,AllDayBar,DayHeader,TimeGutter,NowLine,ListPanel,ListRow,SectionLabel,TimeOfDayTabs,TaskRow,MemberColumn} = window.FamilyOSDesignSystem_68d940;
+function Demo(){return <>
+<div style={{display:'flex',gap:12,alignItems:'center'}}><DayHeader weekday="Wed" date={18} today style={{padding:0}}/><DayHeader weekday="Thu" date={19} style={{padding:0}}/>
+<MemberChip name="Dad" tone="teal" count="1/20"/><MemberChip name="Ellie" tone="blush" count="1/20" active={false}/></div>
+<div style={{display:'flex',gap:8}}><AllDayBar label="Camping Trip" tone="sage" style={{flex:1}}/><AllDayBar label="Cousins Visit" multi style={{flex:1}}/></div>
+<div style={{display:'flex',gap:10,position:'relative'}}>
+  <TimeGutter hours={['10 AM','11 AM']} rowHeight={100} width={62}/>
+  <div style={{flex:1,display:'flex',gap:10,position:'relative'}}>
+    <EventCard title="Pickup Dry Cleaning" time="9:30 - 10:15 AM" tone="teal" people={[{name:'Dad',tone:'teal'}]} height={150} style={{flex:1}}/>
+    <EventCard title="Emma's Birthday Party!" time="10:30 - 12 PM" tone="lilac" people={[{name:'Harper',tone:'lilac'}]} height={150} style={{flex:1}}/>
+    <EventCard title="Dog's Big Bath Day!" time="11 AM -12 PM" multi people={[{name:'Luke',tone:'sage'},{name:'Dad',tone:'teal'},{name:'Mom',tone:'coral'}]} height={150} style={{flex:1}}/>
+    <NowLine top={104}/>
+  </div>
+</div></>}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo/>);
+</script></body></html>

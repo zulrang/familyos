@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "FamilyOS Keyboard",
+  "version": "1.0.0",
+  "description": "On-screen keyboard that shows only while a text field is focused.",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["field.js", "content.js"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_end"
+    }
+  ],
+  "host_permissions": ["<all_urls>"]
+}

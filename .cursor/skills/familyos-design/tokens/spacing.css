@@ -1,0 +1,11 @@
+:root{
+--space-1:2px;--space-2:4px;--space-3:6px;--space-4:8px;--space-5:12px;--space-6:14px;--space-7:16px;--space-8:20px;--space-9:24px;--space-10:32px;--space-12:40px;
+/* component-level spacing observed in the source UI */
+--pad-card:12px 14px;
+--pad-list-row:11px 14px;
+--pad-pill:8px 16px;
+--gap-column:6px;
+--gap-list-row:6px;
+--rail-width:74px;
+--hit-min:44px;
+}

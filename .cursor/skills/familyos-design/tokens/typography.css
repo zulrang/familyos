@@ -1,0 +1,28 @@
+:root{
+--fs-display-xl:44px;
+--fs-display:34px;
+--fs-title:26px;
+--fs-heading:22px;
+--fs-body-lg:19px;
+--fs-body:17px;
+--fs-label:15px;
+--fs-caption:13px;
+--fs-micro:11px;
+--lh-tight:1.1; /* @kind other */
+--lh-snug:1.25; /* @kind other */
+--lh-body:1.45; /* @kind other */
+--fw-regular:400; /* @kind font */
+--fw-semibold:600; /* @kind font */
+--fw-bold:700; /* @kind font */
+--fw-heavy:800; /* @kind font */
+--tracking-tight:-0.01em; /* @kind other */
+--tracking-normal:0; /* @kind other */
+--tracking-wide:0.02em; /* @kind other */
+/* semantic type roles */
+--type-screen-title:var(--fw-semibold) var(--fs-display)/var(--lh-tight) var(--font-display);
+--type-day-label:var(--fw-semibold) var(--fs-title)/var(--lh-tight) var(--font-display);
+--type-section:var(--fw-semibold) var(--fs-heading)/var(--lh-snug) var(--font-display);
+--type-card-title:var(--fw-bold) var(--fs-body)/var(--lh-snug) var(--font-sans);
+--type-card-meta:var(--fw-semibold) var(--fs-label)/var(--lh-snug) var(--font-sans);
+--type-nav-label:var(--fw-semibold) var(--fs-caption)/1.2 var(--font-sans);
+}
