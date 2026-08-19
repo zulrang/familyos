@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Newsreader, Nunito_Sans } from "next/font/google";
 import { NavRail } from "@/components/nav/NavRail";
+import { readSettings } from "@/lib/settings";
 import "./globals.css";
 
 const newsreader = Newsreader({
@@ -25,9 +26,16 @@ export const viewport: Viewport = {
   userScalable: false,
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export const dynamic = "force-dynamic";
+
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const { uiScale } = await readSettings();
   return (
-    <html lang="en" className={`${newsreader.variable} ${nunitoSans.variable}`}>
+    <html
+      lang="en"
+      className={`${newsreader.variable} ${nunitoSans.variable}`}
+      style={{ zoom: uiScale }}
+    >
       <body>
         <div style={{ display: "flex", height: "100%" }}>
           <NavRail />

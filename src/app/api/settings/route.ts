@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { listCalendars } from "@/lib/google";
 import { googleConfigured, patchSettings, readSettings } from "@/lib/settings";
-import type { Member } from "@/lib/types";
+import { type Member, parseUiScale } from "@/lib/types";
 
-export async function GET() {
-  const s = await readSettings();
-  return NextResponse.json({
+function publicSettings(s: Awaited<ReturnType<typeof readSettings>>) {
+  return {
     familyName: s.familyName,
     members: s.members,
     calendarId: s.calendarId,
     signedIn: Boolean(s.tokens?.access_token),
     googleConfigured: googleConfigured(),
-  });
+    uiScale: s.uiScale,
+  };
+}
+
+export async function GET() {
+  return NextResponse.json(publicSettings(await readSettings()));
 }
 
 export async function PATCH(request: Request) {
@@ -19,6 +23,7 @@ export async function PATCH(request: Request) {
     familyName?: string;
     members?: Member[];
     calendarId?: string | null;
+    uiScale?: unknown;
   };
   const cur = await readSettings();
   let calendarTimeZone = cur.calendarTimeZone;
@@ -39,12 +44,10 @@ export async function PATCH(request: Request) {
     members: Array.isArray(body.members) ? body.members : cur.members,
     calendarId,
     calendarTimeZone,
+    uiScale:
+      body.uiScale === undefined
+        ? cur.uiScale
+        : parseUiScale(body.uiScale, cur.uiScale),
   });
-  return NextResponse.json({
-    familyName: next.familyName,
-    members: next.members,
-    calendarId: next.calendarId,
-    signedIn: Boolean(next.tokens?.access_token),
-    googleConfigured: googleConfigured(),
-  });
+  return NextResponse.json(publicSettings(next));
 }

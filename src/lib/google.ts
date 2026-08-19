@@ -29,6 +29,7 @@ import type {
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/tasks",
 ].join(" ");
 
 export function authUrl(state: string): string {
@@ -105,7 +106,10 @@ export class AuthError extends Error {
   }
 }
 
-async function gfetch(url: string, init?: RequestInit): Promise<Response> {
+export async function gfetch(
+  url: string,
+  init?: RequestInit,
+): Promise<Response> {
   const token = await accessToken();
   const res = await fetch(url, {
     ...init,
@@ -116,6 +120,9 @@ async function gfetch(url: string, init?: RequestInit): Promise<Response> {
     },
   });
   if (res.status === 401) throw new AuthError();
+  if (res.status === 403 && url.includes("tasks.googleapis.com")) {
+    throw new AuthError();
+  }
   return res;
 }
 

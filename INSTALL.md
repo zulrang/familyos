@@ -1,6 +1,6 @@
 # Install FamilyOS
 
-FamilyOS is a **kitchen-wall kiosk**, not a hosted app. One household, one display, a week calendar that reads and writes a Google Calendar you pick in Settings. Other nav items (Lists, Tasks, and the rest) are stubs until those screens exist.
+FamilyOS is a **kitchen-wall kiosk**, not a hosted app. One household, one display, a week calendar that reads and writes a Google Calendar you pick in Settings, and lists that read and write Google Tasks. Other nav items (Tasks, and the rest) are stubs until those screens exist.
 
 You can run it in a desktop browser while you set it up. The wall unit is optional.
 
@@ -8,7 +8,7 @@ You can run it in a desktop browser while you set it up. The wall unit is option
 
 - **Node.js 20.9+** (Next.js 16)
 - **pnpm 10** — this repo pins `packageManager: pnpm@10.33.2`. `corepack enable` is the least painful way to get that version
-- A **Google Cloud** project you control, with the Calendar API enabled
+- A **Google Cloud** project you control, with the Calendar API and Tasks API enabled
 - A computer that can stay reachable if a wall panel will load the UI over the LAN
 
 A touchscreen is not required to install or to click around in a browser.
@@ -24,10 +24,10 @@ pnpm install
 
 ## 2. Google OAuth
 
-FamilyOS has no accounts of its own. Google sign-in exists only so the kiosk can talk to Calendar.
+FamilyOS has no accounts of its own. Google sign-in exists only so the kiosk can talk to Calendar and Tasks.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project (or reuse one).
-2. Enable **Google Calendar API**.
+2. Enable **Google Calendar API** and **Google Tasks API**.
 3. Configure the OAuth consent screen. External + yourself as a test user is enough for a household.
 4. Create an OAuth client ID of type **Web application**.
 5. Add this authorized redirect URI:
@@ -42,7 +42,7 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback/google
 ```
 
-Login requests `calendar.events` and `calendar.calendarlist.readonly`. Tokens are stored on the machine running Next, in `data/kiosk.json` (also gitignored) — not in the browser. Easiest path: sign in once from that machine. The wall display then uses the same server-side tokens.
+Login requests `calendar.events`, `calendar.calendarlist.readonly`, and `tasks`. Tokens are stored on the machine running Next, in `data/kiosk.json` (also gitignored) — not in the browser. Easiest path: sign in once from that machine. The wall display then uses the same server-side tokens. If you signed in before Tasks was added, sign out and back in so Google can grant the new scope.
 
 If you insist on completing Google login **on the panel**, `GOOGLE_REDIRECT_URI` and the Cloud Console URI must be the origin Chromium actually loads (LAN hostname or IP), not `localhost`.
 

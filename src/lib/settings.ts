@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Member } from "./types";
+import { type Member, parseUiScale, type UiScale } from "./types";
 
 export type Tokens = {
   access_token: string;
@@ -15,6 +15,7 @@ export type StoredSettings = {
   calendarTimeZone: string | null;
   tokens: Tokens | null;
   oauthState: string | null;
+  uiScale: UiScale;
 };
 
 const FILE = path.join(process.cwd(), "data", "kiosk.json");
@@ -26,6 +27,7 @@ const EMPTY: StoredSettings = {
   calendarTimeZone: null,
   tokens: null,
   oauthState: null,
+  uiScale: 1,
 };
 
 export function googleConfigured(): boolean {
@@ -50,7 +52,9 @@ export function googleClient(): {
 export async function readSettings(): Promise<StoredSettings> {
   try {
     const raw = await readFile(FILE, "utf8");
-    return { ...EMPTY, ...JSON.parse(raw) };
+    const next = { ...EMPTY, ...JSON.parse(raw) };
+    next.uiScale = parseUiScale(next.uiScale);
+    return next;
   } catch {
     return { ...EMPTY };
   }

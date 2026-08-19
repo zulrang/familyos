@@ -52,6 +52,8 @@
   --border-hairline: var(--neutral-200);
   --border-card: var(--neutral-300);
   --focus-ring: var(--brand-blue);
+  --check-idle: var(--white);
+  --check-idle-border: var(--neutral-300);
 
   --font-display: var(--font-newsreader), Georgia, "Times New Roman", serif;
   --font-sans:
@@ -88,12 +90,17 @@
   --space-9: 24px;
   --rail-width: 74px;
   --hit-min: 44px;
+  --pad-list-row: 11px 14px;
+  --gap-list-row: 6px;
 
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 18px;
   --radius-pill: 999px;
   --radius-event: 14px;
+  --radius-xs: 6px;
+  --radius-list-row: 10px;
+  --radius-panel: 18px;
 
   --shadow-raise: 0 1px 2px rgba(31, 42, 51, 0.06);
   --shadow-panel: 0 6px 20px rgba(31, 42, 51, 0.08);

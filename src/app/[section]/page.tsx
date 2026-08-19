@@ -4,7 +4,7 @@ import { FAMILYOS_NAV } from "@/lib/nav";
 
 const STUBS: Set<string> = new Set(
   FAMILYOS_NAV.map((i) => i.id).filter(
-    (id) => id !== "calendar" && id !== "settings",
+    (id) => id !== "calendar" && id !== "settings" && id !== "lists",
   ),
 );
 

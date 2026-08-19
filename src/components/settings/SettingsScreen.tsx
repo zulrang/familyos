@@ -7,6 +7,9 @@ import {
   MEMBER_TONES,
   type Member,
   type PublicSettings,
+  parseUiScale,
+  UI_SCALES,
+  type UiScale,
 } from "@/lib/types";
 import { Button } from "../core/Button";
 import { AppHeader } from "../nav/AppHeader";
@@ -28,6 +31,7 @@ export function SettingsScreen() {
   const [familyName, setFamilyName] = useState("Family");
   const [members, setMembers] = useState<Member[]>([]);
   const [calendarId, setCalendarId] = useState("");
+  const [uiScale, setUiScale] = useState<UiScale>(1);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +41,7 @@ export function SettingsScreen() {
     setFamilyName(s.familyName);
     setMembers(s.members);
     setCalendarId(s.calendarId ?? "");
+    setUiScale(parseUiScale(s.uiScale));
     if (s.signedIn) {
       const res = await fetch("/api/calendars");
       if (res.ok) {
@@ -60,6 +65,7 @@ export function SettingsScreen() {
         familyName,
         members,
         calendarId: calendarId || null,
+        uiScale,
       }),
     });
     if (!res.ok) {
@@ -68,6 +74,7 @@ export function SettingsScreen() {
     }
     setSaved(true);
     setTimeout(() => setSaved(false), 1600);
+    document.documentElement.style.zoom = String(uiScale);
     await load();
   }
 
@@ -100,6 +107,32 @@ export function SettingsScreen() {
         }}
       >
         <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
+          Display
+        </h2>
+        <label style={{ display: "block", marginBottom: 24 }}>
+          <div
+            style={{
+              font: "var(--type-card-meta)",
+              color: "var(--text-muted)",
+              marginBottom: 6,
+            }}
+          >
+            Display size
+          </div>
+          <select
+            className="fos-input"
+            value={uiScale}
+            onChange={(e) => setUiScale(parseUiScale(Number(e.target.value)))}
+          >
+            {UI_SCALES.map((s) => (
+              <option key={s} value={s}>
+                {Math.round(s * 100)}%
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
           Google Calendar
         </h2>
         {!settings ? (
@@ -120,9 +153,10 @@ export function SettingsScreen() {
               marginBottom: 18,
             }}
           >
-            Create an OAuth client in Google Cloud, enable the Calendar API, and
-            put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.local.
-            Redirect URI: http://localhost:3000/api/auth/callback/google
+            Create an OAuth client in Google Cloud, enable the Calendar API and
+            Tasks API, and put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in
+            .env.local. Redirect URI:
+            http://localhost:3000/api/auth/callback/google
           </p>
         ) : settings.signedIn ? (
           <div
