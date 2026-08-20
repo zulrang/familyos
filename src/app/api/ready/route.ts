@@ -1,4 +1,4 @@
-import { handleReady } from "@/lib/pairing-http";
+import { handleReady } from "@/displays/pairing-http";
 
 export async function GET(request: Request) {
   return handleReady(request);

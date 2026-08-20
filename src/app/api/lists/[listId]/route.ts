@@ -1,4 +1,4 @@
-import { handleRenameList, handleUnselectList } from "@/lib/lists-http";
+import { handleRenameList, handleUnselectList } from "@/lists/lists-http";
 
 export async function PATCH(
   request: Request,

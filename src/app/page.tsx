@@ -1,4 +1,4 @@
-import { CalendarScreen } from "@/components/calendar/CalendarScreen";
+import { CalendarScreen } from "@/calendar/CalendarScreen";
 
 export default function Home() {
   return <CalendarScreen />;

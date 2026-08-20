@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
-import { authUrl } from "@/lib/google";
-import { patchProvider } from "@/lib/provider";
-import { googleConfigured } from "@/lib/settings";
+import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
+import { authUrl } from "@/shared/google";
+import { googleConfigured } from "@/shared/google-env";
+import { patchProvider } from "@/shared/provider";
 
 export async function GET(request: Request) {
   const display = await requireTrustedDisplay(request);

@@ -6,10 +6,14 @@ Test: `pnpm test` · Contract: `pnpm test:contract` · Lint: `pnpm lint`
 Component tests need `// @vitest-environment jsdom` (Vitest default env is `node`).
 
 ## Entry Points
-- App shell / pairing gate: `src/app/layout.tsx`
-- Calendar UI: `src/components/calendar/`
-- Lists UI: `src/components/lists/`
-- Domain + adapters: `src/lib/`
+- App shell / pairing gate: `src/app/layout.tsx` (thin Next router; imports from slices)
+- Calendar: `src/calendar/`
+- Lists: `src/lists/`
+- Settings: `src/settings/`
+- Displays / pairing UI + HTTP: `src/displays/` (session/auth in `src/shared/`)
+- Members: `src/members/`
+- Shared UI + infra: `src/shared/` (`shared/ui/` for design-system primitives)
+- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. Display session/auth lives in `shared/` so APIs need not import `displays`.
 
 ## Do Not Touch
 - The `nextjs-agent-rules` block in `AGENTS.md` (`next dev` rewrites it)

@@ -1,4 +1,4 @@
-import { handleClearCompleted } from "@/lib/lists-http";
+import { handleClearCompleted } from "@/lists/lists-http";
 
 export async function POST(
   request: Request,

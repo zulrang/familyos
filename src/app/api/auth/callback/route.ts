@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
-import { exchangeCode } from "@/lib/google";
-import { readProvider } from "@/lib/provider";
+import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
+import { exchangeCode } from "@/shared/google";
+import { readProvider } from "@/shared/provider";
 
 export async function GET(request: NextRequest) {
   const display = await requireTrustedDisplay(request);
