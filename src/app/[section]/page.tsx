@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
-import { NotImplemented } from "@/components/stub/NotImplemented";
-import { FAMILYOS_NAV } from "@/lib/nav";
+import { NotImplemented } from "@/shared/NotImplemented";
+import { FAMILYOS_NAV } from "@/shared/nav";
 
 const STUBS: Set<string> = new Set(
   FAMILYOS_NAV.map((i) => i.id).filter(

@@ -1,4 +1,4 @@
-import { handleAddItem } from "@/lib/lists-http";
+import { handleAddItem } from "@/lists/lists-http";
 
 export async function POST(
   request: Request,

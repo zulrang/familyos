@@ -1,4 +1,7 @@
-import { handleGetSettings, handlePatchSettings } from "@/lib/settings-http";
+import {
+  handleGetSettings,
+  handlePatchSettings,
+} from "@/settings/settings-http";
 
 export async function GET(request: Request) {
   return handleGetSettings(request);

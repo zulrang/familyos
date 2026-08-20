@@ -116,10 +116,11 @@ Other rail destinations are stubs.
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
 
 Household Members are shared server data, not an auth directory. There may be
-at most six active members, each representing one person with a unique active
-tone. Retiring a member keeps the identity record for existing events, removes
-it from new-event choices, and frees the tone for reuse. Member email is not a
-v1 field.
+at most six Active Members, each representing one person with a unique Member
+Color (`#rrggbb`, FamilyOS-owned). Retiring a member keeps the identity record
+for existing events, removes it from new-event choices, and frees the color for
+reuse. Member email is not a v1 field. See
+`docs/adr/0003-member-color-is-familyos-owned.md`.
 
 ## 4. Data Flow and Contracts
 
@@ -142,9 +143,8 @@ peer-to-peer Display synchronization.
 
 **Canonical contracts**
 - Domain language: `CONTEXT.md`
-- Visual spec: Calendar and Lists components in `src/` plus design-skill tokens
-  and `.d.ts` contracts.
 - Product scope: `docs/requirements.md`
+- Decision records: `docs/adr/`
 - Wall device: `docs/kiosk.md`
 - UI components/tokens: `.cursor/skills/familyos-design/` (`.d.ts` + `tokens/`); production copies live in `src/`
 - Event shape: Google Calendar API events. Wrap at the adapter boundary; do not let Google’s payload leak through every component.
@@ -192,20 +192,21 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Stable Household Member IDs in Google private event properties are the only
   Event Participant identity. Do not infer participants from `colorId`,
   attendees, or email.
-- Member tones are presentation. They are unique only among active members and
-  may be reused after retirement.
+- Member Colors are presentation. They are unique only among Active Members and
+  may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Tasks, Rewards, Meals, Recipes, Photos, Sleep, or Settings beyond existing chrome.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
-- There is no test script yet. Don’t introduce a test framework unless the task needs one.
+- Tests are Vitest only (`pnpm test` / `pnpm test:contract`). Component tests need `// @vitest-environment jsdom` because the default env is `node`. Don’t add a second runner.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
-- Current implementation gaps are not product decisions: APIs are
-  unauthenticated, UI scale is household-wide, Calendar renders seven days,
-  event identity uses tones/attendees, Lists exposes all tasklists, and caches
-  and optimistic concurrency are absent. Bring these into line with this SSD;
-  do not document the current behavior as canonical.
+- Current implementation gaps are not product decisions: Calendar still
+  renders seven days (target is Five-Day View with five-day paging),
+  Household Time Zone is not yet the calendar date authority, and the
+  account-bound last-known provider cache (outage read-only) plus Google
+  ETag rejection for stale event / List Item writes are absent. Bring these
+  into line with this SSD; do not document the current behavior as canonical.
 
 ## 8. Future Direction
 

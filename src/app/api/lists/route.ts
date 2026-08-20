@@ -1,4 +1,4 @@
-import { handleCreateList, handleGetLists } from "@/lib/lists-http";
+import { handleCreateList, handleGetLists } from "@/lists/lists-http";
 
 export async function GET(request: Request) {
   return handleGetLists(request);

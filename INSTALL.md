@@ -15,7 +15,7 @@ You can run it in a desktop browser while you set it up. The wall unit is option
 
 ## What you need
 
-- **Node.js 20.9+** (Next.js 16)
+- **Node.js 24.15+** (current LTS; Next.js 16 / Vitest / jsdom)
 - **pnpm 10** — this repo pins `packageManager: pnpm@10.33.2`. `corepack enable` is the least painful way to get that version
 - A **Google Cloud** project you control, with the Calendar API and Tasks API enabled
 - A computer that can stay reachable if a wall panel will load the UI over the LAN

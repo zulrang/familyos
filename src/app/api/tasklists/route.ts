@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { AuthError } from "@/lib/auth-error";
-import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
-import { listTaskLists } from "@/lib/tasks";
+import { listTaskLists } from "@/lists/tasks";
+import { AuthError } from "@/shared/auth-error";
+import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 
 /** Provider tasklist catalog for Settings Household List selection. */
 export async function GET(request: Request) {

@@ -17,7 +17,7 @@ less-cramped Five-Day View defined in `docs/requirements.md`.
 
 ## Quick start
 
-**Node.js 20.9+** and **pnpm 10**. Full walkthrough (OAuth, production bind, Pi kiosk, touchscreen): [INSTALL.md](INSTALL.md).
+**Node.js 24.15+** (current LTS) and **pnpm 10**. Full walkthrough (OAuth, production bind, Pi kiosk, touchscreen): [INSTALL.md](INSTALL.md).
 
 ```bash
 pnpm install
@@ -41,6 +41,8 @@ The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.
 
 - [CONTEXT.md](CONTEXT.md) — canonical domain language
 - [INSTALL.md](INSTALL.md) — clone, Google OAuth, wall kiosk, touchscreen
-- [docs/SSD.md](docs/SSD.md) — architecture and current implementation gaps
+- [docs/SSD.md](docs/SSD.md) — architecture, boundaries, and remaining gaps
 - [docs/kiosk.md](docs/kiosk.md) — FullPageOS Chromium, OSK extension, idle dim
 - [docs/requirements.md](docs/requirements.md) — v1 scope
+- [docs/code-design-principles.md](docs/code-design-principles.md) — coding standards for humans and agents
+- [docs/adr/](docs/adr/) — architecture decision records
