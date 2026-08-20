@@ -1,74 +1,17 @@
-import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
-import { presentationTonesFor } from "@/lib/calendar";
-import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
-import { AuthError, deleteEvent, updateEvent } from "@/lib/google";
-import { normalizeParticipantIds } from "@/lib/participants";
-import { parseScope } from "@/lib/recurrence";
-import { readHousehold } from "@/lib/settings";
+import { handleDeleteEvent, handleUpdateEvent } from "@/calendar/calendar-http";
 
 export async function PATCH(
-  request: NextRequest,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
   const { id } = await params;
-  const s = await readHousehold();
-  if (!s.calendarId)
-    return NextResponse.json({ error: "no calendar" }, { status: 400 });
-  const body = (await request.json()) as {
-    title: string;
-    allDay: boolean;
-    startMs: number;
-    endMs: number;
-    participantIds?: string[];
-    scope?: string;
-  };
-  const participantIds = normalizeParticipantIds(body.participantIds ?? []);
-  try {
-    const event = await updateEvent(
-      s.calendarId,
-      id,
-      {
-        title: body.title,
-        allDay: body.allDay,
-        startMs: body.startMs,
-        endMs: body.endMs,
-        participantIds,
-        presentationTones: presentationTonesFor(s.members, participantIds),
-      },
-      parseScope(body.scope),
-    );
-    return NextResponse.json({ event });
-  } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    console.error(e);
-    return NextResponse.json({ error: "failed" }, { status: 500 });
-  }
+  return handleUpdateEvent(request, id);
 }
 
 export async function DELETE(
-  request: NextRequest,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
   const { id } = await params;
-  const s = await readHousehold();
-  if (!s.calendarId)
-    return NextResponse.json({ error: "no calendar" }, { status: 400 });
-  try {
-    await deleteEvent(
-      s.calendarId,
-      id,
-      parseScope(request.nextUrl.searchParams.get("scope")),
-    );
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (e instanceof AuthError)
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    return NextResponse.json({ error: "failed" }, { status: 500 });
-  }
+  return handleDeleteEvent(request, id);
 }

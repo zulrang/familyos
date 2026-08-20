@@ -1,4 +1,4 @@
-import { SettingsScreen } from "@/components/settings/SettingsScreen";
+import { SettingsScreen } from "@/settings/SettingsScreen";
 
 export default function SettingsPage() {
   return <SettingsScreen />;

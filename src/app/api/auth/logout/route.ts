@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
-import { clearProviderConnection } from "@/lib/provider";
+import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
+import { clearProviderConnection } from "@/shared/provider";
 
 export async function POST(request: Request) {
   const display = await requireTrustedDisplay(request);

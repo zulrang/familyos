@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import { Newsreader, Nunito_Sans } from "next/font/google";
 import { cookies } from "next/headers";
-import { NavRail } from "@/components/nav/NavRail";
-import { DisplayTrustWatch } from "@/components/pairing/DisplayTrustWatch";
-import { PairingScreen } from "@/components/pairing/PairingScreen";
-import { resolveTrustedDisplay } from "@/lib/pairing";
+import { DisplayTrustWatch } from "@/displays/DisplayTrustWatch";
+import { PairingScreen } from "@/displays/PairingScreen";
+import { NavRail } from "@/shared/NavRail";
+import { resolveTrustedDisplay } from "@/shared/pairing";
 import "./globals.css";
 
 const newsreader = Newsreader({

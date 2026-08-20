@@ -1,4 +1,4 @@
-import { handleRevokeDisplay } from "@/lib/displays-http";
+import { handleRevokeDisplay } from "@/displays/displays-http";
 
 export async function DELETE(
   request: Request,

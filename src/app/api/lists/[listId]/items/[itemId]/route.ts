@@ -1,4 +1,4 @@
-import { handleDeleteItem, handlePatchItem } from "@/lib/lists-http";
+import { handleDeleteItem, handlePatchItem } from "@/lists/lists-http";
 
 export async function PATCH(
   request: Request,
