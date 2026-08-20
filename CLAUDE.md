@@ -26,9 +26,11 @@
 - Unimplemented rail items (Tasks, Rewards, Meals, Recipes, Photos, Sleep) stay "not yet implemented" stubs until those screens are in scope.
 - Reimplement UI in `src/` from the design skill; the skill kit uses `window.DS` and CDN icons and will not run as Next modules.
 - Kiosk typing is the Chromium extension in `kiosk/osk/`, not a React overlay and not Onboard. Do not import `kiosk/` into the Next app.
+- When changing, authoring, or reviewing code, follow `docs/code-design-principles.md`.
 
 ## Key Documents
 - For canonical domain terms, see `CONTEXT.md`
+- For code design standards, see `docs/code-design-principles.md`. Apply whenever code is changed, authored, or reviewed.
 - For architecture and constraints, see `docs/SSD.md`
 - For visual language and component contracts, see `.cursor/skills/familyos-design/readme.md`
 - For v1 scope, see `docs/requirements.md`

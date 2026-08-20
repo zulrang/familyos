@@ -9,3 +9,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 <!-- END:nextjs-agent-rules -->
 
 @CLAUDE.md
+
+When changing, authoring, or reviewing code, follow `docs/code-design-principles.md`.
+
