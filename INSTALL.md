@@ -8,10 +8,10 @@ until those screens exist.
 
 You can run it in a desktop browser while you set it up. The wall unit is optional.
 
-> The current implementation predates the v1 pairing gate described in
-> `docs/requirements.md`. Until that work lands, any client that can reach the
-> server on the LAN can call its household APIs; run it only on a trusted
-> network.
+> On first startup (no Trusted Display yet) the Server Installation prints a
+> short-lived pairing code. An unpaired browser only sees pairing UI and
+> readiness; Household screens and APIs require the Display credential issued
+> when that code is entered.
 
 ## What you need
 
@@ -63,7 +63,10 @@ If you insist on completing Google login **on the panel**, `GOOGLE_REDIRECT_URI`
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Go to **Settings**, sign in with Google, pick the family calendar, add household members and their colors. Save.
+Watch the server log for `FamilyOS pairing code: ……`. Open
+[http://localhost:3000](http://localhost:3000), enter the code to pair this
+browser profile, then go to **Settings**, sign in with Google, pick the family
+calendar, add household members and their colors. Save.
 
 `pnpm dev` binds `0.0.0.0:3000`, so another device on the LAN can hit `http://<this-machine>:3000` already. For a wall panel, serve production instead — Fast Refresh over Wi-Fi makes taps feel drunk:
 

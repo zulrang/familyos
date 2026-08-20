@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { deleteTask, listsError, patchTask } from "@/lib/tasks";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ listId: string; itemId: string }> },
 ) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const { listId, itemId } = await params;
   const body = (await request.json()) as { title?: string; done?: boolean };
   const title = typeof body.title === "string" ? body.title.trim() : undefined;
@@ -26,9 +29,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ listId: string; itemId: string }> },
 ) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const { listId, itemId } = await params;
   try {
     await deleteTask(listId, itemId);

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { type Member, parseUiScale, type UiScale } from "./types";
+import { dataDir } from "./data-path.ts";
+import { type Member, parseUiScale, type UiScale } from "./types.ts";
 
 export type Tokens = {
   access_token: string;
@@ -18,7 +19,9 @@ export type StoredSettings = {
   uiScale: UiScale;
 };
 
-const FILE = path.join(process.cwd(), "data", "kiosk.json");
+function settingsFile(): string {
+  return path.join(dataDir(), "kiosk.json");
+}
 
 const EMPTY: StoredSettings = {
   familyName: "Family",
@@ -51,7 +54,7 @@ export function googleClient(): {
 
 export async function readSettings(): Promise<StoredSettings> {
   try {
-    const raw = await readFile(FILE, "utf8");
+    const raw = await readFile(settingsFile(), "utf8");
     const next = { ...EMPTY, ...JSON.parse(raw) };
     next.uiScale = parseUiScale(next.uiScale);
     return next;
@@ -62,8 +65,9 @@ export async function readSettings(): Promise<StoredSettings> {
 
 // ponytail: last-write-wins JSON file; upgrade to a write queue if OAuth refresh races show up.
 export async function writeSettings(next: StoredSettings): Promise<void> {
-  await mkdir(path.dirname(FILE), { recursive: true });
-  await writeFile(FILE, `${JSON.stringify(next, null, 2)}\n`);
+  const file = settingsFile();
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
 }
 
 export async function patchSettings(

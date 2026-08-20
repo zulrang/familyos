@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { clearCompleted, listsError } from "@/lib/tasks";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ listId: string }> },
 ) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const { listId } = await params;
   try {
     await clearCompleted(listId);

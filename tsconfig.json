@@ -9,6 +9,7 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
@@ -35,6 +36,7 @@
     "src/lib/calendar.check.ts",
     "src/lib/recurrence.check.ts",
     "src/lib/tasks.check.ts",
-    "src/lib/ui-scale.check.ts"
+    "src/lib/ui-scale.check.ts",
+    "src/lib/pairing-http.check.ts"
   ]
 }

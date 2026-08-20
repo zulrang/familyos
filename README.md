@@ -24,9 +24,10 @@ pnpm install
 # create .env.local with GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 # Calendar API on; redirect URI http://localhost:3000/api/auth/callback/google
 pnpm dev
+# enter the pairing code printed in the server log
 ```
 
-Open [http://localhost:3000](http://localhost:3000) → **Settings** → sign in → pick the family calendar.
+Open [http://localhost:3000](http://localhost:3000) → pair the Display → **Settings** → sign in → pick the family calendar.
 
 For a panel on the LAN, `pnpm build && pnpm start` (binds `0.0.0.0:3000`). `pnpm dev` over Wi-Fi makes taps feel late.
 

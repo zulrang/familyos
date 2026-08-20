@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { listCalendars } from "@/lib/google";
 import { googleConfigured, patchSettings, readSettings } from "@/lib/settings";
 import { type Member, parseUiScale } from "@/lib/types";
@@ -14,11 +15,15 @@ function publicSettings(s: Awaited<ReturnType<typeof readSettings>>) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   return NextResponse.json(publicSettings(await readSettings()));
 }
 
 export async function PATCH(request: Request) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const body = (await request.json()) as {
     familyName?: string;
     members?: Member[];

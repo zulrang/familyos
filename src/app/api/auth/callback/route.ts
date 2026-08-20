@@ -1,9 +1,12 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { exchangeCode } from "@/lib/google";
 import { readSettings } from "@/lib/settings";
 
 export async function GET(request: NextRequest) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const url = request.nextUrl;
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { isMemberTone } from "@/lib/calendar";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { AuthError, deleteEvent, updateEvent } from "@/lib/google";
 import { parseScope } from "@/lib/recurrence";
 import { readSettings } from "@/lib/settings";
@@ -9,6 +10,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const { id } = await params;
   const s = await readSettings();
   if (!s.calendarId)
@@ -49,6 +52,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const { id } = await params;
   const s = await readSettings();
   if (!s.calendarId)

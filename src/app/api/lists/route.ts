@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { insertTaskList, listListsWithItems, listsError } from "@/lib/tasks";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   try {
     const lists = await listListsWithItems();
     return NextResponse.json({ lists });
@@ -11,6 +14,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   const body = (await request.json()) as { title?: string };
   const title = body.title?.trim();
   if (!title)

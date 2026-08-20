@@ -1,6 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Newsreader, Nunito_Sans } from "next/font/google";
+import { cookies } from "next/headers";
 import { NavRail } from "@/components/nav/NavRail";
+import { PairingScreen } from "@/components/pairing/PairingScreen";
+import { resolveTrustedDisplay } from "@/lib/pairing";
 import { readSettings } from "@/lib/settings";
 import "./globals.css";
 
@@ -29,6 +32,26 @@ export const viewport: Viewport = {
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const jar = await cookies();
+  const cookieHeader = jar
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+  const display = await resolveTrustedDisplay(cookieHeader || null);
+
+  if (!display) {
+    return (
+      <html
+        lang="en"
+        className={`${newsreader.variable} ${nunitoSans.variable}`}
+      >
+        <body>
+          <PairingScreen />
+        </body>
+      </html>
+    );
+  }
+
   const { uiScale } = await readSettings();
   return (
     <html

@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
+import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { AuthError, listCalendars } from "@/lib/google";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
   try {
     const calendars = await listCalendars();
     return NextResponse.json({ calendars });
