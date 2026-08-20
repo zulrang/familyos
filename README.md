@@ -17,7 +17,7 @@ less-cramped Five-Day View defined in `docs/requirements.md`.
 
 ## Quick start
 
-**Node.js 20.9+** and **pnpm 10**. Full walkthrough (OAuth, production bind, Pi kiosk, touchscreen): [INSTALL.md](INSTALL.md).
+**Node.js 24.15+** (current LTS) and **pnpm 10**. Full walkthrough (OAuth, production bind, Pi kiosk, touchscreen): [INSTALL.md](INSTALL.md).
 
 ```bash
 pnpm install

@@ -198,7 +198,7 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Tasks, Rewards, Meals, Recipes, Photos, Sleep, or Settings beyond existing chrome.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
-- There is no test script yet. Don’t introduce a test framework unless the task needs one.
+- Tests run via Vitest: `pnpm test` (fast unit lane, `src/**/*.test.{ts,tsx}`), `pnpm test:watch`, and `pnpm test:contract` for Fake ↔ adapter parity suites (`*.contract.test.ts`). Component tests use `// @vitest-environment jsdom` and Testing Library. Don’t add a second runner.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
