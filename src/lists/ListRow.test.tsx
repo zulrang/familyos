@@ -92,4 +92,32 @@ describe("ListRow", () => {
       textDecoration: "none",
     });
   });
+
+  test("press-and-hold still edits after the pointer leaves the row", async () => {
+    vi.useFakeTimers();
+    const edits: string[] = [];
+    function Harness() {
+      const [checked, setChecked] = useState(false);
+      return (
+        <ListRow
+          label="Milk"
+          checked={checked}
+          onToggle={setChecked}
+          onEdit={() => edits.push("edit")}
+        />
+      );
+    }
+    render(<Harness />);
+    const row = screen.getByRole("button", { name: "Milk" });
+
+    fireEvent.pointerDown(row, { clientX: 0, clientY: 0, pointerId: 1 });
+    await vi.advanceTimersByTimeAsync(500);
+    fireEvent.pointerLeave(row);
+    fireEvent.pointerUp(row, { pointerId: 1 });
+
+    expect(edits).toEqual(["edit"]);
+    expect(screen.getByText("Milk")).toHaveStyle({
+      textDecoration: "none",
+    });
+  });
 });

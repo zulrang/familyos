@@ -39,6 +39,7 @@ export function ListRow({
     openedEdit.current = false;
     held.current = false;
     if (!onEdit) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     origin.current = { x: e.clientX, y: e.clientY };
     hold.current = window.setTimeout(() => {
       held.current = true;
@@ -56,19 +57,27 @@ export function ListRow({
     }
   }
 
-  function releaseHold() {
+  function releaseCapture(e: PointerEvent<HTMLButtonElement>) {
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }
+
+  function releaseHold(e: PointerEvent<HTMLButtonElement>) {
     const shouldEdit = held.current;
     held.current = false;
     clearHold();
+    releaseCapture(e);
     if (shouldEdit) {
       openedEdit.current = true;
       onEdit?.();
     }
   }
 
-  function cancelHold() {
+  function cancelHold(e: PointerEvent<HTMLButtonElement>) {
     held.current = false;
     clearHold();
+    releaseCapture(e);
   }
 
   return (
@@ -78,7 +87,6 @@ export function ListRow({
       onPointerMove={moveHold}
       onPointerUp={releaseHold}
       onPointerCancel={cancelHold}
-      onPointerLeave={cancelHold}
       onContextMenu={(e) => {
         if (!onEdit) return;
         e.preventDefault();
