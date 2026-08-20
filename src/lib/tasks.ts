@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
-import { AuthError, gfetch } from "./google";
+import { gfetch } from "./google";
 import { sortByPosition } from "./list-text";
 import type { TaskItem, TaskList } from "./types";
+
+export { listsError } from "./lists-error";
 
 const TASKS = "https://tasks.googleapis.com/tasks/v1";
 
@@ -14,13 +15,6 @@ type GTask = {
   deleted?: boolean;
   parent?: string;
 };
-
-export function listsError(e: unknown): NextResponse {
-  if (e instanceof AuthError)
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  console.error(e);
-  return NextResponse.json({ error: "failed" }, { status: 500 });
-}
 
 async function pages<T>(
   url: string,
@@ -79,15 +73,34 @@ export async function listTasks(listId: string): Promise<TaskItem[]> {
   return ordered.map(toItem).filter((t): t is TaskItem => t !== null);
 }
 
-export async function listListsWithItems(): Promise<TaskList[]> {
-  const lists = await listTaskLists();
-  // ponytail: N+1 fan-out, fine at household scale
-  return Promise.all(
-    lists.map(async (list) => ({
-      ...list,
-      items: await listTasks(list.id),
-    })),
+async function getTaskListMeta(
+  listId: string,
+): Promise<{ id: string; title: string } | null> {
+  const res = await gfetch(
+    `${TASKS}/users/@me/lists/${encodeURIComponent(listId)}`,
   );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`get list ${res.status}`);
+  const g = (await res.json()) as GTaskList;
+  if (!g.id) return null;
+  return { id: g.id, title: g.title || "List" };
+}
+
+/**
+ * Load only the selected Household Lists, preserving selection order.
+ * Missing provider lists are skipped (deleted outside FamilyOS).
+ */
+export async function listSelectedListsWithItems(
+  listIds: string[],
+): Promise<TaskList[]> {
+  // ponytail: N+1 fan-out, fine at household scale
+  const lists: TaskList[] = [];
+  for (const id of listIds) {
+    const meta = await getTaskListMeta(id);
+    if (!meta) continue;
+    lists.push({ ...meta, items: await listTasks(meta.id) });
+  }
+  return lists;
 }
 
 export async function insertTaskList(title: string): Promise<TaskList> {
@@ -113,15 +126,6 @@ export async function patchTaskList(
   const g = (await res.json()) as GTaskList;
   if (!g.id) throw new Error("patch list returned no id");
   return { id: g.id, title: g.title || title };
-}
-
-export async function deleteTaskList(listId: string): Promise<void> {
-  const res = await gfetch(
-    `${TASKS}/users/@me/lists/${encodeURIComponent(listId)}`,
-    { method: "DELETE" },
-  );
-  if (!res.ok && res.status !== 204)
-    throw new Error(`delete list ${res.status}`);
 }
 
 export async function insertTask(

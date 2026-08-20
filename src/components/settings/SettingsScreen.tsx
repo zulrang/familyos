@@ -5,6 +5,7 @@ import { redirectIfPairingRequired } from "@/lib/display-client";
 import { activeMembers, legacyToneForColor, retireMember } from "@/lib/members";
 import {
   type GoogleCalendar,
+  type GoogleTasklist,
   LEGACY_TONE_COLORS,
   MAX_ACTIVE_MEMBERS,
   MEMBER_TONES,
@@ -44,9 +45,11 @@ function formatPairedAt(createdAt: number): string {
 export function SettingsScreen() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
+  const [tasklists, setTasklists] = useState<GoogleTasklist[]>([]);
   const [familyName, setFamilyName] = useState("Family");
   const [members, setMembers] = useState<Member[]>([]);
   const [calendarId, setCalendarId] = useState("");
+  const [listIds, setListIds] = useState<string[]>([]);
   const [uiScale, setUiScale] = useState<UiScale>(1);
   const [displays, setDisplays] = useState<DisplayRecord[]>([]);
   const [currentDisplayId, setCurrentDisplayId] = useState<string | null>(null);
@@ -72,6 +75,7 @@ export function SettingsScreen() {
     setFamilyName(s.familyName);
     setMembers(s.members);
     setCalendarId(s.calendarId ?? "");
+    setListIds(s.listIds ?? []);
     setUiScale(parseUiScale(s.uiScale));
   }
 
@@ -82,11 +86,23 @@ export function SettingsScreen() {
     await applyPublicSettings(s);
     await loadDisplays();
     if (s.signedIn) {
-      const res = await fetch("/api/calendars");
-      if (res.ok) {
-        const data = (await res.json()) as { calendars: GoogleCalendar[] };
+      const [calRes, listsRes] = await Promise.all([
+        fetch("/api/calendars"),
+        fetch("/api/tasklists"),
+      ]);
+      if (calRes.ok) {
+        const data = (await calRes.json()) as { calendars: GoogleCalendar[] };
         setCalendars(data.calendars);
       }
+      if (listsRes.ok) {
+        const data = (await listsRes.json()) as {
+          tasklists: GoogleTasklist[];
+        };
+        setTasklists(data.tasklists);
+      }
+    } else {
+      setCalendars([]);
+      setTasklists([]);
     }
   }
 
@@ -101,6 +117,7 @@ export function SettingsScreen() {
       !settings ||
       familyName !== settings.familyName ||
       (calendarId || null) !== settings.calendarId ||
+      JSON.stringify(listIds) !== JSON.stringify(settings.listIds) ||
       JSON.stringify(members) !== JSON.stringify(settings.members);
     const scaleDirty = !settings || uiScale !== settings.uiScale;
 
@@ -112,6 +129,7 @@ export function SettingsScreen() {
           familyName,
           members,
           calendarId: calendarId || null,
+          listIds,
           expectedVersion: settings?.configVersion,
         }),
       });
@@ -426,6 +444,70 @@ export function SettingsScreen() {
               ))}
             </select>
           </label>
+        ) : null}
+        {settings?.signedIn ? (
+          <div style={{ marginBottom: 24 }}>
+            <div
+              style={{
+                font: "var(--type-card-meta)",
+                color: "var(--text-muted)",
+                marginBottom: 6,
+              }}
+            >
+              Household Lists
+            </div>
+            <p
+              style={{
+                font: "var(--type-card-meta)",
+                color: "var(--text-muted)",
+                marginBottom: 10,
+              }}
+            >
+              Only selected Google tasklists appear on the Lists wall. Unselect
+              to hide a list without deleting it in Google.
+            </p>
+            {tasklists.length === 0 ? (
+              <p
+                style={{
+                  font: "var(--type-card-meta)",
+                  color: "var(--text-faint)",
+                }}
+              >
+                No Google tasklists found on this account.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {tasklists.map((t) => {
+                  const checked = listIds.includes(t.id);
+                  return (
+                    <label
+                      key={t.id}
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "center",
+                        font: "var(--type-card-meta)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setListIds((ids) =>
+                            checked
+                              ? ids.filter((id) => id !== t.id)
+                              : [...ids, t.id],
+                          );
+                        }}
+                      />
+                      {t.title}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         ) : null}
 
         <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
