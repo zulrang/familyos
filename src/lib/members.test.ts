@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, test } from "vitest";
 import {
   activeMembers,
   MAX_ACTIVE_MEMBERS,
@@ -16,26 +16,27 @@ import {
   retireMember,
 } from "./members.ts";
 
-test("members", () => {
-  assert.equal(MAX_ACTIVE_MEMBERS, 6);
+describe("Household Members", () => {
+  test("caps Active Members at six", () => {
+    assert.equal(MAX_ACTIVE_MEMBERS, 6);
+  });
 
-  // --- Member Color: open #rrggbb, normalized, independent of Google ---
-  assert.equal(parseMemberColor("#A9D8D2"), "#a9d8d2");
-  assert.equal(parseMemberColor("#a9d8d2"), "#a9d8d2");
-  assert.equal(parseMemberColor("a9d8d2"), null);
-  assert.equal(parseMemberColor("#fff"), null);
-  assert.equal(parseMemberColor("#gg0000"), null);
-  assert.equal(parseMemberColor(null), null);
+  test("Member Color is open #rrggbb, normalized, independent of Google", () => {
+    assert.equal(parseMemberColor("#A9D8D2"), "#a9d8d2");
+    assert.equal(parseMemberColor("#a9d8d2"), "#a9d8d2");
+    assert.equal(parseMemberColor("a9d8d2"), null);
+    assert.equal(parseMemberColor("#fff"), null);
+    assert.equal(parseMemberColor("#gg0000"), null);
+    assert.equal(parseMemberColor(null), null);
+  });
 
-  // --- Empty roster ---
-  {
+  test("accepts an empty roster", () => {
     const r = parseRoster([]);
     assert.equal(r.ok, true);
     if (r.ok) assert.deepEqual(r.members, []);
-  }
+  });
 
-  // --- Six active with unique colors ---
-  {
+  test("accepts six Active Members with unique colors", () => {
     const colors = [
       "#a9d8d2",
       "#f6c9c5",
@@ -56,10 +57,9 @@ test("members", () => {
       assert.equal(r.members.length, 6);
       assert.equal(activeMembers(r.members).length, 6);
     }
-  }
+  });
 
-  // --- Seventh active rejected ---
-  {
+  test("rejects a seventh Active Member", () => {
     const raw = Array.from({ length: 7 }, (_, i) => ({
       id: `m${i}`,
       name: `P${i}`,
@@ -69,20 +69,18 @@ test("members", () => {
     const r = parseRoster(raw);
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.error, "too_many_active");
-  }
+  });
 
-  // --- Duplicate active colors rejected (case-insensitive) ---
-  {
+  test("rejects duplicate Active Member Colors case-insensitively", () => {
     const r = parseRoster([
       { id: "a", name: "Ada", status: "active", color: "#A9D8D2" },
       { id: "b", name: "Ben", status: "active", color: "#a9d8d2" },
     ]);
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.error, "duplicate_active_color");
-  }
+  });
 
-  // --- Email absent from model (stripped; not stored) ---
-  {
+  test("strips email so it is not part of the Member model", () => {
     const r = parseRoster([
       {
         id: "a",
@@ -103,10 +101,9 @@ test("members", () => {
         color: "#a9d8d2",
       });
     }
-  }
+  });
 
-  // --- Legacy tone migrates to Member Color hex ---
-  {
+  test("migrates a legacy tone into a Member Color hex", () => {
     const r = parseRoster([
       { id: "a", name: "Ada", tone: "teal", email: "x@y.z" },
     ]);
@@ -119,10 +116,9 @@ test("members", () => {
         color: "#a9d8d2",
       });
     }
-  }
+  });
 
-  // --- Retire preserves id, frees color, drops from active ---
-  {
+  test("retiring preserves id, frees color, and drops from Active", () => {
     const seeded = parseRoster([
       { id: "a", name: "Ada", status: "active", color: "#a9d8d2" },
       { id: "b", name: "Ben", status: "active", color: "#f6c9c5" },
@@ -144,7 +140,6 @@ test("members", () => {
     );
     assert.equal("color" in (memberById(next, "a") ?? {}), false);
 
-    // Freed color may be reused by a new Active Member
     const reused = parseRoster([
       ...next,
       { id: "c", name: "Cara", status: "active", color: "#a9d8d2" },
@@ -154,10 +149,9 @@ test("members", () => {
       assert.equal(activeMembers(reused.members).length, 2);
       assert.ok(memberById(reused.members, "a")?.status === "retired");
     }
-  }
+  });
 
-  // --- Retired Members remain available by stable ID ---
-  {
+  test("Retired Members remain resolvable by stable ID", () => {
     const r = parseRoster([
       { id: "gone", name: "Old", status: "retired" },
       { id: "now", name: "New", status: "active", color: "#c8e5cd" },
@@ -172,10 +166,9 @@ test("members", () => {
         ["gone", "now"],
       );
     }
-  }
+  });
 
-  // --- migrateRoster preserves ids when active constraints break ---
-  {
+  test("legacy roster migration keeps ids when Active constraints break", () => {
     const migrated = migrateRoster([
       { id: "a", name: "Ada", status: "active", color: "#a9d8d2" },
       { id: "b", name: "Ben", status: "active", color: "#a9d8d2" },
@@ -183,20 +176,18 @@ test("members", () => {
     assert.equal(migrated.length, 2);
     assert.equal(memberById(migrated, "a")?.status, "active");
     assert.equal(memberById(migrated, "b")?.status, "retired");
-  }
+  });
 
-  // --- Duplicate ids rejected ---
-  {
+  test("rejects duplicate Member ids", () => {
     const r = parseRoster([
       { id: "a", name: "Ada", status: "active", color: "#a9d8d2" },
       { id: "a", name: "Other", status: "active", color: "#f6c9c5" },
     ]);
     assert.equal(r.ok, false);
     if (!r.ok) assert.equal(r.error, "duplicate_id");
-  }
+  });
 
-  // --- Invalid / missing color on active rejected ---
-  {
+  test("rejects invalid or missing color on an Active Member", () => {
     const bad = parseRoster([
       { id: "a", name: "Ada", status: "active", color: "teal" },
     ]);
@@ -206,10 +197,9 @@ test("members", () => {
     const missing = parseRoster([{ id: "a", name: "Ada", status: "active" }]);
     assert.equal(missing.ok, false);
     if (!missing.ok) assert.equal(missing.error, "invalid_color");
-  }
+  });
 
-  // --- Retired must not carry a color ---
-  {
+  test("Retired Members do not carry a Member Color", () => {
     const r = parseRoster([
       { id: "a", name: "Ada", status: "retired", color: "#a9d8d2" },
     ]);
@@ -221,5 +211,5 @@ test("members", () => {
         status: "retired",
       });
     }
-  }
+  });
 });

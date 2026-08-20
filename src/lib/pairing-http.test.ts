@@ -7,44 +7,55 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
+import { afterAll, beforeAll, describe, test } from "vitest";
 
-test("pairing http", async () => {
-  const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-pair-"));
-  process.env.FAMILYOS_DATA_DIR = dataRoot;
+describe("Display pairing HTTP", () => {
+  let dataRoot: string;
+  let DISPLAY_COOKIE: typeof import("./pairing.ts").DISPLAY_COOKIE;
+  let emitStartupPairingCode: typeof import("./pairing.ts").emitStartupPairingCode;
+  let requireTrustedDisplay: typeof import("./display-auth.ts").requireTrustedDisplay;
+  let handleReady: typeof import("./pairing-http.ts").handleReady;
+  let handlePair: typeof import("./pairing-http.ts").handlePair;
 
-  const { writeHousehold } = await import("./settings.ts");
-  const { writeProvider } = await import("./provider.ts");
-  const { emitStartupPairingCode, DISPLAY_COOKIE } = await import(
-    "./pairing.ts"
-  );
-  const { requireTrustedDisplay } = await import("./display-auth.ts");
-  const { handleReady, handlePair } = await import("./pairing-http.ts");
+  beforeAll(async () => {
+    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-pair-"));
+    process.env.FAMILYOS_DATA_DIR = dataRoot;
 
-  await mkdir(dataRoot, { recursive: true });
-  await writeHousehold({
-    familyName: "SecretHousehold",
-    members: [
-      {
-        id: "m_secret",
-        name: "SecretMember",
-        status: "active",
-        color: "#a9d8d2",
+    const { writeHousehold } = await import("./settings.ts");
+    const { writeProvider } = await import("./provider.ts");
+    ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import("./pairing.ts"));
+    ({ requireTrustedDisplay } = await import("./display-auth.ts"));
+    ({ handleReady, handlePair } = await import("./pairing-http.ts"));
+
+    await mkdir(dataRoot, { recursive: true });
+    await writeHousehold({
+      familyName: "SecretHousehold",
+      members: [
+        {
+          id: "m_secret",
+          name: "SecretMember",
+          status: "active",
+          color: "#a9d8d2",
+        },
+      ],
+      calendarId: "secret-cal@group.calendar.google.com",
+      calendarTimeZone: "America/New_York",
+      listIds: [],
+      configVersion: 1,
+    });
+    await writeProvider({
+      tokens: {
+        access_token: "secret-access",
+        refresh_token: "secret-refresh",
+        expiry: Date.now() + 60_000,
       },
-    ],
-    calendarId: "secret-cal@group.calendar.google.com",
-    calendarTimeZone: "America/New_York",
-    listIds: [],
-    configVersion: 1,
+      oauthState: null,
+      providerConnectionId: "conn-secret",
+    });
   });
-  await writeProvider({
-    tokens: {
-      access_token: "secret-access",
-      refresh_token: "secret-refresh",
-      expiry: Date.now() + 60_000,
-    },
-    oauthState: null,
-    providerConnectionId: "conn-secret",
+
+  afterAll(async () => {
+    await rm(dataRoot, { recursive: true, force: true });
   });
 
   function cookieFrom(res: Response): string | null {
@@ -72,8 +83,7 @@ test("pairing http", async () => {
     await writeFile(file, `${JSON.stringify(store, null, 2)}\n`);
   }
 
-  // --- Unpaired: readiness only, no household leak ---
-  {
+  test("unpaired readiness reports no Household data", async () => {
     const res = await handleReady(
       new Request("http://familyos.test/api/ready"),
     );
@@ -89,10 +99,9 @@ test("pairing http", async () => {
     assert.equal(text.includes("signedIn"), false);
     assert.equal(text.includes("googleConfigured"), false);
     assert.equal(text.includes("members"), false);
-  }
+  });
 
-  // --- Unpaired: household API gate ---
-  {
+  test("unpaired Displays cannot pass the Household API gate", async () => {
     const denied = await requireTrustedDisplay(
       new Request("http://familyos.test/api/settings"),
     );
@@ -100,14 +109,13 @@ test("pairing http", async () => {
     assert.equal(denied.status, 401);
     const body = (await denied.json()) as Record<string, unknown>;
     assert.equal(JSON.stringify(body).includes("SecretHousehold"), false);
-  }
+  });
 
-  // --- Fresh startup emits one short-lived code; pairs once ---
-  const code = await emitStartupPairingCode();
-  assert.ok(code);
-  assert.match(code, /^[A-Z2-9]{6}$/);
+  test("startup emits one short-lived code that pairs a Display once", async () => {
+    const code = await emitStartupPairingCode();
+    assert.ok(code);
+    assert.match(code, /^[A-Z2-9]{6}$/);
 
-  {
     const res = await handlePair(
       new Request("http://familyos.test/api/pair", {
         method: "POST",
@@ -148,12 +156,10 @@ test("pairing http", async () => {
     assert.ok(!(allowed instanceof Response));
     assert.equal(allowed.id, body.displayId);
 
-    // Later startups do not mint another installer code once a Display exists.
     assert.equal(await emitStartupPairingCode(), null);
-  }
+  });
 
-  // --- Expired code fails ---
-  {
+  test("expired pairing codes fail", async () => {
     await patchPendingCode({
       code: "EXPIRE",
       expiresAt: Date.now() - 1,
@@ -168,10 +174,9 @@ test("pairing http", async () => {
     );
     assert.equal(res.status, 403);
     assert.equal(((await res.json()) as { error: string }).error, "expired");
-  }
+  });
 
-  // --- Invalid code fails ---
-  {
+  test("invalid pairing codes fail", async () => {
     await patchPendingCode({
       code: "VALID1",
       expiresAt: Date.now() + 60_000,
@@ -186,7 +191,5 @@ test("pairing http", async () => {
     );
     assert.equal(res.status, 403);
     assert.equal(((await res.json()) as { error: string }).error, "invalid");
-  }
-
-  await rm(dataRoot, { recursive: true, force: true });
+  });
 });
