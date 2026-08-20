@@ -19,6 +19,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - The `nextjs-agent-rules` block in `AGENTS.md` (`next dev` rewrites it)
 - `.cursor/skills/familyos-design/` (copy into `src/`; never import from here)
 - `pnpm-lock.yaml` (change only via `pnpm`; never hand-edit)
+- `docs/code-design-principles.md` (shared principles — follow them; do not edit unless explicitly told to)
 - Importing `kiosk/` into the Next app
 
 ## Non-Obvious Rules
