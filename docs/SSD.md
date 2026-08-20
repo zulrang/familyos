@@ -116,10 +116,11 @@ Other rail destinations are stubs.
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
 
 Household Members are shared server data, not an auth directory. There may be
-at most six active members, each representing one person with a unique active
-tone. Retiring a member keeps the identity record for existing events, removes
-it from new-event choices, and frees the tone for reuse. Member email is not a
-v1 field.
+at most six Active Members, each representing one person with a unique Member
+Color (`#rrggbb`, FamilyOS-owned). Retiring a member keeps the identity record
+for existing events, removes it from new-event choices, and frees the color for
+reuse. Member email is not a v1 field. See
+`docs/adr/0003-member-color-is-familyos-owned.md`.
 
 ## 4. Data Flow and Contracts
 
@@ -192,8 +193,8 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Stable Household Member IDs in Google private event properties are the only
   Event Participant identity. Do not infer participants from `colorId`,
   attendees, or email.
-- Member tones are presentation. They are unique only among active members and
-  may be reused after retirement.
+- Member Colors are presentation. They are unique only among Active Members and
+  may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Tasks, Rewards, Meals, Recipes, Photos, Sleep, or Settings beyond existing chrome.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.

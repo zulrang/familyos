@@ -30,7 +30,8 @@ import {
   weekdayLabel,
 } from "@/lib/calendar";
 import { redirectIfPairingRequired } from "@/lib/display-client";
-import type { CalEvent, Member, PublicSettings } from "@/lib/types";
+import { activeMembers, legacyToneForColor } from "@/lib/members";
+import type { CalEvent, Member, MemberTone, PublicSettings } from "@/lib/types";
 import { Button } from "../core/Button";
 import { Fab } from "../core/Fab";
 import { AppHeader } from "../nav/AppHeader";
@@ -41,6 +42,11 @@ import { type EventDraft, EventSheet, whoFromIds } from "./EventSheet";
 import { MemberChip } from "./MemberChip";
 import { NowLine } from "./NowLine";
 import { TimeGutter } from "./TimeGutter";
+
+function chipTone(m: Member): MemberTone {
+  if (m.status !== "active") return "sand";
+  return legacyToneForColor(m.color) ?? "sand";
+}
 
 function toDraft(ev: CalEvent, members: Member[]): EventDraft {
   const people = peopleOf(members, ev);
@@ -185,8 +191,10 @@ export function CalendarScreen() {
         allDay: draft.allDay,
         startMs,
         endMs,
-        tones: selected.map((m) => m.tone),
-        attendeeEmails: selected.map((m) => m.email).filter(Boolean),
+        tones: selected
+          .filter((m) => m.status === "active")
+          .map((m) => legacyToneForColor(m.color) ?? "sand"),
+        attendeeEmails: [],
         scope: draft.recurringEventId ? draft.scope : "this",
       };
       const res = await fetch(
@@ -309,7 +317,7 @@ export function CalendarScreen() {
             <MemberChip
               key={p.id}
               name={p.name}
-              tone={p.tone}
+              tone={chipTone(p)}
               count={String(
                 events.filter((e) => peopleOf([p], e).length).length,
               )}
@@ -478,7 +486,7 @@ export function CalendarScreen() {
                         height={h}
                         people={people.map((p) => ({
                           name: p.name,
-                          tone: p.tone,
+                          tone: chipTone(p),
                         }))}
                         onClick={() => setSheet(toDraft(e, members))}
                         style={{ height: "100%", minHeight: 0 }}
@@ -498,7 +506,7 @@ export function CalendarScreen() {
       {sheet ? (
         <EventSheet
           draft={sheet}
-          members={members}
+          members={activeMembers(members)}
           busy={busy}
           onChange={setSheet}
           onClose={() => setSheet(null)}

@@ -6,7 +6,7 @@ import {
   readHousehold,
   updateHousehold,
 } from "./settings.ts";
-import { type Member, parseUiScale, type UiScale } from "./types.ts";
+import { parseUiScale, type UiScale } from "./types.ts";
 
 function publicSettings(
   s: Awaited<ReturnType<typeof readHousehold>>,
@@ -47,7 +47,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
   if (isUnauthorized(display)) return display;
   const body = (await request.json()) as {
     familyName?: string;
-    members?: Member[];
+    members?: unknown;
     calendarId?: string | null;
     uiScale?: unknown;
     expectedVersion?: unknown;
@@ -84,6 +84,9 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
       calendarTimeZone,
     });
     if (!result.ok) {
+      if (result.reason === "roster") {
+        return Response.json({ error: result.error }, { status: 400 });
+      }
       return Response.json(
         publicSettings(
           result.config,

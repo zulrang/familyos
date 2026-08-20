@@ -34,22 +34,30 @@ _Avoid_: Display time zone, browser time zone
 
 **Household Member**:
 One person represented in the Household calendar. A member is a presentation
-identity, not a login or Google account.
+identity, not a login or Google account. Identity is a stable ID; email is not
+part of the model.
 _Avoid_: User, account, group
+
+**Member Color**:
+The FamilyOS presentation color for an Active Member. It is chosen in FamilyOS
+and is independent of Google Calendar colors.
+_Avoid_: Tone, Google color, colorId
 
 **Active Member**:
 A Household Member who may be selected as an Event Participant. A Household
-has at most six active members.
+has at most six active members. Each holds a Member Color unique among active
+members.
 _Avoid_: Enabled user
 
 **Retired Member**:
 A former active member retained so existing events still identify the person.
-A retired member cannot be selected for new events.
+A retired member cannot be selected for new events and does not hold a Member
+Color — retirement frees that color for reuse.
 _Avoid_: Deleted member
 
 **Event Participant**:
 A Household Member explicitly associated with an event by the member's stable
-identity. Event colors do not establish participation.
+identity. Member Color does not establish participation.
 _Avoid_: Event owner, attendee
 
 **Household Event**:

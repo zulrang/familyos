@@ -57,11 +57,11 @@ pairing. Tasks, Rewards, Meals, Recipes, Photos, and Sleep remain
 - Google integration requires one Household-level Google login.
 - The Provider Connection is not a Household Member identity.
 - Settings selects one Household Calendar and zero or more Household Lists.
-- Settings manages up to six active Household Members. Each member represents
-  one person and has a unique active display tone; member email is not part of
+- Settings manages up to six Active Members. Each holds a unique Member Color
+  chosen in FamilyOS (not a Google Calendar color); member email is not part of
   the v1 model.
 - Retiring a member preserves the member record for existing events, prevents
-  new assignment, and frees the tone for reuse.
+  new assignment, and frees the Member Color for reuse.
 - Settings changes are versioned so stale saves from another Display cannot
   silently overwrite them.
 

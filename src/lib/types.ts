@@ -1,3 +1,24 @@
+import {
+  type ActiveMember,
+  type HouseholdMember,
+  LEGACY_TONE_COLORS,
+  MAX_ACTIVE_MEMBERS,
+  type Member,
+  type MemberColor,
+  type MemberId,
+  type RetiredMember,
+} from "./members.ts";
+
+export type {
+  ActiveMember,
+  HouseholdMember,
+  Member,
+  MemberColor,
+  MemberId,
+  RetiredMember,
+};
+export { LEGACY_TONE_COLORS, MAX_ACTIVE_MEMBERS };
+
 export const MEMBER_TONES = [
   "teal",
   "blush",
@@ -8,13 +29,6 @@ export const MEMBER_TONES = [
 ] as const;
 
 export type MemberTone = (typeof MEMBER_TONES)[number];
-
-export type Member = {
-  id: string;
-  name: string;
-  email: string;
-  tone: MemberTone;
-};
 
 export type SeriesScope = "this" | "following" | "all";
 

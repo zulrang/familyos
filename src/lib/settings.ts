@@ -1,11 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "./data-path.ts";
-import type { Member } from "./types.ts";
+import type { RosterError } from "./members.ts";
+import { type HouseholdMember, migrateRoster, parseRoster } from "./members.ts";
 
 export type HouseholdConfig = {
   familyName: string;
-  members: Member[];
+  members: HouseholdMember[];
   calendarId: string | null;
   calendarTimeZone: string | null;
   configVersion: number;
@@ -27,7 +28,14 @@ function legacyFile(): string {
   return path.join(dataDir(), "kiosk.json");
 }
 
-function normalize(raw: Partial<HouseholdConfig>): HouseholdConfig {
+function normalizeMembers(raw: unknown): HouseholdConfig["members"] {
+  const parsed = parseRoster(raw);
+  return parsed.ok ? parsed.members : migrateRoster(raw);
+}
+
+function normalize(
+  raw: Partial<HouseholdConfig> & { members?: unknown },
+): HouseholdConfig {
   const version =
     typeof raw.configVersion === "number" &&
     Number.isInteger(raw.configVersion) &&
@@ -37,7 +45,7 @@ function normalize(raw: Partial<HouseholdConfig>): HouseholdConfig {
   return {
     familyName:
       typeof raw.familyName === "string" ? raw.familyName : EMPTY.familyName,
-    members: Array.isArray(raw.members) ? raw.members : [],
+    members: normalizeMembers(raw.members),
     calendarId: raw.calendarId ?? null,
     calendarTimeZone: raw.calendarTimeZone ?? null,
     configVersion: version,
@@ -106,15 +114,24 @@ export async function writeHousehold(next: HouseholdConfig): Promise<void> {
 
 export type HouseholdUpdateResult =
   | { ok: true; config: HouseholdConfig }
-  | { ok: false; config: HouseholdConfig };
+  | { ok: false; reason: "version"; config: HouseholdConfig }
+  | {
+      ok: false;
+      reason: "roster";
+      error: RosterError;
+      config: HouseholdConfig;
+    };
 
 /**
  * Apply a household patch when expectedVersion matches.
  * On mismatch (or non-integer expectedVersion), leave storage unchanged.
+ * Member roster patches are validated through parseRoster.
  */
 export async function updateHousehold(
   expectedVersion: unknown,
-  patch: Partial<Omit<HouseholdConfig, "configVersion">>,
+  patch: Partial<Omit<HouseholdConfig, "configVersion" | "members">> & {
+    members?: unknown;
+  },
 ): Promise<HouseholdUpdateResult> {
   const cur = await readHousehold();
   if (
@@ -122,12 +139,22 @@ export async function updateHousehold(
     !Number.isInteger(expectedVersion) ||
     expectedVersion !== cur.configVersion
   ) {
-    return { ok: false, config: cur };
+    return { ok: false, reason: "version", config: cur };
   }
+
+  let members = cur.members;
+  if (patch.members !== undefined) {
+    const parsed = parseRoster(patch.members);
+    if (!parsed.ok) {
+      return { ok: false, reason: "roster", error: parsed.error, config: cur };
+    }
+    members = parsed.members;
+  }
+
   const next: HouseholdConfig = {
     familyName:
       typeof patch.familyName === "string" ? patch.familyName : cur.familyName,
-    members: Array.isArray(patch.members) ? patch.members : cur.members,
+    members,
     calendarId:
       patch.calendarId === undefined ? cur.calendarId : patch.calendarId,
     calendarTimeZone:

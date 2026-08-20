@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TONE_GOOGLE_NAME } from "@/lib/calendar";
 import { redirectIfPairingRequired } from "@/lib/display-client";
+import { activeMembers, legacyToneForColor, retireMember } from "@/lib/members";
 import {
   type GoogleCalendar,
+  LEGACY_TONE_COLORS,
+  MAX_ACTIVE_MEMBERS,
   MEMBER_TONES,
   type Member,
   type PublicSettings,
@@ -22,13 +24,15 @@ type DisplayRecord = {
 };
 
 function newMember(existing: Member[]): Member {
-  const used = new Set(existing.map((m) => m.tone));
-  const tone = MEMBER_TONES.find((t) => !used.has(t)) ?? "sand";
+  const used = new Set(activeMembers(existing).map((m) => m.color));
+  const color =
+    Object.values(LEGACY_TONE_COLORS).find((c) => !used.has(c)) ??
+    LEGACY_TONE_COLORS.sand;
   return {
     id: `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     name: "",
-    email: "",
-    tone,
+    status: "active",
+    color,
   };
 }
 
@@ -186,8 +190,18 @@ export function SettingsScreen() {
     await loadDisplays();
   }
 
-  const patchMember = (id: string, patch: Partial<Member>) =>
-    setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  const patchMember = (id: string, patch: { name?: string; color?: string }) =>
+    setMembers((ms) =>
+      ms.map((m) => {
+        if (m.id !== id || m.status !== "active") return m;
+        return {
+          id: m.id,
+          name: patch.name ?? m.name,
+          status: "active" as const,
+          color: patch.color ?? m.color,
+        };
+      }),
+    );
 
   const pairingMinutesLeft =
     pairingExpiresAt == null
@@ -440,72 +454,104 @@ export function SettingsScreen() {
             marginBottom: 12,
           }}
         >
-          Each member's color is stored on Google Calendar events — kids do not
-          need an email. Optional email still adds them as an attendee.
+          Each Active Member has a FamilyOS color. Retiring frees the color and
+          keeps the person on past events.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {members.map((m) => (
-            <div
-              key={m.id}
-              style={{ display: "flex", gap: 8, alignItems: "center" }}
-            >
-              <input
-                className="fos-input"
-                placeholder="Name"
-                value={m.name}
-                onChange={(e) => patchMember(m.id, { name: e.target.value })}
-                style={{ flex: 1 }}
-              />
-              <input
-                className="fos-input"
-                placeholder="Email (optional)"
-                value={m.email}
-                onChange={(e) => patchMember(m.id, { email: e.target.value })}
-                style={{ flex: 1.4 }}
-              />
-              <span
-                aria-hidden
+          {members.map((m) =>
+            m.status === "retired" ? (
+              <div
+                key={m.id}
                 style={{
-                  width: 28,
-                  height: 28,
-                  flex: "0 0 28px",
-                  borderRadius: 8,
-                  background: `var(--member-${m.tone})`,
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  opacity: 0.65,
                 }}
-              />
-              <select
-                className="fos-input"
-                value={m.tone}
-                onChange={(e) =>
-                  patchMember(m.id, { tone: e.target.value as Member["tone"] })
-                }
-                style={{ width: 120, flex: "0 0 120px" }}
               >
-                {MEMBER_TONES.map((t) => (
-                  <option
-                    key={t}
-                    value={t}
-                    disabled={members.some(
-                      (x) => x.id !== m.id && x.tone === t,
-                    )}
-                  >
-                    {t} ({TONE_GOOGLE_NAME[t]})
-                  </option>
-                ))}
-              </select>
-              <Button
-                variant="ghost"
-                onClick={() =>
-                  setMembers((ms) => ms.filter((x) => x.id !== m.id))
-                }
+                <input
+                  className="fos-input"
+                  value={m.name}
+                  disabled
+                  style={{ flex: 1 }}
+                />
+                <span
+                  style={{
+                    font: "var(--type-card-meta)",
+                    color: "var(--text-muted)",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  Retired
+                </span>
+              </div>
+            ) : (
+              <div
+                key={m.id}
+                style={{ display: "flex", gap: 8, alignItems: "center" }}
               >
-                Remove
-              </Button>
-            </div>
-          ))}
+                <input
+                  className="fos-input"
+                  placeholder="Name"
+                  value={m.name}
+                  onChange={(e) => patchMember(m.id, { name: e.target.value })}
+                  style={{ flex: 1 }}
+                />
+                <span
+                  aria-hidden
+                  style={{
+                    width: 28,
+                    height: 28,
+                    flex: "0 0 28px",
+                    borderRadius: 8,
+                    background:
+                      legacyToneForColor(m.color) != null
+                        ? `var(--member-${legacyToneForColor(m.color)})`
+                        : m.color,
+                  }}
+                />
+                <select
+                  className="fos-input"
+                  value={legacyToneForColor(m.color) ?? ""}
+                  onChange={(e) => {
+                    const tone = e.target
+                      .value as (typeof MEMBER_TONES)[number];
+                    patchMember(m.id, {
+                      color: LEGACY_TONE_COLORS[tone],
+                    });
+                  }}
+                  style={{ width: 120, flex: "0 0 120px" }}
+                >
+                  {MEMBER_TONES.map((t) => (
+                    <option
+                      key={t}
+                      value={t}
+                      disabled={members.some(
+                        (x) =>
+                          x.status === "active" &&
+                          x.id !== m.id &&
+                          x.color === LEGACY_TONE_COLORS[t],
+                      )}
+                    >
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="ghost"
+                  onClick={() =>
+                    setMembers((ms) => retireMember(ms, m.id) ?? ms)
+                  }
+                >
+                  Retire
+                </Button>
+              </div>
+            ),
+          )}
         </div>
         <Button
           icon="plus"
+          disabled={activeMembers(members).length >= MAX_ACTIVE_MEMBERS}
           onClick={() => setMembers((ms) => [...ms, newMember(ms)])}
           style={{ marginTop: 12 }}
         >
