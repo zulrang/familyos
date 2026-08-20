@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { colorIdForTones, googleDateTime, TONES_PROP } from "./calendar";
+=======
+import { AuthError } from "./auth-error.ts";
+>>>>>>> origin/main
 import {
   normalizeParticipantIds,
   PARTICIPANTS_PROP,
@@ -111,11 +115,7 @@ async function accessToken(): Promise<string> {
   return next.access_token;
 }
 
-export class AuthError extends Error {
-  constructor() {
-    super("not signed in");
-  }
-}
+export { AuthError } from "./auth-error.ts";
 
 export async function gfetch(
   url: string,

@@ -3,12 +3,15 @@ import path from "node:path";
 import { dataDir } from "./data-path.ts";
 import type { RosterError } from "./members.ts";
 import { type HouseholdMember, migrateRoster, parseRoster } from "./members.ts";
+import type { HouseholdListId } from "./types.ts";
 
 export type HouseholdConfig = {
   familyName: string;
   members: HouseholdMember[];
   calendarId: string | null;
   calendarTimeZone: string | null;
+  /** Ordered selection of Household Lists (provider tasklist IDs). */
+  listIds: HouseholdListId[];
   configVersion: number;
 };
 
@@ -17,8 +20,34 @@ const EMPTY: HouseholdConfig = {
   members: [],
   calendarId: null,
   calendarTimeZone: null,
+  listIds: [],
   configVersion: 1,
 };
+
+/**
+ * Normalize a Household List selection: non-empty string IDs, first-seen order,
+ * duplicates dropped.
+ */
+export function parseListIds(raw: unknown): HouseholdListId[] {
+  if (!Array.isArray(raw)) return [];
+  const out: HouseholdListId[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const id = item.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+export function isHouseholdList(
+  listId: string,
+  listIds: readonly HouseholdListId[],
+): boolean {
+  return listIds.includes(listId);
+}
 
 function householdFile(): string {
   return path.join(dataDir(), "household.json");
@@ -48,6 +77,7 @@ function normalize(
     members: normalizeMembers(raw.members),
     calendarId: raw.calendarId ?? null,
     calendarTimeZone: raw.calendarTimeZone ?? null,
+    listIds: parseListIds(raw.listIds),
     configVersion: version,
   };
 }
@@ -126,11 +156,15 @@ export type HouseholdUpdateResult =
  * Apply a household patch when expectedVersion matches.
  * On mismatch (or non-integer expectedVersion), leave storage unchanged.
  * Member roster patches are validated through parseRoster.
+ * listIds patches are normalized through parseListIds.
  */
 export async function updateHousehold(
   expectedVersion: unknown,
-  patch: Partial<Omit<HouseholdConfig, "configVersion" | "members">> & {
+  patch: Partial<
+    Omit<HouseholdConfig, "configVersion" | "members" | "listIds">
+  > & {
     members?: unknown;
+    listIds?: unknown;
   },
 ): Promise<HouseholdUpdateResult> {
   const cur = await readHousehold();
@@ -161,6 +195,8 @@ export async function updateHousehold(
       patch.calendarTimeZone === undefined
         ? cur.calendarTimeZone
         : patch.calendarTimeZone,
+    listIds:
+      patch.listIds === undefined ? cur.listIds : parseListIds(patch.listIds),
     configVersion: cur.configVersion + 1,
   };
   await writeHousehold(next);

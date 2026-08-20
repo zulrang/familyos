@@ -25,6 +25,7 @@ await writeHousehold({
   members: [],
   calendarId: null,
   calendarTimeZone: null,
+  listIds: [],
   configVersion: 1,
 });
 await writeProvider({
@@ -78,6 +79,7 @@ async function getSettings(cookie: string) {
     uiScale: number;
     configVersion: number;
     signedIn: boolean;
+    listIds: string[];
   };
 }
 
@@ -233,6 +235,70 @@ const second = await pairWithCode(secondCode);
   const badType = await patchSettings(second.cookie, { uiScale: "1.5" });
   assert.equal(badType.status, 200);
   assert.equal(((await badType.json()) as { uiScale: number }).uiScale, 1.25);
+}
+
+// --- GET exposes empty Household List selection ---
+{
+  const body = await getSettings(first.cookie);
+  assert.deepEqual(body.listIds, []);
+}
+
+// --- Select and unselect Household Lists bumps configVersion ---
+{
+  const cur = await getSettings(first.cookie);
+  const select = await patchSettings(first.cookie, {
+    listIds: ["tl-groceries", "tl-chores"],
+    expectedVersion: cur.configVersion,
+  });
+  assert.equal(select.status, 200);
+  const selected = (await select.json()) as {
+    listIds: string[];
+    configVersion: number;
+  };
+  assert.deepEqual(selected.listIds, ["tl-groceries", "tl-chores"]);
+  assert.equal(selected.configVersion, cur.configVersion + 1);
+
+  const unselect = await patchSettings(first.cookie, {
+    listIds: ["tl-groceries"],
+    expectedVersion: selected.configVersion,
+  });
+  assert.equal(unselect.status, 200);
+  const after = (await unselect.json()) as {
+    listIds: string[];
+    configVersion: number;
+  };
+  assert.deepEqual(after.listIds, ["tl-groceries"]);
+  assert.equal(after.configVersion, selected.configVersion + 1);
+  assert.deepEqual((await readHousehold()).listIds, ["tl-groceries"]);
+}
+
+// --- Stale listIds mutation rejects and returns current selection ---
+{
+  const before = await readHousehold();
+  const res = await patchSettings(first.cookie, {
+    listIds: ["tl-should-not-win"],
+    expectedVersion: 1,
+  });
+  assert.equal(res.status, 409);
+  const body = (await res.json()) as {
+    listIds: string[];
+    configVersion: number;
+  };
+  assert.deepEqual(body.listIds, before.listIds);
+  assert.equal(body.configVersion, before.configVersion);
+  assert.deepEqual((await readHousehold()).listIds, before.listIds);
+}
+
+// --- Duplicate / blank listIds are normalized ---
+{
+  const cur = await readHousehold();
+  const res = await patchSettings(first.cookie, {
+    listIds: ["tl-a", "tl-a", "", "  ", "tl-b"],
+    expectedVersion: cur.configVersion,
+  });
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { listIds: string[] };
+  assert.deepEqual(body.listIds, ["tl-a", "tl-b"]);
 }
 
 await rm(dataRoot, { recursive: true, force: true });
