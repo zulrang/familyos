@@ -18,7 +18,8 @@
     "check:lists": "node --experimental-strip-types src/lib/lists-http.check.ts",
     "check:provider": "node --experimental-strip-types src/lib/provider.check.ts",
     "check:members": "node --experimental-strip-types src/lib/members.check.ts",
-    "check:participants": "node --experimental-strip-types src/lib/participants.check.ts"
+    "check:participants": "node --experimental-strip-types src/lib/participants.check.ts",
+    "check:event-who": "node --experimental-strip-types src/lib/event-who.check.ts"
   },
   "dependencies": {
     "next": "16.3.1",
