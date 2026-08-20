@@ -24,6 +24,7 @@ await writeHousehold({
   members: [],
   calendarId: null,
   calendarTimeZone: null,
+  listIds: [],
   configVersion: 1,
 });
 

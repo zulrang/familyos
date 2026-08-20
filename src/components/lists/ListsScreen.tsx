@@ -52,6 +52,7 @@ export function ListsScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [lists, setLists] = useState<TaskList[]>([]);
+  const [configVersion, setConfigVersion] = useState(1);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,6 +77,7 @@ export function ListsScreen() {
     if (await redirectIfPairingRequired(sRes)) return;
     const s = (await sRes.json()) as PublicSettings;
     setSettings(s);
+    setConfigVersion(s.configVersion);
     if (!s.signedIn) {
       setLists([]);
       return;
@@ -188,11 +190,22 @@ export function ListsScreen() {
         const res = await fetch("/api/lists", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
+          body: JSON.stringify({ title, expectedVersion: configVersion }),
         });
+        if (res.status === 409) {
+          setError(
+            "Lists changed on another Display. Reloaded — try adding again.",
+          );
+          await load();
+          return;
+        }
         if (!res.ok) {
           setError("Could not create list.");
           return;
+        }
+        const data = (await res.json()) as { configVersion?: number };
+        if (typeof data.configVersion === "number") {
+          setConfigVersion(data.configVersion);
         }
       } else {
         const res = await fetch(`/api/lists/${encodeURIComponent(sheet.id)}`, {
@@ -212,15 +225,28 @@ export function ListsScreen() {
     }
   }
 
-  async function deleteList(id: string) {
+  async function removeList(id: string) {
     setBusy(true);
     try {
       const res = await fetch(`/api/lists/${encodeURIComponent(id)}`, {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: configVersion }),
       });
-      if (!res.ok) {
-        setError("Could not delete list.");
+      if (res.status === 409) {
+        setError(
+          "Lists changed on another Display. Reloaded — try removing again.",
+        );
+        await load();
         return;
+      }
+      if (!res.ok) {
+        setError("Could not remove list.");
+        return;
+      }
+      const data = (await res.json()) as { configVersion?: number };
+      if (typeof data.configVersion === "number") {
+        setConfigVersion(data.configVersion);
       }
       setSheet(null);
       await load();
@@ -274,7 +300,7 @@ export function ListsScreen() {
             color: "var(--text-faint)",
           }}
         >
-          Tap + to add a list
+          Tap + to add a list, or select lists under Settings
         </div>
       ) : null}
       {signedIn && lists.length > 0 ? (
@@ -381,7 +407,7 @@ export function ListsScreen() {
           onClose={() => setSheet(null)}
           onSave={saveSheet}
           onDelete={
-            sheet.kind === "edit" ? () => deleteList(sheet.id) : undefined
+            sheet.kind === "edit" ? () => removeList(sheet.id) : undefined
           }
         />
       ) : null}
@@ -461,7 +487,7 @@ function ListSheet({
                 onClick={onDelete}
                 style={{ marginRight: "auto" }}
               >
-                Delete list?
+                Remove from wall?
               </Button>
             ) : (
               <Button
@@ -469,7 +495,7 @@ function ListSheet({
                 onClick={() => onChange({ ...sheet, confirmDelete: true })}
                 style={{ marginRight: "auto" }}
               >
-                Delete
+                Remove
               </Button>
             )
           ) : null}
