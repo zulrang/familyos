@@ -100,6 +100,14 @@ export async function resolveTrustedDisplay(
   };
 }
 
+/** Public Display records — never include credential material. */
+export async function listTrustedDisplays(): Promise<TrustedDisplay[]> {
+  const store = await readStore();
+  return store.displays
+    .filter((d) => d.revokedAt == null)
+    .map(({ id, createdAt, revokedAt }) => ({ id, createdAt, revokedAt }));
+}
+
 /** Emit one short-lived pairing code when no Trusted Display exists yet. */
 export async function emitStartupPairingCode(
   now = Date.now(),
@@ -107,6 +115,22 @@ export async function emitStartupPairingCode(
   const store = await readStore();
   const hasTrusted = store.displays.some((d) => d.revokedAt == null);
   if (hasTrusted) return null;
+  return mintPendingCode(store, now);
+}
+
+/** Any Trusted Display may mint a short-lived code to pair another Display. */
+export async function createPairingCode(
+  now = Date.now(),
+): Promise<{ code: string; expiresAt: number }> {
+  const store = await readStore();
+  const code = await mintPendingCode(store, now);
+  return { code, expiresAt: now + PAIRING_CODE_TTL_MS };
+}
+
+async function mintPendingCode(
+  store: PairingStore,
+  now: number,
+): Promise<string> {
   const code = newCode();
   store.pendingCode = {
     code,
@@ -161,4 +185,21 @@ export async function pairWithCode(
     token,
     display: { id, createdAt: display.createdAt, revokedAt: null },
   };
+}
+
+export type RevokeResult =
+  | { ok: true }
+  | { ok: false; reason: "missing" | "already_revoked" };
+
+export async function revokeDisplay(
+  displayId: string,
+  now = Date.now(),
+): Promise<RevokeResult> {
+  const store = await readStore();
+  const row = store.displays.find((d) => d.id === displayId);
+  if (!row) return { ok: false, reason: "missing" };
+  if (row.revokedAt != null) return { ok: false, reason: "already_revoked" };
+  row.revokedAt = now;
+  await writeStore(store);
+  return { ok: true };
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { TONE_GOOGLE_NAME } from "@/lib/calendar";
+import { redirectIfPairingRequired } from "@/lib/display-client";
 import {
   type GoogleCalendar,
   MEMBER_TONES,
@@ -14,6 +15,12 @@ import {
 import { Button } from "../core/Button";
 import { AppHeader } from "../nav/AppHeader";
 
+type DisplayRecord = {
+  id: string;
+  createdAt: number;
+  revokedAt: number | null;
+};
+
 function newMember(existing: Member[]): Member {
   const used = new Set(existing.map((m) => m.tone));
   const tone = MEMBER_TONES.find((t) => !used.has(t)) ?? "sand";
@@ -25,6 +32,11 @@ function newMember(existing: Member[]): Member {
   };
 }
 
+function formatPairedAt(createdAt: number): string {
+  // ponytail: UTC calendar date avoids browser-TZ drift; upgrade to Household Time Zone when settings expose it.
+  return new Date(createdAt).toISOString().slice(0, 10);
+}
+
 export function SettingsScreen() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [calendars, setCalendars] = useState<GoogleCalendar[]>([]);
@@ -32,16 +44,35 @@ export function SettingsScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   const [calendarId, setCalendarId] = useState("");
   const [uiScale, setUiScale] = useState<UiScale>(1);
+  const [displays, setDisplays] = useState<DisplayRecord[]>([]);
+  const [currentDisplayId, setCurrentDisplayId] = useState<string | null>(null);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [pairingExpiresAt, setPairingExpiresAt] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  async function loadDisplays() {
+    const res = await fetch("/api/displays");
+    if (await redirectIfPairingRequired(res)) return;
+    if (!res.ok) throw new Error("displays");
+    const data = (await res.json()) as {
+      displays: DisplayRecord[];
+      currentDisplayId: string;
+    };
+    setDisplays(data.displays);
+    setCurrentDisplayId(data.currentDisplayId);
+  }
+
   async function load() {
-    const s = (await (await fetch("/api/settings")).json()) as PublicSettings;
+    const sRes = await fetch("/api/settings");
+    if (await redirectIfPairingRequired(sRes)) return;
+    const s = (await sRes.json()) as PublicSettings;
     setSettings(s);
     setFamilyName(s.familyName);
     setMembers(s.members);
     setCalendarId(s.calendarId ?? "");
     setUiScale(parseUiScale(s.uiScale));
+    await loadDisplays();
     if (s.signedIn) {
       const res = await fetch("/api/calendars");
       if (res.ok) {
@@ -78,8 +109,51 @@ export function SettingsScreen() {
     await load();
   }
 
+  async function mintPairingCode() {
+    setError(null);
+    const res = await fetch("/api/displays/pairing-code", { method: "POST" });
+    if (await redirectIfPairingRequired(res)) return;
+    if (!res.ok) {
+      setError("Could not create a pairing code.");
+      return;
+    }
+    const data = (await res.json()) as { code: string; expiresAt: number };
+    setPairingCode(data.code);
+    setPairingExpiresAt(data.expiresAt);
+  }
+
+  async function revoke(displayId: string) {
+    setError(null);
+    const self = displayId === currentDisplayId;
+    if (
+      !window.confirm(
+        self
+          ? "Revoke this Display? It will return to pairing immediately."
+          : "Revoke this Trusted Display? It will lose household access immediately.",
+      )
+    ) {
+      return;
+    }
+    const res = await fetch(`/api/displays/${displayId}`, { method: "DELETE" });
+    if (self) {
+      window.location.assign("/");
+      return;
+    }
+    if (await redirectIfPairingRequired(res)) return;
+    if (!res.ok) {
+      setError("Could not revoke that Display.");
+      return;
+    }
+    await loadDisplays();
+  }
+
   const patchMember = (id: string, patch: Partial<Member>) =>
     setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+
+  const pairingMinutesLeft =
+    pairingExpiresAt == null
+      ? null
+      : Math.max(0, Math.ceil((pairingExpiresAt - Date.now()) / 60_000));
 
   return (
     <div
@@ -131,6 +205,91 @@ export function SettingsScreen() {
             ))}
           </select>
         </label>
+
+        <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
+          Trusted Displays
+        </h2>
+        <p
+          style={{
+            font: "var(--type-card-meta)",
+            color: "var(--text-muted)",
+            marginBottom: 12,
+          }}
+        >
+          Every Trusted Display has equal control. Generate a short-lived code
+          to pair another browser profile, or revoke one that should no longer
+          access the Household.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {displays.map((d) => {
+            const isCurrent = d.id === currentDisplayId;
+            return (
+              <div
+                key={d.id}
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ font: "var(--type-card-meta)" }}>
+                    {isCurrent ? "This Display" : "Trusted Display"}
+                  </div>
+                  <div
+                    style={{
+                      font: "var(--type-card-meta)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    Paired {formatPairedAt(d.createdAt)}
+                  </div>
+                </div>
+                <Button variant="ghost" onClick={() => void revoke(d.id)}>
+                  Revoke
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 12,
+            alignItems: "center",
+            marginTop: 14,
+            marginBottom: 24,
+          }}
+        >
+          <Button icon="plus" onClick={() => void mintPairingCode()}>
+            Generate pairing code
+          </Button>
+          {pairingCode ? (
+            <div
+              style={{
+                font: "var(--fw-semibold) 22px/1 var(--font-sans)",
+                letterSpacing: "0.18em",
+                color: "var(--text-title)",
+              }}
+            >
+              {pairingCode}
+              {pairingMinutesLeft != null ? (
+                <span
+                  style={{
+                    marginLeft: 10,
+                    letterSpacing: "normal",
+                    font: "var(--type-card-meta)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  expires in ~{pairingMinutesLeft} min
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
 
         <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
           Google Calendar

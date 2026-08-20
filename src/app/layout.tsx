@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Newsreader, Nunito_Sans } from "next/font/google";
 import { cookies } from "next/headers";
 import { NavRail } from "@/components/nav/NavRail";
+import { DisplayTrustWatch } from "@/components/pairing/DisplayTrustWatch";
 import { PairingScreen } from "@/components/pairing/PairingScreen";
 import { resolveTrustedDisplay } from "@/lib/pairing";
 import { readSettings } from "@/lib/settings";
@@ -60,6 +61,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       style={{ zoom: uiScale }}
     >
       <body>
+        <DisplayTrustWatch />
         <div style={{ display: "flex", height: "100%" }}>
           <NavRail />
           <div
