@@ -44,6 +44,7 @@ export type PublicSettings = {
   signedIn: boolean;
   googleConfigured: boolean;
   uiScale: UiScale;
+  configVersion: number;
 };
 
 export type GoogleCalendar = {

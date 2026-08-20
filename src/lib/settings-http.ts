@@ -1,26 +1,45 @@
 import { isUnauthorized, requireTrustedDisplay } from "./display-auth.ts";
 import { setDisplayUiScale } from "./pairing.ts";
-import { googleConfigured, patchSettings, readSettings } from "./settings.ts";
+import { readProvider } from "./provider.ts";
+import {
+  googleConfigured,
+  readHousehold,
+  updateHousehold,
+} from "./settings.ts";
 import { type Member, parseUiScale, type UiScale } from "./types.ts";
 
 function publicSettings(
-  s: Awaited<ReturnType<typeof readSettings>>,
+  s: Awaited<ReturnType<typeof readHousehold>>,
+  signedIn: boolean,
   uiScale: UiScale,
 ) {
   return {
     familyName: s.familyName,
     members: s.members,
     calendarId: s.calendarId,
-    signedIn: Boolean(s.tokens?.access_token),
+    signedIn,
     googleConfigured: googleConfigured(),
     uiScale,
+    configVersion: s.configVersion,
   };
+}
+
+async function publicFromStores(uiScale: UiScale) {
+  const [household, provider] = await Promise.all([
+    readHousehold(),
+    readProvider(),
+  ]);
+  return publicSettings(
+    household,
+    Boolean(provider.tokens?.access_token),
+    uiScale,
+  );
 }
 
 export async function handleGetSettings(request: Request): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  return Response.json(publicSettings(await readSettings(), display.uiScale));
+  return Response.json(await publicFromStores(display.uiScale));
 }
 
 export async function handlePatchSettings(request: Request): Promise<Response> {
@@ -31,6 +50,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
     members?: Member[];
     calendarId?: string | null;
     uiScale?: unknown;
+    expectedVersion?: unknown;
   };
 
   const touchesHousehold =
@@ -38,14 +58,15 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
     body.members !== undefined ||
     body.calendarId !== undefined;
 
-  let settings = await readSettings();
   let uiScale = display.uiScale;
+  const provider = await readProvider();
 
   if (touchesHousehold) {
-    let calendarTimeZone = settings.calendarTimeZone;
+    const current = await readHousehold();
+    let calendarTimeZone = current.calendarTimeZone;
     const calendarId =
-      body.calendarId === undefined ? settings.calendarId : body.calendarId;
-    if (calendarId && calendarId !== settings.calendarId && settings.tokens) {
+      body.calendarId === undefined ? current.calendarId : body.calendarId;
+    if (calendarId && calendarId !== current.calendarId && provider.tokens) {
       try {
         // ponytail: dynamic import so Node self-checks never load Google; static once checks can mock it.
         const { listCalendars } = await import("./google.ts");
@@ -56,15 +77,22 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
         /* keep existing tz */
       }
     }
-    settings = await patchSettings({
-      familyName:
-        typeof body.familyName === "string"
-          ? body.familyName
-          : settings.familyName,
-      members: Array.isArray(body.members) ? body.members : settings.members,
+    const result = await updateHousehold(body.expectedVersion, {
+      familyName: body.familyName,
+      members: body.members,
       calendarId,
       calendarTimeZone,
     });
+    if (!result.ok) {
+      return Response.json(
+        publicSettings(
+          result.config,
+          Boolean(provider.tokens?.access_token),
+          uiScale,
+        ),
+        { status: 409 },
+      );
+    }
   }
 
   if (body.uiScale !== undefined) {
@@ -75,5 +103,5 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
     }
   }
 
-  return Response.json(publicSettings(settings, uiScale));
+  return Response.json(await publicFromStores(uiScale));
 }

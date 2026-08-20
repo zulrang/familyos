@@ -63,15 +63,19 @@ export function SettingsScreen() {
     setCurrentDisplayId(data.currentDisplayId);
   }
 
-  async function load() {
-    const sRes = await fetch("/api/settings");
-    if (await redirectIfPairingRequired(sRes)) return;
-    const s = (await sRes.json()) as PublicSettings;
+  async function applyPublicSettings(s: PublicSettings) {
     setSettings(s);
     setFamilyName(s.familyName);
     setMembers(s.members);
     setCalendarId(s.calendarId ?? "");
     setUiScale(parseUiScale(s.uiScale));
+  }
+
+  async function load() {
+    const sRes = await fetch("/api/settings");
+    if (await redirectIfPairingRequired(sRes)) return;
+    const s = (await sRes.json()) as PublicSettings;
+    await applyPublicSettings(s);
     await loadDisplays();
     if (s.signedIn) {
       const res = await fetch("/api/calendars");
@@ -104,12 +108,23 @@ export function SettingsScreen() {
           familyName,
           members,
           calendarId: calendarId || null,
+          expectedVersion: settings?.configVersion,
         }),
       });
+      if (householdRes.status === 409) {
+        const newer = (await householdRes.json()) as PublicSettings;
+        await applyPublicSettings(newer);
+        setError(
+          "Settings changed on another Display. Reloaded the current values — review and save again.",
+        );
+        return;
+      }
       if (!householdRes.ok) {
         setError("Could not save.");
         return;
       }
+      const savedHousehold = (await householdRes.json()) as PublicSettings;
+      await applyPublicSettings(savedHousehold);
     }
 
     if (scaleDirty) {
@@ -123,12 +138,14 @@ export function SettingsScreen() {
         setError("Could not save display size.");
         return;
       }
+      const savedScale = (await scaleRes.json()) as PublicSettings;
+      setSettings(savedScale);
+      setUiScale(parseUiScale(savedScale.uiScale));
     }
 
     setSaved(true);
     setTimeout(() => setSaved(false), 1600);
     document.documentElement.style.zoom = String(uiScale);
-    await load();
   }
 
   async function mintPairingCode() {

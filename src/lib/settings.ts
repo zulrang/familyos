@@ -3,33 +3,66 @@ import path from "node:path";
 import { dataDir } from "./data-path.ts";
 import type { Member } from "./types.ts";
 
-export type Tokens = {
-  access_token: string;
-  refresh_token: string;
-  expiry: number;
-};
-
-export type StoredSettings = {
+export type HouseholdConfig = {
   familyName: string;
   members: Member[];
   calendarId: string | null;
   calendarTimeZone: string | null;
-  tokens: Tokens | null;
-  oauthState: string | null;
+  configVersion: number;
 };
 
-function settingsFile(): string {
-  return path.join(dataDir(), "kiosk.json");
-}
-
-const EMPTY: StoredSettings = {
+const EMPTY: HouseholdConfig = {
   familyName: "Family",
   members: [],
   calendarId: null,
   calendarTimeZone: null,
-  tokens: null,
-  oauthState: null,
+  configVersion: 1,
 };
+
+function householdFile(): string {
+  return path.join(dataDir(), "household.json");
+}
+
+function legacyFile(): string {
+  return path.join(dataDir(), "kiosk.json");
+}
+
+function normalize(raw: Partial<HouseholdConfig>): HouseholdConfig {
+  const version =
+    typeof raw.configVersion === "number" &&
+    Number.isInteger(raw.configVersion) &&
+    raw.configVersion >= 1
+      ? raw.configVersion
+      : 1;
+  return {
+    familyName:
+      typeof raw.familyName === "string" ? raw.familyName : EMPTY.familyName,
+    members: Array.isArray(raw.members) ? raw.members : [],
+    calendarId: raw.calendarId ?? null,
+    calendarTimeZone: raw.calendarTimeZone ?? null,
+    configVersion: version,
+  };
+}
+
+async function migrateFromLegacy(): Promise<HouseholdConfig | null> {
+  try {
+    const raw = await readFile(legacyFile(), "utf8");
+    const parsed = JSON.parse(raw) as Partial<HouseholdConfig> & {
+      uiScale?: unknown;
+      tokens?: unknown;
+      oauthState?: unknown;
+    };
+    const {
+      uiScale: _legacyScale,
+      tokens: _tokens,
+      oauthState: _oauth,
+      ...rest
+    } = parsed;
+    return normalize(rest);
+  } catch {
+    return null;
+  }
+}
 
 export function googleConfigured(): boolean {
   return Boolean(
@@ -50,36 +83,59 @@ export function googleClient(): {
   return { id, secret, redirect };
 }
 
-export async function readSettings(): Promise<StoredSettings> {
+export async function readHousehold(): Promise<HouseholdConfig> {
   try {
-    const raw = await readFile(settingsFile(), "utf8");
-    const parsed = JSON.parse(raw) as Partial<StoredSettings> & {
-      uiScale?: unknown;
-    };
-    // Drop legacy household-wide uiScale; scale lives on each Display (#4).
-    const { uiScale: _legacy, ...rest } = parsed;
-    return { ...EMPTY, ...rest };
+    const raw = await readFile(householdFile(), "utf8");
+    return normalize(JSON.parse(raw) as Partial<HouseholdConfig>);
   } catch {
+    const legacy = await migrateFromLegacy();
+    if (legacy) {
+      await writeHousehold(legacy);
+      return legacy;
+    }
     return { ...EMPTY };
   }
 }
 
-// ponytail: last-write-wins JSON file; upgrade to a write queue if OAuth refresh races show up.
-export async function writeSettings(next: StoredSettings): Promise<void> {
-  const file = settingsFile();
+// ponytail: last-write-wins JSON file; upgrade to a write queue if concurrent Settings races show up.
+export async function writeHousehold(next: HouseholdConfig): Promise<void> {
+  const file = householdFile();
   await mkdir(path.dirname(file), { recursive: true });
-  // ponytail: strip legacy uiScale if callers still pass it; delete once data dirs are clean.
-  const { uiScale: _legacy, ...clean } = next as StoredSettings & {
-    uiScale?: unknown;
-  };
-  await writeFile(file, `${JSON.stringify(clean, null, 2)}\n`);
+  await writeFile(file, `${JSON.stringify(normalize(next), null, 2)}\n`);
 }
 
-export async function patchSettings(
-  patch: Partial<StoredSettings>,
-): Promise<StoredSettings> {
-  const cur = await readSettings();
-  const next = { ...cur, ...patch };
-  await writeSettings(next);
-  return next;
+export type HouseholdUpdateResult =
+  | { ok: true; config: HouseholdConfig }
+  | { ok: false; config: HouseholdConfig };
+
+/**
+ * Apply a household patch when expectedVersion matches.
+ * On mismatch (or non-integer expectedVersion), leave storage unchanged.
+ */
+export async function updateHousehold(
+  expectedVersion: unknown,
+  patch: Partial<Omit<HouseholdConfig, "configVersion">>,
+): Promise<HouseholdUpdateResult> {
+  const cur = await readHousehold();
+  if (
+    typeof expectedVersion !== "number" ||
+    !Number.isInteger(expectedVersion) ||
+    expectedVersion !== cur.configVersion
+  ) {
+    return { ok: false, config: cur };
+  }
+  const next: HouseholdConfig = {
+    familyName:
+      typeof patch.familyName === "string" ? patch.familyName : cur.familyName,
+    members: Array.isArray(patch.members) ? patch.members : cur.members,
+    calendarId:
+      patch.calendarId === undefined ? cur.calendarId : patch.calendarId,
+    calendarTimeZone:
+      patch.calendarTimeZone === undefined
+        ? cur.calendarTimeZone
+        : patch.calendarTimeZone,
+    configVersion: cur.configVersion + 1,
+  };
+  await writeHousehold(next);
+  return { ok: true, config: next };
 }

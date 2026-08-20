@@ -10,13 +10,14 @@ import path from "node:path";
 const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-pair-"));
 process.env.FAMILYOS_DATA_DIR = dataRoot;
 
-const { writeSettings } = await import("./settings.ts");
+const { writeHousehold } = await import("./settings.ts");
+const { writeProvider } = await import("./provider.ts");
 const { emitStartupPairingCode, DISPLAY_COOKIE } = await import("./pairing.ts");
 const { requireTrustedDisplay } = await import("./display-auth.ts");
 const { handleReady, handlePair } = await import("./pairing-http.ts");
 
 await mkdir(dataRoot, { recursive: true });
-await writeSettings({
+await writeHousehold({
   familyName: "SecretHousehold",
   members: [
     {
@@ -28,12 +29,16 @@ await writeSettings({
   ],
   calendarId: "secret-cal@group.calendar.google.com",
   calendarTimeZone: "America/New_York",
+  configVersion: 1,
+});
+await writeProvider({
   tokens: {
     access_token: "secret-access",
     refresh_token: "secret-refresh",
     expiry: Date.now() + 60_000,
   },
   oauthState: null,
+  providerConnectionId: "conn-secret",
 });
 
 function cookieFrom(res: Response): string | null {
