@@ -3,14 +3,14 @@ import { NextResponse } from "next/server";
 import { isMemberTone } from "@/lib/calendar";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { AuthError, insertEvent, listEvents } from "@/lib/google";
-import { readSettings } from "@/lib/settings";
+import { readHousehold } from "@/lib/settings";
 
 export async function GET(request: NextRequest) {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
   const from = request.nextUrl.searchParams.get("from");
   const to = request.nextUrl.searchParams.get("to");
-  const s = await readSettings();
+  const s = await readHousehold();
   if (!s.calendarId)
     return NextResponse.json({ error: "no calendar" }, { status: 400 });
   if (!from || !to)
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: Request) {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  const s = await readSettings();
+  const s = await readHousehold();
   if (!s.calendarId)
     return NextResponse.json({ error: "no calendar" }, { status: 400 });
   const body = (await request.json()) as {

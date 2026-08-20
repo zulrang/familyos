@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { exchangeCode } from "@/lib/google";
-import { readSettings } from "@/lib/settings";
+import { readProvider } from "@/lib/provider";
 
 export async function GET(request: NextRequest) {
   const display = await requireTrustedDisplay(request);
@@ -10,8 +10,8 @@ export async function GET(request: NextRequest) {
   const url = request.nextUrl;
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const s = await readSettings();
-  if (!code || !state || state !== s.oauthState) {
+  const provider = await readProvider();
+  if (!code || !state || state !== provider.oauthState) {
     return NextResponse.redirect(new URL("/settings", url.origin));
   }
   try {

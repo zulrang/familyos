@@ -1,16 +1,17 @@
 /**
- * HTTP acceptance seam for per-Display UI scale (#4).
- * Isolated data dir; no live Google credentials.
+ * HTTP acceptance seam for Settings: per-Display UI scale (#4) and
+ * versioned Household Configuration (#5). Isolated data dir; no live Google.
  */
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-scale-"));
+const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-settings-"));
 process.env.FAMILYOS_DATA_DIR = dataRoot;
 
-const { writeSettings, readSettings } = await import("./settings.ts");
+const { writeHousehold, readHousehold } = await import("./settings.ts");
+const { writeProvider } = await import("./provider.ts");
 const { emitStartupPairingCode, DISPLAY_COOKIE, createPairingCode } =
   await import("./pairing.ts");
 const { handlePair } = await import("./pairing-http.ts");
@@ -19,13 +20,21 @@ const { handleGetSettings, handlePatchSettings } = await import(
 );
 
 await mkdir(dataRoot, { recursive: true });
-await writeSettings({
+await writeHousehold({
   familyName: "ScaleHousehold",
   members: [],
   calendarId: null,
   calendarTimeZone: null,
-  tokens: null,
-  oauthState: null,
+  configVersion: 1,
+});
+await writeProvider({
+  tokens: {
+    access_token: "secret-access",
+    refresh_token: "secret-refresh",
+    expiry: Date.now() + 60_000,
+  },
+  oauthState: "secret-oauth-state",
+  providerConnectionId: "conn-secret",
 });
 
 function cookieFrom(res: Response): string | null {
@@ -67,6 +76,8 @@ async function getSettings(cookie: string) {
   return (await res.json()) as {
     familyName: string;
     uiScale: number;
+    configVersion: number;
+    signedIn: boolean;
   };
 }
 
@@ -86,6 +97,32 @@ const first = await pairWithCode(startupCode);
 const { code: secondCode } = await createPairingCode();
 const second = await pairWithCode(secondCode);
 
+// --- GET: configVersion present; secrets never leave the server ---
+{
+  const res = await handleGetSettings(
+    new Request("http://familyos.test/api/settings", {
+      headers: { cookie: first.cookie },
+    }),
+  );
+  assert.equal(res.status, 200);
+  const text = await res.text();
+  assert.equal(text.includes("secret-access"), false);
+  assert.equal(text.includes("secret-refresh"), false);
+  assert.equal(text.includes("secret-oauth-state"), false);
+  assert.equal(text.includes("conn-secret"), false);
+  assert.equal(text.includes("tokens"), false);
+  assert.equal(text.includes("oauthState"), false);
+  assert.equal(text.includes("providerConnectionId"), false);
+  const body = JSON.parse(text) as {
+    configVersion: number;
+    signedIn: boolean;
+    familyName: string;
+  };
+  assert.equal(body.configVersion, 1);
+  assert.equal(body.signedIn, true);
+  assert.equal(body.familyName, "ScaleHousehold");
+}
+
 // --- New Displays default to 100% ---
 {
   const a = await getSettings(first.cookie);
@@ -93,6 +130,7 @@ const second = await pairWithCode(secondCode);
   assert.equal(a.uiScale, 1);
   assert.equal(b.uiScale, 1);
   assert.equal(a.familyName, "ScaleHousehold");
+  assert.equal(a.configVersion, 1);
 }
 
 // --- Two Displays keep independent scales; reload (GET) preserves them ---
@@ -111,33 +149,79 @@ const second = await pairWithCode(secondCode);
 
 // --- Changing scale does not mutate Household Configuration ---
 {
-  const before = await readFile(path.join(dataRoot, "kiosk.json"), "utf8");
-  const householdBefore = await readSettings();
-  assert.equal("uiScale" in householdBefore, false);
+  const before = await readFile(path.join(dataRoot, "household.json"), "utf8");
+  const householdBefore = await readHousehold();
+  assert.equal(householdBefore.configVersion, 1);
 
   const res = await patchSettings(first.cookie, { uiScale: 1.1 });
   assert.equal(res.status, 200);
   assert.equal(((await res.json()) as { uiScale: number }).uiScale, 1.1);
 
-  const after = await readFile(path.join(dataRoot, "kiosk.json"), "utf8");
+  const after = await readFile(path.join(dataRoot, "household.json"), "utf8");
   assert.equal(after, before);
   assert.equal((await getSettings(second.cookie)).uiScale, 1.25);
+  assert.equal((await getSettings(second.cookie)).configVersion, 1);
 }
 
-// --- Household field patch leaves each Display's scale alone ---
+// --- Household field patch with matching expectedVersion bumps version ---
 {
   const res = await patchSettings(first.cookie, {
     familyName: "RenamedHousehold",
+    expectedVersion: 1,
   });
   assert.equal(res.status, 200);
-  const body = (await res.json()) as { familyName: string; uiScale: number };
+  const body = (await res.json()) as {
+    familyName: string;
+    uiScale: number;
+    configVersion: number;
+  };
   assert.equal(body.familyName, "RenamedHousehold");
   assert.equal(body.uiScale, 1.1);
+  assert.equal(body.configVersion, 2);
   assert.equal((await getSettings(second.cookie)).uiScale, 1.25);
   assert.equal(
     (await getSettings(second.cookie)).familyName,
     "RenamedHousehold",
   );
+  assert.equal((await getSettings(second.cookie)).configVersion, 2);
+  assert.equal((await readHousehold()).configVersion, 2);
+}
+
+// --- Stale expectedVersion rejects and returns current public state ---
+{
+  const before = await readHousehold();
+  const res = await patchSettings(first.cookie, {
+    familyName: "ShouldNotWin",
+    expectedVersion: 1,
+  });
+  assert.equal(res.status, 409);
+  const body = (await res.json()) as {
+    familyName: string;
+    configVersion: number;
+    uiScale: number;
+    signedIn: boolean;
+  };
+  assert.equal(body.familyName, "RenamedHousehold");
+  assert.equal(body.configVersion, 2);
+  assert.equal(body.uiScale, 1.1);
+  assert.equal(body.signedIn, true);
+  assert.equal((await readHousehold()).familyName, before.familyName);
+  assert.equal((await readHousehold()).configVersion, 2);
+}
+
+// --- Missing expectedVersion on household mutation is a conflict ---
+{
+  const res = await patchSettings(first.cookie, {
+    familyName: "AlsoShouldNotWin",
+  });
+  assert.equal(res.status, 409);
+  const body = (await res.json()) as {
+    familyName: string;
+    configVersion: number;
+  };
+  assert.equal(body.familyName, "RenamedHousehold");
+  assert.equal(body.configVersion, 2);
+  assert.equal((await readHousehold()).familyName, "RenamedHousehold");
 }
 
 // --- Invalid scale values are normalized; previous scale kept as fallback ---

@@ -14,7 +14,8 @@
     "check:ui-scale": "node --experimental-strip-types src/lib/ui-scale.check.ts",
     "check:pairing": "node --experimental-strip-types src/lib/pairing-http.check.ts",
     "check:displays": "node --experimental-strip-types src/lib/displays-http.check.ts",
-    "check:settings": "node --experimental-strip-types src/lib/settings-http.check.ts"
+    "check:settings": "node --experimental-strip-types src/lib/settings-http.check.ts",
+    "check:provider": "node --experimental-strip-types src/lib/provider.check.ts"
   },
   "dependencies": {
     "next": "16.3.1",

@@ -4,7 +4,7 @@ import { isMemberTone } from "@/lib/calendar";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { AuthError, deleteEvent, updateEvent } from "@/lib/google";
 import { parseScope } from "@/lib/recurrence";
-import { readSettings } from "@/lib/settings";
+import { readHousehold } from "@/lib/settings";
 
 export async function PATCH(
   request: NextRequest,
@@ -13,7 +13,7 @@ export async function PATCH(
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
   const { id } = await params;
-  const s = await readSettings();
+  const s = await readHousehold();
   if (!s.calendarId)
     return NextResponse.json({ error: "no calendar" }, { status: 400 });
   const body = (await request.json()) as {
@@ -55,7 +55,7 @@ export async function DELETE(
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
   const { id } = await params;
-  const s = await readSettings();
+  const s = await readHousehold();
   if (!s.calendarId)
     return NextResponse.json({ error: "no calendar" }, { status: 400 });
   try {

@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { authUrl } from "@/lib/google";
-import { googleConfigured, patchSettings } from "@/lib/settings";
+import { patchProvider } from "@/lib/provider";
+import { googleConfigured } from "@/lib/settings";
 
 export async function GET(request: Request) {
   const display = await requireTrustedDisplay(request);
@@ -14,6 +15,6 @@ export async function GET(request: Request) {
     );
   }
   const state = randomBytes(16).toString("hex");
-  await patchSettings({ oauthState: state });
+  await patchProvider({ oauthState: state });
   return NextResponse.redirect(authUrl(state));
 }

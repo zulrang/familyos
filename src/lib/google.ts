@@ -6,6 +6,12 @@ import {
   tonesFromGoogle,
 } from "./calendar";
 import {
+  establishProviderConnection,
+  patchProvider,
+  readProvider,
+  type Tokens,
+} from "./provider";
+import {
   followingRecurrence,
   isSeriesHead,
   rruleCount,
@@ -13,12 +19,7 @@ import {
   truncateRecurrence,
   untilStamp,
 } from "./recurrence";
-import {
-  googleClient,
-  patchSettings,
-  readSettings,
-  type Tokens,
-} from "./settings";
+import { googleClient } from "./settings";
 import type {
   CalEvent,
   GoogleCalendar,
@@ -59,9 +60,19 @@ async function tokenRequest(body: Record<string, string>): Promise<{
   return res.json();
 }
 
+async function googleAccountId(accessToken: string): Promise<string> {
+  const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`userinfo ${res.status}`);
+  const data = (await res.json()) as { sub?: string };
+  if (!data.sub) throw new Error("userinfo missing sub");
+  return data.sub;
+}
+
 export async function exchangeCode(code: string): Promise<void> {
   const { id, secret, redirect } = googleClient();
-  const cur = await readSettings();
+  const cur = await readProvider();
   const tok = await tokenRequest({
     code,
     client_id: id,
@@ -69,18 +80,17 @@ export async function exchangeCode(code: string): Promise<void> {
     redirect_uri: redirect,
     grant_type: "authorization_code",
   });
-  await patchSettings({
-    oauthState: null,
-    tokens: {
-      access_token: tok.access_token,
-      refresh_token: tok.refresh_token ?? cur.tokens?.refresh_token ?? "",
-      expiry: Date.now() + tok.expires_in * 1000,
-    },
-  });
+  const tokens: Tokens = {
+    access_token: tok.access_token,
+    refresh_token: tok.refresh_token ?? cur.tokens?.refresh_token ?? "",
+    expiry: Date.now() + tok.expires_in * 1000,
+  };
+  const accountId = await googleAccountId(tokens.access_token);
+  await establishProviderConnection(accountId, tokens);
 }
 
 async function accessToken(): Promise<string> {
-  const s = await readSettings();
+  const s = await readProvider();
   if (!s.tokens?.access_token) throw new AuthError();
   if (s.tokens.expiry - 60_000 > Date.now()) return s.tokens.access_token;
   if (!s.tokens.refresh_token) throw new AuthError();
@@ -96,7 +106,7 @@ async function accessToken(): Promise<string> {
     refresh_token: tok.refresh_token ?? s.tokens.refresh_token,
     expiry: Date.now() + tok.expires_in * 1000,
   };
-  await patchSettings({ tokens: next });
+  await patchProvider({ tokens: next });
   return next.access_token;
 }
 

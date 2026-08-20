@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
-import { patchSettings } from "@/lib/settings";
+import { clearProviderConnection } from "@/lib/provider";
 
 export async function POST(request: Request) {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  await patchSettings({ tokens: null, oauthState: null });
+  await clearProviderConnection();
   return NextResponse.json({ ok: true });
 }
