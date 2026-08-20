@@ -1,6 +1,6 @@
 /**
  * HTTP acceptance seam for selected Household Lists (#8).
- * Fake ListsGateway — no live Google.
+ * Uses shared Lists Fake — no live Google.
  */
 
 import assert from "node:assert/strict";
@@ -8,6 +8,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "vitest";
+import { createFakeListsGateway } from "./lists-fake.ts";
+import type { TaskItem, TaskList } from "./types.ts";
 
 test("lists http", async () => {
   const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-lists-"));
@@ -30,25 +32,6 @@ test("lists http", async () => {
   );
   const { handlePair } = await import("./pairing-http.ts");
 
-  type TaskItem = { id: string; title: string; done: boolean };
-  type TaskList = { id: string; title: string; items: TaskItem[] };
-  type ListsGateway = {
-    listSelected: (listIds: string[]) => Promise<TaskList[]>;
-    createList: (title: string) => Promise<TaskList>;
-    renameList: (
-      listId: string,
-      title: string,
-    ) => Promise<{ id: string; title: string }>;
-    addItem: (listId: string, title: string) => Promise<TaskItem>;
-    patchItem: (
-      listId: string,
-      itemId: string,
-      patch: { title?: string; done?: boolean },
-    ) => Promise<TaskItem>;
-    clearCompleted: (listId: string) => Promise<void>;
-    deleteItem: (listId: string, itemId: string) => Promise<void>;
-  };
-
   await mkdir(dataRoot, { recursive: true });
   await writeHousehold({
     familyName: "ListsHousehold",
@@ -68,99 +51,24 @@ test("lists http", async () => {
     providerConnectionId: "conn",
   });
 
-  const store = new Map<string, TaskList>([
-    [
-      "tl-selected",
-      {
-        id: "tl-selected",
-        title: "Selected",
-        items: [{ id: "i1", title: "Milk", done: false }],
-      },
-    ],
-    [
-      "tl-also",
-      {
-        id: "tl-also",
-        title: "Also",
-        items: [{ id: "i2", title: "Done", done: true }],
-      },
-    ],
-    [
-      "tl-personal",
-      {
-        id: "tl-personal",
-        title: "Personal",
-        items: [{ id: "i3", title: "Secret", done: false }],
-      },
-    ],
+  const gateway = createFakeListsGateway([
+    {
+      id: "tl-selected",
+      title: "Selected",
+      items: [{ id: "i1", title: "Milk", done: false }],
+    },
+    {
+      id: "tl-also",
+      title: "Also",
+      items: [{ id: "i2", title: "Done", done: true }],
+    },
+    {
+      id: "tl-personal",
+      title: "Personal",
+      items: [{ id: "i3", title: "Secret", done: false }],
+    },
   ]);
-
-  let createCount = 0;
-  const gateway: ListsGateway = {
-    async listSelected(listIds) {
-      return listIds
-        .map((id) => store.get(id))
-        .filter((l): l is TaskList => l !== undefined);
-    },
-    async createList(title) {
-      createCount += 1;
-      const id = `tl-new-${createCount}`;
-      const list: TaskList = { id, title, items: [] };
-      store.set(id, list);
-      return list;
-    },
-    async renameList(listId, title) {
-      const cur = store.get(listId);
-      if (!cur) throw new Error("missing");
-      const next = { ...cur, title };
-      store.set(listId, next);
-      return { id: listId, title };
-    },
-    async addItem(listId, title) {
-      const cur = store.get(listId);
-      if (!cur) throw new Error("missing");
-      const item: TaskItem = {
-        id: `item-${cur.items.length + 1}`,
-        title,
-        done: false,
-      };
-      store.set(listId, { ...cur, items: [item, ...cur.items] });
-      return item;
-    },
-    async patchItem(listId, itemId, patch) {
-      const cur = store.get(listId);
-      if (!cur) throw new Error("missing");
-      const items = cur.items.map((i) =>
-        i.id === itemId
-          ? {
-              ...i,
-              title: patch.title ?? i.title,
-              done: patch.done ?? i.done,
-            }
-          : i,
-      );
-      store.set(listId, { ...cur, items });
-      const item = items.find((i) => i.id === itemId);
-      if (!item) throw new Error("missing item");
-      return item;
-    },
-    async clearCompleted(listId) {
-      const cur = store.get(listId);
-      if (!cur) throw new Error("missing");
-      store.set(listId, {
-        ...cur,
-        items: cur.items.filter((i) => !i.done),
-      });
-    },
-    async deleteItem(listId, itemId) {
-      const cur = store.get(listId);
-      if (!cur) throw new Error("missing");
-      store.set(listId, {
-        ...cur,
-        items: cur.items.filter((i) => i.id !== itemId),
-      });
-    },
-  };
+  const { store } = gateway;
 
   function cookieFrom(res: Response): string | null {
     const raw = res.headers.getSetCookie?.() ?? [];
@@ -355,7 +263,7 @@ test("lists http", async () => {
   // --- Create with stale version conflicts and does not create ---
   {
     const before = await readHousehold();
-    const createdBefore = createCount;
+    const createdBefore = gateway.createCount;
     const res = await handleCreateList(
       req("http://familyos.test/api/lists", {
         method: "POST",
@@ -364,7 +272,7 @@ test("lists http", async () => {
       gateway,
     );
     assert.equal(res.status, 409);
-    assert.equal(createCount, createdBefore);
+    assert.equal(gateway.createCount, createdBefore);
     const body = (await res.json()) as {
       listIds: string[];
       configVersion: number;
