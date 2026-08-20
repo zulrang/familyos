@@ -31,12 +31,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": [
-    "node_modules",
-    "src/lib/calendar.check.ts",
-    "src/lib/recurrence.check.ts",
-    "src/lib/tasks.check.ts",
-    "src/lib/ui-scale.check.ts",
-    "src/lib/pairing-http.check.ts"
-  ]
+  "exclude": ["node_modules"]
 }
