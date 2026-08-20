@@ -29,6 +29,7 @@ import {
   weekDays,
   weekdayLabel,
 } from "@/lib/calendar";
+import { redirectIfPairingRequired } from "@/lib/display-client";
 import type { CalEvent, Member, PublicSettings } from "@/lib/types";
 import { Button } from "../core/Button";
 import { Fab } from "../core/Fab";
@@ -107,6 +108,7 @@ export function CalendarScreen() {
 
   async function load() {
     const sRes = await fetch("/api/settings");
+    if (await redirectIfPairingRequired(sRes)) return;
     const s = (await sRes.json()) as PublicSettings;
     setSettings(s);
     if (!s.signedIn || !s.calendarId) {
@@ -116,6 +118,7 @@ export function CalendarScreen() {
     const eRes = await fetch(
       `/api/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     );
+    if (await redirectIfPairingRequired(eRes)) return;
     if (eRes.status === 401) {
       setEvents([]);
       setSettings({ ...s, signedIn: false });

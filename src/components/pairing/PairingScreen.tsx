@@ -78,7 +78,8 @@ export function PairingScreen() {
               color: "var(--text-muted)",
             }}
           >
-            Enter the short-lived code from the Server Installation.
+            Enter the short-lived code from the Server Installation or another
+            Trusted Display.
           </p>
         </div>
         <label

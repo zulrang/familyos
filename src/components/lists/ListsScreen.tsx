@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatClock } from "@/lib/calendar";
+import { redirectIfPairingRequired } from "@/lib/display-client";
 import { splitLeadingEmoji } from "@/lib/list-text";
 import type {
   MemberTone,
@@ -72,6 +73,7 @@ export function ListsScreen() {
 
   async function load() {
     const sRes = await fetch("/api/settings");
+    if (await redirectIfPairingRequired(sRes)) return;
     const s = (await sRes.json()) as PublicSettings;
     setSettings(s);
     if (!s.signedIn) {
@@ -79,6 +81,7 @@ export function ListsScreen() {
       return;
     }
     const res = await fetch("/api/lists");
+    if (await redirectIfPairingRequired(res)) return;
     if (res.status === 401) {
       setLists([]);
       setNeedsReauth(true);
@@ -120,6 +123,7 @@ export function ListsScreen() {
         body: JSON.stringify({ done }),
       },
     );
+    if (await redirectIfPairingRequired(res)) return;
     if (res.status === 401) {
       patchItem(listId, item.id, { done: item.done });
       setNeedsReauth(true);
@@ -136,6 +140,7 @@ export function ListsScreen() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     });
+    if (await redirectIfPairingRequired(res)) return;
     if (res.status === 401) {
       setNeedsReauth(true);
       return;
@@ -157,6 +162,7 @@ export function ListsScreen() {
     const res = await fetch(`/api/lists/${encodeURIComponent(listId)}/clear`, {
       method: "POST",
     });
+    if (await redirectIfPairingRequired(res)) return;
     if (res.status === 401) {
       setNeedsReauth(true);
       return;

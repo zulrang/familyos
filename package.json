@@ -12,7 +12,8 @@
     "check:recurrence": "node --experimental-strip-types src/lib/recurrence.check.ts",
     "check:tasks": "node --experimental-strip-types src/lib/tasks.check.ts",
     "check:ui-scale": "node --experimental-strip-types src/lib/ui-scale.check.ts",
-    "check:pairing": "node --experimental-strip-types src/lib/pairing-http.check.ts"
+    "check:pairing": "node --experimental-strip-types src/lib/pairing-http.check.ts",
+    "check:displays": "node --experimental-strip-types src/lib/displays-http.check.ts"
   },
   "dependencies": {
     "next": "16.3.1",
