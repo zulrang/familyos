@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { isMemberTone } from "@/lib/calendar";
+import { presentationTonesFor } from "@/lib/calendar";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { AuthError, deleteEvent, updateEvent } from "@/lib/google";
+import { normalizeParticipantIds } from "@/lib/participants";
 import { parseScope } from "@/lib/recurrence";
 import { readHousehold } from "@/lib/settings";
 
@@ -21,10 +22,10 @@ export async function PATCH(
     allDay: boolean;
     startMs: number;
     endMs: number;
-    tones?: string[];
-    attendeeEmails?: string[];
+    participantIds?: string[];
     scope?: string;
   };
+  const participantIds = normalizeParticipantIds(body.participantIds ?? []);
   try {
     const event = await updateEvent(
       s.calendarId,
@@ -34,8 +35,8 @@ export async function PATCH(
         allDay: body.allDay,
         startMs: body.startMs,
         endMs: body.endMs,
-        tones: (body.tones ?? []).filter(isMemberTone),
-        attendeeEmails: body.attendeeEmails ?? [],
+        participantIds,
+        presentationTones: presentationTonesFor(s.members, participantIds),
       },
       parseScope(body.scope),
     );

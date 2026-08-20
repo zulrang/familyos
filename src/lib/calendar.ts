@@ -1,7 +1,8 @@
-import { legacyToneForColor } from "./members.ts";
+import { legacyToneForColor, resolveMembers } from "./members.ts";
+import { isHouseholdEvent } from "./participants.ts";
 import type { CalEvent, Member, MemberTone } from "./types.ts";
 
-/** Google Calendar event colorIds closest to our member pastels. Graphite (8) is multi. */
+/** Google Calendar event colorIds closest to our member pastels. Graphite (8) is multi. Presentation only. */
 export const TONE_COLOR_ID: Record<MemberTone, string> = {
   teal: "7",
   blush: "4",
@@ -12,6 +13,8 @@ export const TONE_COLOR_ID: Record<MemberTone, string> = {
 };
 
 export const MULTI_COLOR_ID = "8";
+
+/** @deprecated Legacy private prop; identity is PARTICIPANTS_PROP. Cleared on write. */
 export const TONES_PROP = "familyosTones";
 
 export const TONE_GOOGLE_NAME: Record<MemberTone, string> = {
@@ -34,29 +37,25 @@ export function toneFromColorId(id: string): MemberTone | null {
   return null;
 }
 
+/** Presentation colorId for Google Calendar UI — never Event Participant identity. */
 export function colorIdForTones(tones: MemberTone[]): string | null {
   if (tones.length === 1) return TONE_COLOR_ID[tones[0]];
   if (tones.length > 1) return MULTI_COLOR_ID;
   return null;
 }
 
-/** Empty/missing stored string means infer from colorId (events colored in Google Calendar). */
-export function tonesFromGoogle(opts: {
-  colorId?: string | null;
-  stored?: string | undefined;
-}): MemberTone[] {
-  if (opts.stored) {
-    return [
-      ...new Set(
-        opts.stored
-          .split(",")
-          .map((s) => s.trim())
-          .filter(isMemberTone),
-      ),
-    ];
+/** Legacy tones for Google colorId from Active Member colors. */
+export function presentationTonesFor(
+  members: Member[],
+  participantIds: string[],
+): MemberTone[] {
+  const tones: MemberTone[] = [];
+  for (const m of resolveMembers(members, participantIds)) {
+    if (m.status !== "active") continue;
+    const tone = legacyToneForColor(m.color);
+    if (tone && !tones.includes(tone)) tones.push(tone);
   }
-  const tone = opts.colorId ? toneFromColorId(opts.colorId) : null;
-  return tone ? [tone] : [];
+  return tones;
 }
 
 export const DAY_COUNT = 7;
@@ -205,34 +204,33 @@ export function layoutColumns<T extends { startMs: number; endMs: number }>(
   return result;
 }
 
+/** Resolve Event Participants by stable ID — includes Retired Members. */
 export function peopleOf(members: Member[], event: CalEvent): Member[] {
-  // ponytail: tone bridge until #7 stores participant IDs; custom/retired colors won't match.
-  const tones = new Set(event.tones);
-  return members.filter((m) => {
-    if (m.status !== "active") return false;
-    const tone = legacyToneForColor(m.color);
-    return tone !== null && tones.has(tone);
-  });
+  return resolveMembers(members, event.participantIds);
+}
+
+/** Household Events stay visible; otherwise any non-filtered resolved participant. */
+export function visibleUnderMemberFilter(
+  event: CalEvent,
+  members: Member[],
+  off: Record<string, boolean>,
+): boolean {
+  if (isHouseholdEvent(event.participantIds)) return true;
+  const people = peopleOf(members, event);
+  return people.some((p) => !off[p.id]);
 }
 
 export function eventTone(people: Member[]): {
   tone: MemberTone;
   multi: boolean;
 } {
-  const active = people.filter((p) => p.status === "active");
-  if (active.length > 1) {
-    return {
-      tone: legacyToneForColor(active[0].color) ?? "sand",
-      multi: true,
-    };
+  const multi = people.length > 1;
+  for (const p of people) {
+    if (p.status !== "active") continue;
+    const tone = legacyToneForColor(p.color);
+    if (tone) return { tone, multi };
   }
-  if (active.length === 1) {
-    return {
-      tone: legacyToneForColor(active[0].color) ?? "sand",
-      multi: false,
-    };
-  }
-  return { tone: "sand", multi: false };
+  return { tone: "sand", multi };
 }
 
 export function coversDay(event: CalEvent, day: Date): boolean {

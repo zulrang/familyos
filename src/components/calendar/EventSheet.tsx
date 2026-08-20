@@ -1,5 +1,6 @@
 "use client";
 
+import { applyWhoSelection, showSeveralOption } from "@/lib/event-who";
 import { legacyToneForColor } from "@/lib/members";
 import type { Member, SeriesScope } from "@/lib/types";
 import { Button } from "../core/Button";
@@ -20,17 +21,13 @@ export type EventDraft = {
   scope: SeriesScope;
 };
 
+export { whoFromIds } from "@/lib/event-who";
+
 const SCOPES: { id: SeriesScope; label: string }[] = [
   { id: "this", label: "This event" },
   { id: "following", label: "This and following events" },
   { id: "all", label: "All events" },
 ];
-
-export function whoFromIds(ids: string[]): string {
-  if (ids.length === 0) return "none";
-  if (ids.length === 1) return ids[0];
-  return "several";
-}
 
 export function EventSheet({
   draft,
@@ -50,12 +47,13 @@ export function EventSheet({
   onDelete?: () => void;
 }) {
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
-  const setWho = (who: string) => {
-    if (who === "none") set({ who, memberIds: [] });
-    else if (who === "several") set({ who });
-    else set({ who, memberIds: [who] });
-  };
+  const setWho = (who: string) =>
+    set(applyWhoSelection(who, members, draft.memberIds));
   const assignable = members.filter((m) => m.status === "active");
+  // Historical Event Participants (Retired) stay visible but not newly choosable.
+  const historical = members.filter(
+    (m) => m.status === "retired" && draft.memberIds.includes(m.id),
+  );
   return (
     <div
       style={{
@@ -182,7 +180,12 @@ export function EventSheet({
                 {m.name || "Unnamed"}
               </option>
             ))}
-            {assignable.length >= 2 ? (
+            {historical.map((m) => (
+              <option key={m.id} value={m.id} disabled>
+                {m.name || "Unnamed"} (retired)
+              </option>
+            ))}
+            {showSeveralOption(assignable.length, historical.length, draft) ? (
               <option value="several">Several people</option>
             ) : null}
           </select>
@@ -203,6 +206,15 @@ export function EventSheet({
                   })
                 }
                 style={{ flex: "0 0 auto" }}
+              />
+            ))}
+            {historical.map((m) => (
+              <MemberChip
+                key={m.id}
+                name={`${m.name || "Unnamed"} (retired)`}
+                tone="sand"
+                active
+                style={{ flex: "0 0 auto", opacity: 0.85 }}
               />
             ))}
           </div>

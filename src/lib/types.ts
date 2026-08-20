@@ -38,8 +38,8 @@ export type CalEvent = {
   allDay: boolean;
   startMs: number;
   endMs: number;
-  tones: MemberTone[];
-  attendeeEmails: string[];
+  /** Stable Household Member IDs; empty = Household Event. */
+  participantIds: MemberId[];
   recurringEventId?: string;
   originalStartMs?: number;
 };

@@ -26,11 +26,12 @@ import {
   statusEvent,
   timedOnDay,
   topPx,
+  visibleUnderMemberFilter,
   weekDays,
   weekdayLabel,
 } from "@/lib/calendar";
 import { redirectIfPairingRequired } from "@/lib/display-client";
-import { activeMembers, legacyToneForColor } from "@/lib/members";
+import { legacyToneForColor } from "@/lib/members";
 import type { CalEvent, Member, MemberTone, PublicSettings } from "@/lib/types";
 import { Button } from "../core/Button";
 import { Fab } from "../core/Fab";
@@ -48,8 +49,7 @@ function chipTone(m: Member): MemberTone {
   return legacyToneForColor(m.color) ?? "sand";
 }
 
-function toDraft(ev: CalEvent, members: Member[]): EventDraft {
-  const people = peopleOf(members, ev);
+function toDraft(ev: CalEvent): EventDraft {
   const endInclusive = ev.allDay ? ev.endMs - 86400000 : ev.endMs;
   return {
     id: ev.id,
@@ -59,8 +59,9 @@ function toDraft(ev: CalEvent, members: Member[]): EventDraft {
     endDate: msToDateInput(endInclusive),
     startTime: msToTimeInput(ev.startMs),
     endTime: msToTimeInput(ev.endMs),
-    memberIds: people.map((p) => p.id),
-    who: whoFromIds(people.map((p) => p.id)),
+    // Round-trip stored IDs even if some no longer resolve on the roster.
+    memberIds: [...ev.participantIds],
+    who: whoFromIds(ev.participantIds),
     recurringEventId: ev.recurringEventId,
     scope: "this",
   };
@@ -168,18 +169,13 @@ export function CalendarScreen() {
     };
   }, []);
 
-  const visible = (ev: CalEvent) => {
-    const people = peopleOf(members, ev);
-    if (!people.length) return true;
-    return people.some((p) => !off[p.id]);
-  };
+  const visible = (ev: CalEvent) => visibleUnderMemberFilter(ev, members, off);
 
   const status = statusEvent(events, today);
 
   async function save(draft: EventDraft) {
     setBusy(true);
     try {
-      const selected = members.filter((m) => draft.memberIds.includes(m.id));
       const startMs = draft.allDay
         ? fromDateOnly(draft.date)
         : fromDateAndTime(draft.date, draft.startTime);
@@ -191,10 +187,7 @@ export function CalendarScreen() {
         allDay: draft.allDay,
         startMs,
         endMs,
-        tones: selected
-          .filter((m) => m.status === "active")
-          .map((m) => legacyToneForColor(m.color) ?? "sand"),
-        attendeeEmails: [],
+        participantIds: draft.memberIds,
         scope: draft.recurringEventId ? draft.scope : "this",
       };
       const res = await fetch(
@@ -397,7 +390,7 @@ export function CalendarScreen() {
                         tone={tone}
                         multi={multi}
                         style={{ height: 30, cursor: "pointer" }}
-                        onClick={() => setSheet(toDraft(e, members))}
+                        onClick={() => setSheet(toDraft(e))}
                       />
                     );
                   })}
@@ -488,7 +481,7 @@ export function CalendarScreen() {
                           name: p.name,
                           tone: chipTone(p),
                         }))}
-                        onClick={() => setSheet(toDraft(e, members))}
+                        onClick={() => setSheet(toDraft(e))}
                         style={{ height: "100%", minHeight: 0 }}
                       />
                     </div>
@@ -506,7 +499,7 @@ export function CalendarScreen() {
       {sheet ? (
         <EventSheet
           draft={sheet}
-          members={activeMembers(members)}
+          members={members}
           busy={busy}
           onChange={setSheet}
           onClose={() => setSheet(null)}

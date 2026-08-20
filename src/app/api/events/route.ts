@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { isMemberTone } from "@/lib/calendar";
+import { presentationTonesFor } from "@/lib/calendar";
 import { isUnauthorized, requireTrustedDisplay } from "@/lib/display-auth";
 import { AuthError, insertEvent, listEvents } from "@/lib/google";
+import { normalizeParticipantIds } from "@/lib/participants";
 import { readHousehold } from "@/lib/settings";
 
 export async function GET(request: NextRequest) {
@@ -39,17 +40,17 @@ export async function POST(request: Request) {
     allDay: boolean;
     startMs: number;
     endMs: number;
-    tones?: string[];
-    attendeeEmails?: string[];
+    participantIds?: string[];
   };
+  const participantIds = normalizeParticipantIds(body.participantIds ?? []);
   try {
     const event = await insertEvent(s.calendarId, {
       title: body.title,
       allDay: body.allDay,
       startMs: body.startMs,
       endMs: body.endMs,
-      tones: (body.tones ?? []).filter(isMemberTone),
-      attendeeEmails: body.attendeeEmails ?? [],
+      participantIds,
+      presentationTones: presentationTonesFor(s.members, participantIds),
     });
     return NextResponse.json({ event });
   } catch (e) {

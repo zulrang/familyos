@@ -1,11 +1,11 @@
 import { AuthError } from "./auth-error.ts";
+import { colorIdForTones, googleDateTime, TONES_PROP } from "./calendar";
 import {
-  colorIdForTones,
-  googleDateTime,
-  isMemberTone,
-  TONES_PROP,
-  tonesFromGoogle,
-} from "./calendar";
+  normalizeParticipantIds,
+  PARTICIPANTS_PROP,
+  parseParticipantIds,
+  serializeParticipantIds,
+} from "./participants";
 import {
   establishProviderConnection,
   patchProvider,
@@ -188,8 +188,7 @@ function toCalEvent(g: GEvent): CalEvent | null {
   const start = parseGDate(g.start);
   const end = parseGDate(g.end);
   if (!start || !end) return null;
-  const emails = (g.attendees ?? []).map((a) => a.email ?? "").filter(Boolean);
-  const stored = g.extendedProperties?.private?.[TONES_PROP];
+  const stored = g.extendedProperties?.private?.[PARTICIPANTS_PROP];
   const original = parseGDate(g.originalStartTime);
   return {
     id: g.id,
@@ -197,11 +196,10 @@ function toCalEvent(g: GEvent): CalEvent | null {
     allDay: start.allDay,
     startMs: start.ms,
     endMs: end.ms,
-    tones: tonesFromGoogle({
-      colorId: g.colorId,
-      stored: stored === undefined || stored === null ? undefined : stored,
-    }),
-    attendeeEmails: [...new Set(emails.map((e) => e.toLowerCase()))],
+    // Identity from private IDs only — never colorId or attendees.
+    participantIds: parseParticipantIds(
+      stored === undefined || stored === null ? undefined : stored,
+    ),
     recurringEventId: g.recurringEventId,
     originalStartMs: original?.ms,
   };
@@ -245,8 +243,9 @@ export type EventWrite = {
   allDay: boolean;
   startMs: number;
   endMs: number;
-  tones: MemberTone[];
-  attendeeEmails: string[];
+  participantIds: string[];
+  /** Google colorId only — never Event Participant identity. */
+  presentationTones?: MemberTone[];
 };
 
 function eventTimeZone(g: GEvent): string {
@@ -262,8 +261,8 @@ function gBody(
   mode: "insert" | "update",
   timeZone?: string,
 ): Record<string, unknown> {
-  const tones = [...new Set(w.tones.filter(isMemberTone))];
-  const attendees = w.attendeeEmails.map((email) => ({ email }));
+  const participantIds = normalizeParticipantIds(w.participantIds);
+  const tones = w.presentationTones ?? [];
   let start: GDate;
   let end: GDate;
   if (w.allDay) {
@@ -281,16 +280,18 @@ function gBody(
     summary: w.title,
     start,
     end,
-    attendees,
   };
   const colorId = colorIdForTones(tones);
   if (colorId) body.colorId = colorId;
   else if (mode === "update") body.colorId = null;
-  // ponytail: Google 400s on null private props ("Required"); "" clears a prior multi list.
-  if (tones.length > 1) {
-    body.extendedProperties = { private: { [TONES_PROP]: tones.join(",") } };
-  } else if (mode === "update") {
-    body.extendedProperties = { private: { [TONES_PROP]: "" } };
+  // ponytail: Google 400s on null private props ("Required"); "" clears prior lists.
+  // Also wipe legacy familyosTones so tone-as-identity can't linger beside IDs.
+  const privateProps: Record<string, string> = {
+    [PARTICIPANTS_PROP]: serializeParticipantIds(participantIds),
+  };
+  if (mode === "update") privateProps[TONES_PROP] = "";
+  if (participantIds.length > 0 || mode === "update") {
+    body.extendedProperties = { private: privateProps };
   }
   return body;
 }
