@@ -29,6 +29,7 @@ await writeHousehold({
   ],
   calendarId: "secret-cal@group.calendar.google.com",
   calendarTimeZone: "America/New_York",
+  listIds: [],
   configVersion: 1,
 });
 await writeProvider({

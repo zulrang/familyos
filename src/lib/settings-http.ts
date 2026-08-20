@@ -17,6 +17,7 @@ function publicSettings(
     familyName: s.familyName,
     members: s.members,
     calendarId: s.calendarId,
+    listIds: s.listIds,
     signedIn,
     googleConfigured: googleConfigured(),
     uiScale,
@@ -49,6 +50,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
     familyName?: string;
     members?: Member[];
     calendarId?: string | null;
+    listIds?: unknown;
     uiScale?: unknown;
     expectedVersion?: unknown;
   };
@@ -56,7 +58,8 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
   const touchesHousehold =
     body.familyName !== undefined ||
     body.members !== undefined ||
-    body.calendarId !== undefined;
+    body.calendarId !== undefined ||
+    body.listIds !== undefined;
 
   let uiScale = display.uiScale;
   const provider = await readProvider();
@@ -82,6 +85,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
       members: body.members,
       calendarId,
       calendarTimeZone,
+      listIds: body.listIds,
     });
     if (!result.ok) {
       return Response.json(

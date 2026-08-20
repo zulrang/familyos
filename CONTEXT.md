@@ -74,10 +74,16 @@ The Household-level Google authorization used to access Calendar and Tasks.
 It is separate from Household Member identity.
 _Avoid_: Member login, FamilyOS account
 
+**Household Configuration**:
+The shared, versioned settings of one Household — family name, members,
+Household Calendar, and selected Household Lists.
+_Avoid_: Kiosk settings, device preferences
+
 **Household List**:
-A Google tasklist explicitly selected for display in FamilyOS. Unselected
-Google tasklists are not Household Lists.
-_Avoid_: Task panel
+A Google tasklist explicitly selected in Household Configuration for display
+in FamilyOS. Its identity is the provider tasklist ID. Unselected Google
+tasklists are not Household Lists.
+_Avoid_: Task panel, selected tasklist
 
 **List Item**:
 A checkable entry in a Household List.

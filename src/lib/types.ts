@@ -37,10 +37,15 @@ export function parseUiScale(value: unknown, fallback: UiScale = 1): UiScale {
   return UI_SCALES.includes(value as UiScale) ? (value as UiScale) : fallback;
 }
 
+/** Provider tasklist ID selected as a Household List. */
+export type HouseholdListId = string;
+
 export type PublicSettings = {
   familyName: string;
   members: Member[];
   calendarId: string | null;
+  /** Ordered Household List IDs (zero or more). */
+  listIds: HouseholdListId[];
   signedIn: boolean;
   googleConfigured: boolean;
   uiScale: UiScale;
@@ -54,14 +59,22 @@ export type GoogleCalendar = {
   timeZone?: string;
 };
 
+/** Provider tasklist available for Household List selection (Settings picker). */
+export type GoogleTasklist = {
+  id: string;
+  title: string;
+};
+
+/** List Item on the wire. */
 export type TaskItem = {
   id: string;
   title: string;
   done: boolean;
 };
 
+/** Household List panel payload (selected tasklist + its List Items). */
 export type TaskList = {
-  id: string;
+  id: HouseholdListId;
   title: string;
   items: TaskItem[];
 };
