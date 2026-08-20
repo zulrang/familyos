@@ -28,6 +28,7 @@ import type {
 } from "./types";
 
 const SCOPES = [
+  "openid",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
   "https://www.googleapis.com/auth/tasks",

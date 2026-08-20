@@ -40,15 +40,32 @@ function normalize(raw: Partial<ProviderConnection>): ProviderConnection {
   };
 }
 
+/** Drop OAuth secrets from pre-split kiosk.json so logout/migrate cannot revive them. */
+async function scrubLegacyCredentials(): Promise<void> {
+  try {
+    const raw = await readFile(legacyFile(), "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!("tokens" in parsed) && !("oauthState" in parsed)) return;
+    const { tokens: _tokens, oauthState: _oauth, ...rest } = parsed;
+    await writeFile(legacyFile(), `${JSON.stringify(rest, null, 2)}\n`);
+  } catch {
+    /* no legacy file */
+  }
+}
+
 async function migrateFromLegacy(): Promise<ProviderConnection | null> {
   try {
     const raw = await readFile(legacyFile(), "utf8");
     const parsed = JSON.parse(raw) as Partial<ProviderConnection>;
-    return normalize({
+    const migrated = normalize({
       tokens: parsed.tokens ?? null,
       oauthState: parsed.oauthState ?? null,
       providerConnectionId: null,
     });
+    if (parsed.tokens != null || parsed.oauthState != null) {
+      await scrubLegacyCredentials();
+    }
+    return migrated;
   } catch {
     return null;
   }
@@ -95,11 +112,13 @@ export async function establishProviderConnection(
     providerConnectionId: accountId,
   };
   await writeProvider(next);
+  await scrubLegacyCredentials();
   return next;
 }
 
 export async function clearProviderConnection(): Promise<ProviderConnection> {
   const next: ProviderConnection = { ...EMPTY };
   await writeProvider(next);
+  await scrubLegacyCredentials();
   return next;
 }
