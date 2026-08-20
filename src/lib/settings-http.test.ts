@@ -7,68 +7,94 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
+import { afterAll, beforeAll, describe, test } from "vitest";
 
-test("settings http", async () => {
-  const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-settings-"));
-  process.env.FAMILYOS_DATA_DIR = dataRoot;
+describe("Household Configuration HTTP", () => {
+  let dataRoot: string;
+  let writeHousehold: typeof import("./settings.ts").writeHousehold;
+  let readHousehold: typeof import("./settings.ts").readHousehold;
+  let writeProvider: typeof import("./provider.ts").writeProvider;
+  let emitStartupPairingCode: typeof import("./pairing.ts").emitStartupPairingCode;
+  let createPairingCode: typeof import("./pairing.ts").createPairingCode;
+  let DISPLAY_COOKIE: typeof import("./pairing.ts").DISPLAY_COOKIE;
+  let handlePair: typeof import("./pairing-http.ts").handlePair;
+  let handleGetSettings: typeof import("./settings-http.ts").handleGetSettings;
+  let handlePatchSettings: typeof import("./settings-http.ts").handlePatchSettings;
 
-  const { writeHousehold, readHousehold } = await import("./settings.ts");
-  const { writeProvider } = await import("./provider.ts");
-  const { emitStartupPairingCode, DISPLAY_COOKIE, createPairingCode } =
-    await import("./pairing.ts");
-  const { handlePair } = await import("./pairing-http.ts");
-  const { handleGetSettings, handlePatchSettings } = await import(
-    "./settings-http.ts"
-  );
+  let first: { cookie: string; displayId: string };
+  let second: { cookie: string; displayId: string };
 
-  await mkdir(dataRoot, { recursive: true });
-  await writeHousehold({
-    familyName: "ScaleHousehold",
-    members: [],
-    calendarId: null,
-    calendarTimeZone: null,
-    listIds: [],
-    configVersion: 1,
-  });
-  await writeProvider({
-    tokens: {
-      access_token: "secret-access",
-      refresh_token: "secret-refresh",
-      expiry: Date.now() + 60_000,
-    },
-    oauthState: "secret-oauth-state",
-    providerConnectionId: "conn-secret",
-  });
+  beforeAll(async () => {
+    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-settings-"));
+    process.env.FAMILYOS_DATA_DIR = dataRoot;
 
-  function cookieFrom(res: Response): string | null {
-    const raw = res.headers.getSetCookie?.() ?? [];
-    if (raw.length) {
-      const line = raw.find((c) => c.startsWith(`${DISPLAY_COOKIE}=`));
-      return line?.split(";")[0] ?? null;
+    ({ writeHousehold, readHousehold } = await import("./settings.ts"));
+    ({ writeProvider } = await import("./provider.ts"));
+    ({ emitStartupPairingCode, DISPLAY_COOKIE, createPairingCode } =
+      await import("./pairing.ts"));
+    ({ handlePair } = await import("./pairing-http.ts"));
+    ({ handleGetSettings, handlePatchSettings } = await import(
+      "./settings-http.ts"
+    ));
+
+    await mkdir(dataRoot, { recursive: true });
+    await writeHousehold({
+      familyName: "ScaleHousehold",
+      members: [],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      configVersion: 1,
+    });
+    await writeProvider({
+      tokens: {
+        access_token: "secret-access",
+        refresh_token: "secret-refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: "secret-oauth-state",
+      providerConnectionId: "conn-secret",
+    });
+
+    function cookieFrom(res: Response): string | null {
+      const raw = res.headers.getSetCookie?.() ?? [];
+      if (raw.length) {
+        const line = raw.find((c) => c.startsWith(`${DISPLAY_COOKIE}=`));
+        return line?.split(";")[0] ?? null;
+      }
+      const single = res.headers.get("set-cookie");
+      if (!single) return null;
+      return single.split(";")[0] ?? null;
     }
-    const single = res.headers.get("set-cookie");
-    if (!single) return null;
-    return single.split(";")[0] ?? null;
-  }
 
-  async function pairWithCode(code: string): Promise<{
-    cookie: string;
-    displayId: string;
-  }> {
-    const res = await handlePair(
-      new Request("http://familyos.test/api/pair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      }),
-    );
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { displayId: string };
-    const cookie = cookieFrom(res);
-    assert.ok(cookie);
-    return { cookie, displayId: body.displayId };
-  }
+    async function pairWithCode(code: string): Promise<{
+      cookie: string;
+      displayId: string;
+    }> {
+      const res = await handlePair(
+        new Request("http://familyos.test/api/pair", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code }),
+        }),
+      );
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { displayId: string };
+      const cookie = cookieFrom(res);
+      assert.ok(cookie);
+      return { cookie, displayId: body.displayId };
+    }
+
+    const startupCode = await emitStartupPairingCode();
+    assert.ok(startupCode);
+    first = await pairWithCode(startupCode);
+    const { code: secondCode } = await createPairingCode();
+    second = await pairWithCode(secondCode);
+  });
+
+  afterAll(async () => {
+    await rm(dataRoot, { recursive: true, force: true });
+  });
 
   async function getSettings(cookie: string) {
     const res = await handleGetSettings(
@@ -96,14 +122,7 @@ test("settings http", async () => {
     );
   }
 
-  const startupCode = await emitStartupPairingCode();
-  assert.ok(startupCode);
-  const first = await pairWithCode(startupCode);
-  const { code: secondCode } = await createPairingCode();
-  const second = await pairWithCode(secondCode);
-
-  // --- GET: configVersion present; secrets never leave the server ---
-  {
+  test("GET exposes Household Configuration version without provider secrets", async () => {
     const res = await handleGetSettings(
       new Request("http://familyos.test/api/settings", {
         headers: { cookie: first.cookie },
@@ -126,20 +145,18 @@ test("settings http", async () => {
     assert.equal(body.configVersion, 1);
     assert.equal(body.signedIn, true);
     assert.equal(body.familyName, "ScaleHousehold");
-  }
+  });
 
-  // --- New Displays default to 100% ---
-  {
+  test("new Trusted Displays default to 100% UI scale", async () => {
     const a = await getSettings(first.cookie);
     const b = await getSettings(second.cookie);
     assert.equal(a.uiScale, 1);
     assert.equal(b.uiScale, 1);
     assert.equal(a.familyName, "ScaleHousehold");
     assert.equal(a.configVersion, 1);
-  }
+  });
 
-  // --- Two Displays keep independent scales; reload (GET) preserves them ---
-  {
+  test("Trusted Displays keep independent UI scales across GET reloads", async () => {
     const setA = await patchSettings(first.cookie, { uiScale: 1.5 });
     assert.equal(setA.status, 200);
     assert.equal(((await setA.json()) as { uiScale: number }).uiScale, 1.5);
@@ -150,10 +167,9 @@ test("settings http", async () => {
 
     assert.equal((await getSettings(first.cookie)).uiScale, 1.5);
     assert.equal((await getSettings(second.cookie)).uiScale, 1.25);
-  }
+  });
 
-  // --- Changing scale does not mutate Household Configuration ---
-  {
+  test("changing UI scale does not mutate Household Configuration", async () => {
     const before = await readFile(
       path.join(dataRoot, "household.json"),
       "utf8",
@@ -169,10 +185,9 @@ test("settings http", async () => {
     assert.equal(after, before);
     assert.equal((await getSettings(second.cookie)).uiScale, 1.25);
     assert.equal((await getSettings(second.cookie)).configVersion, 1);
-  }
+  });
 
-  // --- Household field patch with matching expectedVersion bumps version ---
-  {
+  test("Household field patch with matching expectedVersion bumps configVersion", async () => {
     const res = await patchSettings(first.cookie, {
       familyName: "RenamedHousehold",
       expectedVersion: 1,
@@ -193,10 +208,9 @@ test("settings http", async () => {
     );
     assert.equal((await getSettings(second.cookie)).configVersion, 2);
     assert.equal((await readHousehold()).configVersion, 2);
-  }
+  });
 
-  // --- Stale expectedVersion rejects and returns current public state ---
-  {
+  test("stale expectedVersion rejects Household mutation and returns current public state", async () => {
     const before = await readHousehold();
     const res = await patchSettings(first.cookie, {
       familyName: "ShouldNotWin",
@@ -215,10 +229,9 @@ test("settings http", async () => {
     assert.equal(body.signedIn, true);
     assert.equal((await readHousehold()).familyName, before.familyName);
     assert.equal((await readHousehold()).configVersion, 2);
-  }
+  });
 
-  // --- Missing expectedVersion on household mutation is a conflict ---
-  {
+  test("missing expectedVersion on Household mutation is a conflict", async () => {
     const res = await patchSettings(first.cookie, {
       familyName: "AlsoShouldNotWin",
     });
@@ -230,10 +243,9 @@ test("settings http", async () => {
     assert.equal(body.familyName, "RenamedHousehold");
     assert.equal(body.configVersion, 2);
     assert.equal((await readHousehold()).familyName, "RenamedHousehold");
-  }
+  });
 
-  // --- Invalid scale values are normalized; previous scale kept as fallback ---
-  {
+  test("invalid UI scale values are normalized to the previous scale", async () => {
     const res = await patchSettings(first.cookie, { uiScale: 9 });
     assert.equal(res.status, 200);
     assert.equal(((await res.json()) as { uiScale: number }).uiScale, 1.1);
@@ -241,16 +253,14 @@ test("settings http", async () => {
     const badType = await patchSettings(second.cookie, { uiScale: "1.5" });
     assert.equal(badType.status, 200);
     assert.equal(((await badType.json()) as { uiScale: number }).uiScale, 1.25);
-  }
+  });
 
-  // --- GET exposes empty Household List selection ---
-  {
+  test("GET exposes empty Household List selection", async () => {
     const body = await getSettings(first.cookie);
     assert.deepEqual(body.listIds, []);
-  }
+  });
 
-  // --- Select and unselect Household Lists bumps configVersion ---
-  {
+  test("select and unselect Household Lists bumps configVersion", async () => {
     const cur = await getSettings(first.cookie);
     const select = await patchSettings(first.cookie, {
       listIds: ["tl-groceries", "tl-chores"],
@@ -276,10 +286,9 @@ test("settings http", async () => {
     assert.deepEqual(after.listIds, ["tl-groceries"]);
     assert.equal(after.configVersion, selected.configVersion + 1);
     assert.deepEqual((await readHousehold()).listIds, ["tl-groceries"]);
-  }
+  });
 
-  // --- Stale listIds mutation rejects and returns current selection ---
-  {
+  test("stale listIds mutation rejects and returns current selection", async () => {
     const before = await readHousehold();
     const res = await patchSettings(first.cookie, {
       listIds: ["tl-should-not-win"],
@@ -293,10 +302,9 @@ test("settings http", async () => {
     assert.deepEqual(body.listIds, before.listIds);
     assert.equal(body.configVersion, before.configVersion);
     assert.deepEqual((await readHousehold()).listIds, before.listIds);
-  }
+  });
 
-  // --- Duplicate / blank listIds are normalized ---
-  {
+  test("duplicate and blank listIds are normalized", async () => {
     const cur = await readHousehold();
     const res = await patchSettings(first.cookie, {
       listIds: ["tl-a", "tl-a", "", "  ", "tl-b"],
@@ -305,7 +313,5 @@ test("settings http", async () => {
     assert.equal(res.status, 200);
     const body = (await res.json()) as { listIds: string[] };
     assert.deepEqual(body.listIds, ["tl-a", "tl-b"]);
-  }
-
-  await rm(dataRoot, { recursive: true, force: true });
+  });
 });

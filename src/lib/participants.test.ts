@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, test } from "vitest";
 import {
   isHouseholdEvent,
   normalizeParticipantIds,
@@ -13,32 +13,38 @@ import {
   serializeParticipantIds,
 } from "./participants.ts";
 
-test("participants", () => {
-  assert.equal(PARTICIPANTS_PROP, "familyosParticipants");
+describe("Event Participants", () => {
+  test("stores IDs under the FamilyOS private property key", () => {
+    assert.equal(PARTICIPANTS_PROP, "familyosParticipants");
+  });
 
-  // --- Missing / empty → Household Event ---
-  assert.deepEqual(parseParticipantIds(undefined), []);
-  assert.deepEqual(parseParticipantIds(null), []);
-  assert.deepEqual(parseParticipantIds(""), []);
-  assert.equal(isHouseholdEvent([]), true);
+  test("missing or empty IDs are a Household Event", () => {
+    assert.deepEqual(parseParticipantIds(undefined), []);
+    assert.deepEqual(parseParticipantIds(null), []);
+    assert.deepEqual(parseParticipantIds(""), []);
+    assert.equal(isHouseholdEvent([]), true);
+  });
 
-  // --- Round-trip create/edit payload ---
-  assert.deepEqual(parseParticipantIds("dad,mom"), ["dad", "mom"]);
-  assert.equal(serializeParticipantIds(["dad", "mom"]), "dad,mom");
-  assert.deepEqual(
-    parseParticipantIds(serializeParticipantIds(["ellie", "harper"])),
-    ["ellie", "harper"],
-  );
-  assert.equal(isHouseholdEvent(["dad"]), false);
+  test("round-trips create and edit participant payloads", () => {
+    assert.deepEqual(parseParticipantIds("dad,mom"), ["dad", "mom"]);
+    assert.equal(serializeParticipantIds(["dad", "mom"]), "dad,mom");
+    assert.deepEqual(
+      parseParticipantIds(serializeParticipantIds(["ellie", "harper"])),
+      ["ellie", "harper"],
+    );
+    assert.equal(isHouseholdEvent(["dad"]), false);
+  });
 
-  // --- Trim, skip blanks, de-dupe (first wins) ---
-  assert.deepEqual(parseParticipantIds(" dad , , mom ,dad "), ["dad", "mom"]);
-  assert.equal(serializeParticipantIds([" dad ", "dad", "", "mom"]), "dad,mom");
-  assert.deepEqual(normalizeParticipantIds([" dad ", "dad", "", "mom"]), [
-    "dad",
-    "mom",
-  ]);
+  test("trims blanks and de-dupes IDs with first-wins order", () => {
+    assert.deepEqual(parseParticipantIds(" dad , , mom ,dad "), ["dad", "mom"]);
+    assert.equal(serializeParticipantIds([" dad ", "dad", "", "mom"]), "dad,mom");
+    assert.deepEqual(normalizeParticipantIds([" dad ", "dad", "", "mom"]), [
+      "dad",
+      "mom",
+    ]);
+  });
 
-  // --- Clear prior IDs ---
-  assert.equal(serializeParticipantIds([]), "");
+  test("serializing an empty list clears prior IDs", () => {
+    assert.equal(serializeParticipantIds([]), "");
+  });
 });

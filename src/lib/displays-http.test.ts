@@ -7,21 +7,41 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
+import { afterAll, beforeAll, describe, test } from "vitest";
 
-test("displays http", async () => {
-  const dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-displays-"));
-  process.env.FAMILYOS_DATA_DIR = dataRoot;
+describe("Trusted Display HTTP", () => {
+  let dataRoot: string;
+  let DISPLAY_COOKIE: typeof import("./pairing.ts").DISPLAY_COOKIE;
+  let emitStartupPairingCode: typeof import("./pairing.ts").emitStartupPairingCode;
+  let handleListDisplays: typeof import("./displays-http.ts").handleListDisplays;
+  let handleCreatePairingCode: typeof import("./displays-http.ts").handleCreatePairingCode;
+  let handleRevokeDisplay: typeof import("./displays-http.ts").handleRevokeDisplay;
+  let handlePair: typeof import("./pairing-http.ts").handlePair;
+  let handleReady: typeof import("./pairing-http.ts").handleReady;
+  let requireTrustedDisplay: typeof import("./display-auth.ts").requireTrustedDisplay;
 
-  const { emitStartupPairingCode, DISPLAY_COOKIE } = await import(
-    "./pairing.ts"
-  );
-  const { handleListDisplays, handleCreatePairingCode, handleRevokeDisplay } =
-    await import("./displays-http.ts");
-  const { handlePair, handleReady } = await import("./pairing-http.ts");
-  const { requireTrustedDisplay } = await import("./display-auth.ts");
+  // ponytail: suite shares Display credentials across ordered cases (same
+  // narrative as the former single assert script). Ceiling: cases are not
+  // independently runnable; upgrade by pairing in each test or beforeEach.
+  let first: { cookie: string; displayId: string };
+  let second: { cookie: string; displayId: string };
 
-  await mkdir(dataRoot, { recursive: true });
+  beforeAll(async () => {
+    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-displays-"));
+    process.env.FAMILYOS_DATA_DIR = dataRoot;
+
+    ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import("./pairing.ts"));
+    ({ handleListDisplays, handleCreatePairingCode, handleRevokeDisplay } =
+      await import("./displays-http.ts"));
+    ({ handlePair, handleReady } = await import("./pairing-http.ts"));
+    ({ requireTrustedDisplay } = await import("./display-auth.ts"));
+
+    await mkdir(dataRoot, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(dataRoot, { recursive: true, force: true });
+  });
 
   function cookieFrom(res: Response): string | null {
     const raw = res.headers.getSetCookie?.() ?? [];
@@ -63,20 +83,18 @@ test("displays http", async () => {
     return ((await res.json()) as { code: string }).code;
   }
 
-  // --- Unpaired cannot list Displays ---
-  {
+  test("unpaired Displays cannot list Displays", async () => {
     const denied = await handleListDisplays(
       new Request("http://familyos.test/api/displays"),
     );
     assert.equal(denied.status, 401);
-  }
+  });
 
-  const startupCode = await emitStartupPairingCode();
-  assert.ok(startupCode);
-  const first = await pairWithCode(startupCode);
+  test("Trusted Display lists peers without credentials or secrets", async () => {
+    const startupCode = await emitStartupPairingCode();
+    assert.ok(startupCode);
+    first = await pairWithCode(startupCode);
 
-  // --- Trusted Display can list; no credentials or secrets ---
-  {
     const res = await handleListDisplays(
       new Request("http://familyos.test/api/displays", {
         headers: { cookie: first.cookie },
@@ -97,37 +115,35 @@ test("displays http", async () => {
     assert.equal(text.includes("Hash"), false);
     assert.equal(text.includes("token"), false);
     assert.equal(text.includes(first.cookie.split("=")[1] ?? "___"), false);
-  }
+  });
 
-  // --- Unpaired cannot mint a pairing code ---
-  {
+  test("unpaired Displays cannot mint a pairing code", async () => {
     const denied = await handleCreatePairingCode(
       new Request("http://familyos.test/api/displays/pairing-code", {
         method: "POST",
       }),
     );
     assert.equal(denied.status, 401);
-  }
+  });
 
-  // --- Trusted Display mints a short-lived code; expires and cannot be reused ---
-  const minted = await handleCreatePairingCode(
-    new Request("http://familyos.test/api/displays/pairing-code", {
-      method: "POST",
-      headers: { cookie: first.cookie },
-    }),
-  );
-  assert.equal(minted.status, 200);
-  const { code, expiresAt } = (await minted.json()) as {
-    code: string;
-    expiresAt: number;
-  };
-  assert.match(code, /^[A-Z2-9]{6}$/);
-  assert.ok(expiresAt > Date.now());
-  assert.ok(expiresAt <= Date.now() + 10 * 60 * 1000 + 1000);
+  test("Trusted Display mints a short-lived code that expires and cannot be reused", async () => {
+    const minted = await handleCreatePairingCode(
+      new Request("http://familyos.test/api/displays/pairing-code", {
+        method: "POST",
+        headers: { cookie: first.cookie },
+      }),
+    );
+    assert.equal(minted.status, 200);
+    const { code, expiresAt } = (await minted.json()) as {
+      code: string;
+      expiresAt: number;
+    };
+    assert.match(code, /^[A-Z2-9]{6}$/);
+    assert.ok(expiresAt > Date.now());
+    assert.ok(expiresAt <= Date.now() + 10 * 60 * 1000 + 1000);
 
-  const second = await pairWithCode(code);
+    second = await pairWithCode(code);
 
-  {
     const reuse = await handlePair(
       new Request("http://familyos.test/api/pair", {
         method: "POST",
@@ -137,12 +153,9 @@ test("displays http", async () => {
     );
     assert.equal(reuse.status, 403);
     assert.equal(((await reuse.json()) as { error: string }).error, "reused");
-  }
 
-  // Equal authority: second Display can also mint.
-  const fromSecondCode = await mintCode(second.cookie);
+    const fromSecondCode = await mintCode(second.cookie);
 
-  {
     const file = path.join(dataRoot, "displays.json");
     const store = JSON.parse(await readFile(file, "utf8")) as {
       pendingCode: {
@@ -170,22 +183,19 @@ test("displays http", async () => {
       ((await expired.json()) as { error: string }).error,
       "expired",
     );
-  }
+  });
 
-  // --- Unpaired cannot revoke ---
-  {
+  test("unpaired Displays cannot revoke", async () => {
     const denied = await handleRevokeDisplay(
       new Request("http://familyos.test/api/displays/x", { method: "DELETE" }),
       first.displayId,
     );
     assert.equal(denied.status, 401);
-  }
+  });
 
-  // Pair a third Display whose credential we will revoke
-  const third = await pairWithCode(await mintCode(first.cookie));
+  test("revocation immediately rejects the revoked credential", async () => {
+    const third = await pairWithCode(await mintCode(first.cookie));
 
-  // --- Revocation immediately rejects the credential ---
-  {
     const revoked = await handleRevokeDisplay(
       new Request(`http://familyos.test/api/displays/${third.displayId}`, {
         method: "DELETE",
@@ -223,10 +233,9 @@ test("displays http", async () => {
       false,
     );
     assert.equal(JSON.stringify(afterBody).includes("credential"), false);
-  }
+  });
 
-  // --- Equal authority: second Display can revoke the first ---
-  {
+  test("any Trusted Display can revoke another", async () => {
     const revoked = await handleRevokeDisplay(
       new Request(`http://familyos.test/api/displays/${first.displayId}`, {
         method: "DELETE",
@@ -243,7 +252,5 @@ test("displays http", async () => {
     );
     assert.ok(denied instanceof Response);
     assert.equal(denied.status, 401);
-  }
-
-  await rm(dataRoot, { recursive: true, force: true });
+  });
 });
