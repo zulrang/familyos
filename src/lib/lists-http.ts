@@ -1,41 +1,18 @@
 import { isUnauthorized, requireTrustedDisplay } from "./display-auth.ts";
 import { listsError } from "./lists-error.ts";
+import type { ListsGateway } from "./lists-gateway.ts";
 import { isHouseholdList, readHousehold, updateHousehold } from "./settings.ts";
-import type { TaskItem, TaskList } from "./types.ts";
 
-export type ListsGateway = {
-  listSelected: (listIds: string[]) => Promise<TaskList[]>;
-  createList: (title: string) => Promise<TaskList>;
-  renameList: (
-    listId: string,
-    title: string,
-  ) => Promise<{ id: string; title: string }>;
-  addItem: (listId: string, title: string) => Promise<TaskItem>;
-  patchItem: (
-    listId: string,
-    itemId: string,
-    patch: { title?: string; done?: boolean },
-  ) => Promise<TaskItem>;
-  clearCompleted: (listId: string) => Promise<void>;
-  deleteItem: (listId: string, itemId: string) => Promise<void>;
-};
+export type { ListsGateway };
 
 function notSelected(): Response {
   return Response.json({ error: "not a Household List" }, { status: 404 });
 }
 
-// ponytail: lazy default so Node self-checks can inject a fake gateway without loading Google.
+// ponytail: lazy default so tests can inject a Fake without loading Google.
 async function defaultGateway(): Promise<ListsGateway> {
-  const tasks = await import("./tasks.ts");
-  return {
-    listSelected: tasks.listSelectedListsWithItems,
-    createList: tasks.insertTaskList,
-    renameList: tasks.patchTaskList,
-    addItem: tasks.insertTask,
-    patchItem: tasks.patchTask,
-    clearCompleted: tasks.clearCompleted,
-    deleteItem: tasks.deleteTask,
-  };
+  const { googleListsGateway } = await import("./lists-gateway.ts");
+  return googleListsGateway();
 }
 
 async function resolveGateway(gateway?: ListsGateway): Promise<ListsGateway> {
