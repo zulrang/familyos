@@ -89,20 +89,42 @@ export function SettingsScreen() {
 
   async function save() {
     setError(null);
-    const res = await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        familyName,
-        members,
-        calendarId: calendarId || null,
-        uiScale,
-      }),
-    });
-    if (!res.ok) {
-      setError("Could not save.");
-      return;
+    const householdDirty =
+      !settings ||
+      familyName !== settings.familyName ||
+      (calendarId || null) !== settings.calendarId ||
+      JSON.stringify(members) !== JSON.stringify(settings.members);
+    const scaleDirty = !settings || uiScale !== settings.uiScale;
+
+    if (householdDirty) {
+      const householdRes = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          familyName,
+          members,
+          calendarId: calendarId || null,
+        }),
+      });
+      if (!householdRes.ok) {
+        setError("Could not save.");
+        return;
+      }
     }
+
+    if (scaleDirty) {
+      // Scale is Display-local — never bundle it into Household Configuration writes.
+      const scaleRes = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uiScale }),
+      });
+      if (!scaleRes.ok) {
+        setError("Could not save display size.");
+        return;
+      }
+    }
+
     setSaved(true);
     setTimeout(() => setSaved(false), 1600);
     document.documentElement.style.zoom = String(uiScale);

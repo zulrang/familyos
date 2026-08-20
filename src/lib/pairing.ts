@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "./data-path.ts";
+import { parseUiScale, type UiScale } from "./types.ts";
 
 export const DISPLAY_COOKIE = "fos_display";
 export const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;
@@ -10,10 +11,22 @@ export type TrustedDisplay = {
   id: string;
   createdAt: number;
   revokedAt: number | null;
+  uiScale: UiScale;
 };
 
-type StoredDisplay = TrustedDisplay & {
+/** Public list row — scale is per-session, not shared roster data. */
+export type DisplaySummary = {
+  id: string;
+  createdAt: number;
+  revokedAt: number | null;
+};
+
+type StoredDisplay = {
+  id: string;
+  createdAt: number;
+  revokedAt: number | null;
   credentialHash: string;
+  uiScale: UiScale;
 };
 
 type PendingCode = {
@@ -31,13 +44,37 @@ function storePath(): string {
   return path.join(dataDir(), "displays.json");
 }
 
+function normalizeDisplay(
+  row: Partial<StoredDisplay> & { id: string },
+): StoredDisplay {
+  return {
+    id: row.id,
+    createdAt: typeof row.createdAt === "number" ? row.createdAt : 0,
+    revokedAt: row.revokedAt ?? null,
+    credentialHash:
+      typeof row.credentialHash === "string" ? row.credentialHash : "",
+    uiScale: parseUiScale(row.uiScale),
+  };
+}
+
+function isDisplayRow(
+  d: unknown,
+): d is Partial<StoredDisplay> & { id: string } {
+  return Boolean(
+    d &&
+      typeof d === "object" &&
+      typeof (d as { id?: unknown }).id === "string",
+  );
+}
+
 async function readStore(): Promise<PairingStore> {
   try {
     const raw = await readFile(storePath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<PairingStore>;
+    const rows = Array.isArray(parsed.displays) ? parsed.displays : [];
     return {
       pendingCode: parsed.pendingCode ?? null,
-      displays: Array.isArray(parsed.displays) ? parsed.displays : [],
+      displays: rows.filter(isDisplayRow).map(normalizeDisplay),
     };
   } catch {
     return { pendingCode: null, displays: [] };
@@ -97,15 +134,28 @@ export async function resolveTrustedDisplay(
     id: row.id,
     createdAt: row.createdAt,
     revokedAt: row.revokedAt,
+    uiScale: row.uiScale,
   };
 }
 
 /** Public Display records — never include credential material. */
-export async function listTrustedDisplays(): Promise<TrustedDisplay[]> {
+export async function listTrustedDisplays(): Promise<DisplaySummary[]> {
   const store = await readStore();
   return store.displays
     .filter((d) => d.revokedAt == null)
     .map(({ id, createdAt, revokedAt }) => ({ id, createdAt, revokedAt }));
+}
+
+export async function setDisplayUiScale(
+  displayId: string,
+  uiScale: UiScale,
+): Promise<boolean> {
+  const store = await readStore();
+  const row = store.displays.find((d) => d.id === displayId);
+  if (!row || row.revokedAt != null) return false;
+  row.uiScale = uiScale;
+  await writeStore(store);
+  return true;
 }
 
 /** Emit one short-lived pairing code when no Trusted Display exists yet. */
@@ -174,6 +224,7 @@ export async function pairWithCode(
     credentialHash: hashCredential(token),
     createdAt: now,
     revokedAt: null,
+    uiScale: 1,
   };
   pending.consumedAt = now;
   store.pendingCode = pending;
@@ -183,7 +234,12 @@ export async function pairWithCode(
   return {
     ok: true,
     token,
-    display: { id, createdAt: display.createdAt, revokedAt: null },
+    display: {
+      id,
+      createdAt: display.createdAt,
+      revokedAt: null,
+      uiScale: display.uiScale,
+    },
   };
 }
 

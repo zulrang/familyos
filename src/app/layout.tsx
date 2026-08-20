@@ -5,7 +5,6 @@ import { NavRail } from "@/components/nav/NavRail";
 import { DisplayTrustWatch } from "@/components/pairing/DisplayTrustWatch";
 import { PairingScreen } from "@/components/pairing/PairingScreen";
 import { resolveTrustedDisplay } from "@/lib/pairing";
-import { readSettings } from "@/lib/settings";
 import "./globals.css";
 
 const newsreader = Newsreader({
@@ -53,7 +52,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     );
   }
 
-  const { uiScale } = await readSettings();
+  const { uiScale } = display;
   return (
     <html
       lang="en"
