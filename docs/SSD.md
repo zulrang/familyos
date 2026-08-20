@@ -143,9 +143,8 @@ peer-to-peer Display synchronization.
 
 **Canonical contracts**
 - Domain language: `CONTEXT.md`
-- Visual spec: Calendar and Lists components in `src/` plus design-skill tokens
-  and `.d.ts` contracts.
 - Product scope: `docs/requirements.md`
+- Decision records: `docs/adr/`
 - Wall device: `docs/kiosk.md`
 - UI components/tokens: `.cursor/skills/familyos-design/` (`.d.ts` + `tokens/`); production copies live in `src/`
 - Event shape: Google Calendar API events. Wrap at the adapter boundary; do not let Google’s payload leak through every component.
@@ -198,15 +197,16 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Tasks, Rewards, Meals, Recipes, Photos, Sleep, or Settings beyond existing chrome.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
-- Tests run via Vitest: `pnpm test` (fast unit lane, `src/**/*.test.{ts,tsx}`), `pnpm test:watch`, and `pnpm test:contract` for Fake ↔ adapter parity suites (`*.contract.test.ts`). Component tests use `// @vitest-environment jsdom` and Testing Library. Don’t add a second runner.
+- Tests are Vitest only (`pnpm test` / `pnpm test:contract`). Component tests need `// @vitest-environment jsdom` because the default env is `node`. Don’t add a second runner.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
-- Current implementation gaps are not product decisions: APIs are
-  unauthenticated, UI scale is household-wide, Calendar renders seven days,
-  event identity uses tones/attendees, Lists exposes all tasklists, and caches
-  and optimistic concurrency are absent. Bring these into line with this SSD;
-  do not document the current behavior as canonical.
+- Current implementation gaps are not product decisions: Calendar still
+  renders seven days (target is Five-Day View with five-day paging),
+  Household Time Zone is not yet the calendar date authority, and the
+  account-bound last-known provider cache (outage read-only) plus Google
+  ETag rejection for stale event / List Item writes are absent. Bring these
+  into line with this SSD; do not document the current behavior as canonical.
 
 ## 8. Future Direction
 
