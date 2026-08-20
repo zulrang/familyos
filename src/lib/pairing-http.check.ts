@@ -34,7 +34,6 @@ await writeSettings({
     expiry: Date.now() + 60_000,
   },
   oauthState: null,
-  uiScale: 1,
 });
 
 function cookieFrom(res: Response): string | null {

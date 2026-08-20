@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "./data-path.ts";
-import { type Member, parseUiScale, type UiScale } from "./types.ts";
+import type { Member } from "./types.ts";
 
 export type Tokens = {
   access_token: string;
@@ -16,7 +16,6 @@ export type StoredSettings = {
   calendarTimeZone: string | null;
   tokens: Tokens | null;
   oauthState: string | null;
-  uiScale: UiScale;
 };
 
 function settingsFile(): string {
@@ -30,7 +29,6 @@ const EMPTY: StoredSettings = {
   calendarTimeZone: null,
   tokens: null,
   oauthState: null,
-  uiScale: 1,
 };
 
 export function googleConfigured(): boolean {
@@ -55,9 +53,12 @@ export function googleClient(): {
 export async function readSettings(): Promise<StoredSettings> {
   try {
     const raw = await readFile(settingsFile(), "utf8");
-    const next = { ...EMPTY, ...JSON.parse(raw) };
-    next.uiScale = parseUiScale(next.uiScale);
-    return next;
+    const parsed = JSON.parse(raw) as Partial<StoredSettings> & {
+      uiScale?: unknown;
+    };
+    // Drop legacy household-wide uiScale; scale lives on each Display (#4).
+    const { uiScale: _legacy, ...rest } = parsed;
+    return { ...EMPTY, ...rest };
   } catch {
     return { ...EMPTY };
   }
@@ -67,7 +68,11 @@ export async function readSettings(): Promise<StoredSettings> {
 export async function writeSettings(next: StoredSettings): Promise<void> {
   const file = settingsFile();
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
+  // ponytail: strip legacy uiScale if callers still pass it; delete once data dirs are clean.
+  const { uiScale: _legacy, ...clean } = next as StoredSettings & {
+    uiScale?: unknown;
+  };
+  await writeFile(file, `${JSON.stringify(clean, null, 2)}\n`);
 }
 
 export async function patchSettings(
