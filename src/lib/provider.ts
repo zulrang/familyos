@@ -57,15 +57,11 @@ async function migrateFromLegacy(): Promise<ProviderConnection | null> {
   try {
     const raw = await readFile(legacyFile(), "utf8");
     const parsed = JSON.parse(raw) as Partial<ProviderConnection>;
-    const migrated = normalize({
+    return normalize({
       tokens: parsed.tokens ?? null,
       oauthState: parsed.oauthState ?? null,
       providerConnectionId: null,
     });
-    if (parsed.tokens != null || parsed.oauthState != null) {
-      await scrubLegacyCredentials();
-    }
-    return migrated;
   } catch {
     return null;
   }
@@ -78,7 +74,10 @@ export async function readProvider(): Promise<ProviderConnection> {
   } catch {
     const legacy = await migrateFromLegacy();
     if (legacy) {
+      // Persist first, then scrub — same order as establish/clear so a failed
+      // write still leaves credentials recoverable from kiosk.json.
       await writeProvider(legacy);
+      await scrubLegacyCredentials();
       return legacy;
     }
     return { ...EMPTY };
