@@ -1,4 +1,5 @@
-import type { CalEvent, Member, MemberTone } from "./types";
+import { legacyToneForColor } from "./members.ts";
+import type { CalEvent, Member, MemberTone } from "./types.ts";
 
 /** Google Calendar event colorIds closest to our member pastels. Graphite (8) is multi. */
 export const TONE_COLOR_ID: Record<MemberTone, string> = {
@@ -205,21 +206,32 @@ export function layoutColumns<T extends { startMs: number; endMs: number }>(
 }
 
 export function peopleOf(members: Member[], event: CalEvent): Member[] {
+  // ponytail: tone bridge until #7 stores participant IDs; custom/retired colors won't match.
   const tones = new Set(event.tones);
-  const emails = new Set(event.attendeeEmails.map((e) => e.toLowerCase()));
-  return members.filter(
-    (m) =>
-      tones.has(m.tone) ||
-      (Boolean(m.email) && emails.has(m.email.toLowerCase())),
-  );
+  return members.filter((m) => {
+    if (m.status !== "active") return false;
+    const tone = legacyToneForColor(m.color);
+    return tone !== null && tones.has(tone);
+  });
 }
 
 export function eventTone(people: Member[]): {
   tone: MemberTone;
   multi: boolean;
 } {
-  if (people.length > 1) return { tone: people[0].tone, multi: true };
-  if (people.length === 1) return { tone: people[0].tone, multi: false };
+  const active = people.filter((p) => p.status === "active");
+  if (active.length > 1) {
+    return {
+      tone: legacyToneForColor(active[0].color) ?? "sand",
+      multi: true,
+    };
+  }
+  if (active.length === 1) {
+    return {
+      tone: legacyToneForColor(active[0].color) ?? "sand",
+      multi: false,
+    };
+  }
   return { tone: "sand", multi: false };
 }
 

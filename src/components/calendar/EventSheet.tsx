@@ -1,5 +1,6 @@
 "use client";
 
+import { legacyToneForColor } from "@/lib/members";
 import type { Member, SeriesScope } from "@/lib/types";
 import { Button } from "../core/Button";
 import { IconButton } from "../core/IconButton";
@@ -54,6 +55,7 @@ export function EventSheet({
     else if (who === "several") set({ who });
     else set({ who, memberIds: [who] });
   };
+  const assignable = members.filter((m) => m.status === "active");
   return (
     <div
       style={{
@@ -175,23 +177,23 @@ export function EventSheet({
             onChange={(e) => setWho(e.target.value)}
           >
             <option value="none">Nobody</option>
-            {members.map((m) => (
+            {assignable.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name || "Unnamed"}
               </option>
             ))}
-            {members.length >= 2 ? (
+            {assignable.length >= 2 ? (
               <option value="several">Several people</option>
             ) : null}
           </select>
         </label>
         {draft.who === "several" ? (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {members.map((m) => (
+            {assignable.map((m) => (
               <MemberChip
                 key={m.id}
                 name={m.name}
-                tone={m.tone}
+                tone={legacyToneForColor(m.color) ?? "sand"}
                 active={draft.memberIds.includes(m.id)}
                 onClick={() =>
                   set({

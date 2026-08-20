@@ -23,8 +23,8 @@ await writeHousehold({
     {
       id: "m_secret",
       name: "SecretMember",
-      email: "secret@example.com",
-      tone: "teal",
+      status: "active",
+      color: "#a9d8d2",
     },
   ],
   calendarId: "secret-cal@group.calendar.google.com",

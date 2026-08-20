@@ -82,8 +82,8 @@ assert.notEqual(byStart[0].col, byStart[30].col);
 assert.equal(byStart[100].cols, 1);
 
 const members: Member[] = [
-  { id: "dad", name: "Dad", email: "dad@x.test", tone: "teal" },
-  { id: "mom", name: "Mom", email: "mom@x.test", tone: "coral" },
+  { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+  { id: "mom", name: "Mom", status: "active", color: "#f9c0bc" },
 ];
 const ev: CalEvent = {
   id: "1",
@@ -92,7 +92,7 @@ const ev: CalEvent = {
   startMs: 0,
   endMs: 1,
   attendeeEmails: ["DAD@x.test", "mom@x.test"],
-  tones: [],
+  tones: ["teal", "coral"],
 };
 assert.deepEqual(
   peopleOf(members, ev).map((m) => m.id),
@@ -103,7 +103,13 @@ assert.deepEqual(eventTone(peopleOf(members, ev)), {
   multi: true,
 });
 assert.deepEqual(
-  eventTone(peopleOf(members, { ...ev, attendeeEmails: ["dad@x.test"] })),
+  eventTone(
+    peopleOf(members, {
+      ...ev,
+      tones: ["teal"],
+      attendeeEmails: ["dad@x.test"],
+    }),
+  ),
   {
     tone: "teal",
     multi: false,
@@ -112,8 +118,8 @@ assert.deepEqual(
 assert.deepEqual(eventTone([]), { tone: "sand", multi: false });
 
 const kids: Member[] = [
-  { id: "ellie", name: "Ellie", email: "", tone: "blush" },
-  { id: "harper", name: "Harper", email: "", tone: "lilac" },
+  { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+  { id: "harper", name: "Harper", status: "active", color: "#dccfea" },
 ];
 assert.deepEqual(
   peopleOf(kids, { ...ev, attendeeEmails: [], tones: ["blush"] }).map(
@@ -128,6 +134,13 @@ assert.deepEqual(
     tones: ["blush", "lilac"],
   }).map((m) => m.id),
   ["ellie", "harper"],
+);
+// Email alone no longer establishes participation
+assert.deepEqual(
+  peopleOf(members, { ...ev, tones: [], attendeeEmails: ["dad@x.test"] }).map(
+    (m) => m.id,
+  ),
+  [],
 );
 
 assert.equal(new Set(Object.values(TONE_COLOR_ID)).size, MEMBER_TONES.length);
