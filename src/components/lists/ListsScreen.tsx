@@ -193,10 +193,10 @@ export function ListsScreen() {
           body: JSON.stringify({ title, expectedVersion: configVersion }),
         });
         if (res.status === 409) {
+          await load();
           setError(
             "Lists changed on another Display. Reloaded — try adding again.",
           );
-          await load();
           return;
         }
         if (!res.ok) {
@@ -234,10 +234,10 @@ export function ListsScreen() {
         body: JSON.stringify({ expectedVersion: configVersion }),
       });
       if (res.status === 409) {
+        await load();
         setError(
           "Lists changed on another Display. Reloaded — try removing again.",
         );
-        await load();
         return;
       }
       if (!res.ok) {
