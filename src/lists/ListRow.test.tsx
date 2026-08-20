@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { ListRow } from "./ListRow";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function ControlledListRow({
   label,
@@ -56,6 +59,34 @@ describe("ListRow", () => {
       target: screen.getByRole("button", { name: "Milk" }),
     });
 
+    expect(edits).toEqual(["edit"]);
+    expect(screen.getByText("Milk")).toHaveStyle({
+      textDecoration: "none",
+    });
+  });
+
+  test("press-and-hold edits the item on release without checking it", async () => {
+    vi.useFakeTimers();
+    const edits: string[] = [];
+    function Harness() {
+      const [checked, setChecked] = useState(false);
+      return (
+        <ListRow
+          label="Milk"
+          checked={checked}
+          onToggle={setChecked}
+          onEdit={() => edits.push("edit")}
+        />
+      );
+    }
+    render(<Harness />);
+    const row = screen.getByRole("button", { name: "Milk" });
+
+    fireEvent.pointerDown(row, { clientX: 0, clientY: 0 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(edits).toEqual([]);
+
+    fireEvent.pointerUp(row);
     expect(edits).toEqual(["edit"]);
     expect(screen.getByText("Milk")).toHaveStyle({
       textDecoration: "none",

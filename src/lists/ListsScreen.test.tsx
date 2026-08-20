@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { TaskItem, TaskList } from "@/lists/types";
@@ -9,6 +15,7 @@ import { ListsScreen } from "./ListsScreen";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -137,6 +144,24 @@ describe("ListsScreen List Item lifecycle", () => {
       await screen.findByRole("button", { name: "Oat milk" }),
     ).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "List Item" })).toBeNull();
+  });
+
+  test("press-and-hold keeps the List Item sheet open", async () => {
+    await renderGrocery();
+    vi.useFakeTimers();
+    const row = screen.getByRole("button", { name: "Milk" });
+    fireEvent.pointerDown(row, { clientX: 0, clientY: 0 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(screen.queryByRole("heading", { name: "List Item" })).toBeNull();
+
+    fireEvent.pointerUp(row);
+    expect(
+      screen.getByRole("heading", { name: "List Item" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    expect(
+      screen.getByRole("heading", { name: "List Item" }),
+    ).toBeInTheDocument();
   });
 
   test("a List Item can be deleted from the wall", async () => {

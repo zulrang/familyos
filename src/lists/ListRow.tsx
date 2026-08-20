@@ -24,6 +24,7 @@ export function ListRow({
 }) {
   const hold = useRef<number | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
+  const held = useRef(false);
   const openedEdit = useRef(false);
 
   function clearHold() {
@@ -36,11 +37,11 @@ export function ListRow({
 
   function startHold(e: PointerEvent<HTMLButtonElement>) {
     openedEdit.current = false;
+    held.current = false;
     if (!onEdit) return;
     origin.current = { x: e.clientX, y: e.clientY };
     hold.current = window.setTimeout(() => {
-      openedEdit.current = true;
-      onEdit();
+      held.current = true;
       hold.current = null;
     }, HOLD_MS);
   }
@@ -49,7 +50,25 @@ export function ListRow({
     if (!origin.current) return;
     const dx = e.clientX - origin.current.x;
     const dy = e.clientY - origin.current.y;
-    if (dx * dx + dy * dy > HOLD_MOVE_PX * HOLD_MOVE_PX) clearHold();
+    if (dx * dx + dy * dy > HOLD_MOVE_PX * HOLD_MOVE_PX) {
+      held.current = false;
+      clearHold();
+    }
+  }
+
+  function releaseHold() {
+    const shouldEdit = held.current;
+    held.current = false;
+    clearHold();
+    if (shouldEdit) {
+      openedEdit.current = true;
+      onEdit?.();
+    }
+  }
+
+  function cancelHold() {
+    held.current = false;
+    clearHold();
   }
 
   return (
@@ -57,9 +76,9 @@ export function ListRow({
       type="button"
       onPointerDown={startHold}
       onPointerMove={moveHold}
-      onPointerUp={clearHold}
-      onPointerCancel={clearHold}
-      onPointerLeave={clearHold}
+      onPointerUp={releaseHold}
+      onPointerCancel={cancelHold}
+      onPointerLeave={cancelHold}
       onContextMenu={(e) => {
         if (!onEdit) return;
         e.preventDefault();

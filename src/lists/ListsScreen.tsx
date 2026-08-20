@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { splitLeadingEmoji } from "@/lists/list-text";
 import type { TaskItem, TaskList } from "@/lists/types";
 import type { PublicSettings } from "@/settings/types";
@@ -498,6 +498,7 @@ function ListSheet({
   onSave: () => void;
   onDelete?: () => void;
 }) {
+  const closeFromBackdrop = useRef(false);
   return (
     <div
       style={{
@@ -512,7 +513,14 @@ function ListSheet({
       <button
         type="button"
         aria-label="Close"
-        onClick={onClose}
+        onPointerDown={() => {
+          closeFromBackdrop.current = true;
+        }}
+        onClick={() => {
+          if (!closeFromBackdrop.current) return;
+          closeFromBackdrop.current = false;
+          onClose();
+        }}
         style={{
           position: "absolute",
           inset: 0,
