@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-import { colorIdForTones, googleDateTime, TONES_PROP } from "./calendar";
-=======
 import { AuthError } from "./auth-error.ts";
->>>>>>> origin/main
+import { colorIdForTones, googleDateTime, TONES_PROP } from "./calendar";
 import {
   normalizeParticipantIds,
   PARTICIPANTS_PROP,
