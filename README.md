@@ -1,12 +1,19 @@
 # FamilyOS
 
-A kitchen-wall kiosk for one household. v1 is a week calendar that reads and writes a Google Calendar you pick in Settings. Other nav items (Lists, Tasks, and the rest) are stubs.
+A locally hosted kitchen-wall command center for one household and multiple
+paired displays. v1 is a rolling five-day calendar, selected Google Tasks
+lists, Settings, and the fixed navigation rail; Tasks, Rewards, Meals, Recipes,
+Photos, and Sleep remain stubs.
 
-It is not a hosted app, not multi-tenant, and not a phone UI. You run Next.js on a computer you control; a wall panel is optional.
+It is not a cloud-hosted SaaS, not multi-tenant, and not a phone UI. You run one
+FamilyOS server on a computer you control; wall panels connect over the local
+network.
 
-![Week calendar](docs/calendar.png)
+![FamilyOS calendar](docs/calendar.png)
 
-`docs/calendar.png` is a 1920×1080 capture of the running app (`pnpm dev`, then screenshot `/`).
+`docs/calendar.png` is a 1920×1080 capture of the current seven-day
+implementation (`pnpm dev`, then screenshot `/`). The v1 target is the
+less-cramped Five-Day View defined in `docs/requirements.md`.
 
 ## Quick start
 
@@ -31,6 +38,8 @@ The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.
 
 ## Docs
 
+- [CONTEXT.md](CONTEXT.md) — canonical domain language
 - [INSTALL.md](INSTALL.md) — clone, Google OAuth, wall kiosk, touchscreen
+- [docs/SSD.md](docs/SSD.md) — architecture and current implementation gaps
 - [docs/kiosk.md](docs/kiosk.md) — FullPageOS Chromium, OSK extension, idle dim
 - [docs/requirements.md](docs/requirements.md) — v1 scope

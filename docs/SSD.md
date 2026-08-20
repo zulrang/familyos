@@ -2,28 +2,69 @@
 
 ## 1. Purpose and Scope
 
-FamilyOS is a **locally running kiosk** on a wall-mounted touch display. One household uses it as a shared command center: calendar first, then lists, chores, and other domestic surfaces. It is read from across a kitchen (6–10 feet), not held in a hand.
+FamilyOS is a **locally hosted household command center** for wall-mounted touch
+displays. One Server Installation on the local network represents one
+Household and serves one or more Displays. It is read from across a kitchen
+(6–10 feet), not held in a hand.
 
-It is **not** a multi-tenant SaaS product, a phone-first web app, or a per-person login system. Family members listed in Settings are **display identity** — colors, filters, avatars — not authentication principals. Companion phones/tablets are out of v1 scope.
+It is **not** a multi-tenant SaaS product, a phone-first web app, or a
+per-person login system. Household Members are people represented in household
+data, not authentication principals. Companion phones/tablets are out of v1
+scope, although any paired browser profile follows the same Trusted Display
+rules.
 
-v1: the week calendar in `src/components/calendar/`, the Lists screen in `src/components/lists/` (Google Tasks), the left nav rail, and Settings. Other rail destinations are stubs.
+v1: pairing, the Five-Day Calendar in `src/components/calendar/`, Lists in
+`src/components/lists/` (Google Tasks), Settings, and the fixed left rail.
+Other rail destinations are stubs.
 
 ## 2. Architectural Decisions
 
-**Decision: Shared kiosk, no FamilyOS accounts**
-- Choice: Anyone at the display can use it. Google sign-in exists only to authorize Calendar and Tasks API access.
-- Alternatives considered: Per-member FamilyOS logins; PIN unlock; cloud user directory.
-- Rationale: The device is a fridge whiteboard. Auth would fight the product. Google OAuth is a calendar-provider credential, not a household identity system.
+**Decision: One Household server, multiple paired Displays**
+- Choice: One Server Installation owns shared Household Configuration and
+  serves multiple Displays. A Display is a paired browser profile; only UI
+  scale varies by Display in v1.
+- Alternatives considered: One independent installation per kiosk; a
+  multi-household server; cloud synchronization between displays.
+- Rationale: Household data and provider connections must be consistent across
+  every wall display without introducing tenancy. See
+  `docs/adr/0001-one-household-server-with-paired-displays.md`.
+
+**Decision: Trusted Displays, no FamilyOS member accounts**
+- Choice: A new Display pairs with a short-lived code. The first code is
+  printed at server startup; any Trusted Display may later pair or revoke
+  another. All Trusted Displays have equal control.
+- Alternatives considered: Trusting every LAN client; per-member logins;
+  display roles; recurring PIN unlock.
+- Rationale: People should use the wall like a fridge whiteboard, but the
+  unauthenticated LAN must not become a write API for household data. Google
+  OAuth authorizes the provider connection, not a person using FamilyOS.
 
 **Decision: Google Calendar is the event source of truth**
-- Choice: Every calendar read and write goes to the Google Calendar configured in Settings. No local event table as the store.
+- Choice: Every calendar read and write goes to the one Google Calendar
+  selected in Settings. No local event table is the write store.
 - Alternatives considered: Local DB with later sync; CalDAV; iCloud; a FamilyOS-owned event schema that happens to import ICS.
-- Rationale: `docs/requirements.md` — “syncs all reads and writes to the family calendar that is configured under Settings” and “integrate with Google Calendar by simply logging into Google.” Local cache for offline/latency is allowed; it must not become a second source of truth.
+- Rationale: Google remains editable from existing household devices. A
+  server-side last-known cache supports stale read-only display, but never
+  accepts offline writes or becomes a second source of truth.
+
+**Decision: Stable IDs are the only Event Participant identity**
+- Choice: FamilyOS stores stable Household Member IDs in Google event private
+  properties. Zero IDs means Household Event. Event colors are presentation
+  only; FamilyOS does not infer identity from color or attendee email.
+- Alternatives considered: Treating Google `colorId` as member identity;
+  inferring members from attendees; backfilling inferred IDs.
+- Rationale: Colors are reusable and decorative. Making them identity corrupts
+  history when a member retires or a tone is reused. See
+  `docs/adr/0002-id-only-event-participants.md`.
 
 **Decision: Wall UI, light-only**
-- Choice: Fixed 74px icon rail, equal-width columns, dense type, member pastels. Newsreader + Nunito Sans from the design skill. No dark mode. The week calendar in `src/` is the visual reference.
+- Choice: Fixed 74px icon rail, equal-width columns, dense type, member
+  pastels. Newsreader + Nunito Sans from the design skill. No dark mode. The
+  rolling Five-Day View starts today, pages in five-day increments, and
+  contrasts weekend columns.
 - Alternatives considered: Responsive collapsing nav; create-next-app Geist + `prefers-color-scheme` dark; a redesigned “modern” calendar.
-- Rationale: The wall product is kitchen-distance, light-only, and already implemented. The scaffold’s marketing page, dark theme, and Geist fonts contradict it and should stay gone.
+- Rationale: The wall product is kitchen-distance and light-only. Five days
+  gives events enough width; seven columns were too cramped and busy.
 
 **Decision: Design skill is reference; `src/` is production**
 - Choice: Copy tokens and reimplement components under `src/` as App Router / React modules. Use the skill’s `.d.ts` files as the component contract.
@@ -31,14 +72,22 @@ v1: the week calendar in `src/components/calendar/`, the Lists screen in `src/co
 - Rationale: The kit is a static prototype (`window.DS`, Lucide via CDN). It will not run as Next modules. Editing the skill to “make the app work” also breaks the design-skill workflow.
 
 **Decision: Google Tasks is the list source of truth**
-- Choice: Every list read and write goes to Google Tasks. Each Lists panel is one tasklist; rows are tasks. No local list table as the store.
+- Choice: Every list read and write goes to Google Tasks. Each explicitly
+  selected Household List is one tasklist panel; rows are List Items. Removing
+  a panel unselects it rather than deleting provider data.
 - Alternatives considered: Device-local JSON next to `data/kiosk.json`; a FamilyOS-owned list schema.
-- Rationale: Same pattern as Calendar. Household members can edit from phones via the Google Tasks app; the kiosk polls. Local cache for latency is allowed; it must not become a second source of truth.
+- Rationale: Same authority pattern as Calendar. Explicit selection prevents a
+  connected account's personal tasklists from appearing on the wall.
 
 **Decision: v1 is Calendar + Lists + Settings + stubs**
-- Choice: 7-day family calendar, Lists (Google Tasks), and Settings (Google login + calendar picker). Tasks, Rewards, Meals, Recipes, Photos, Sleep render a “not yet implemented” screen.
+- Choice: Pairing, a rolling 5-day family calendar, selected Household Lists,
+  and Settings (Google login, source selection, members, Displays). Tasks,
+  Rewards, Meals, Recipes, Photos, and Sleep render a “not yet implemented”
+  screen.
 - Alternatives considered: Building Tasks (chores) in parallel; inventing Rewards/Meals UI with no production screen yet.
-- Rationale: Requirements started at the week calendar plus nav. Lists follows the same Google-as-store pattern. Invented screens become accidental product.
+- Rationale: Lists follows the same Google-as-store pattern. Invented screens
+  become accidental product. The future Tasks surface means assigned chores,
+  not Google Tasks list rows.
 
 **Decision: Keep the Next.js App Router scaffold**
 - Choice: Stay on this repo’s Next + React + Biome + pnpm setup. Next 16 APIs come from `node_modules/next/dist/docs/`, not training data.
@@ -59,52 +108,92 @@ v1: the week calendar in `src/components/calendar/`, the Lists screen in `src/co
 
 | Component | Owns | Must not own |
 |-----------|------|----------------|
-| App shell (`src/app` layout + rail) | Frame, routing between rail destinations, shared chrome | Google tokens, event fetch/write, member color assignment |
-| Calendar | Week view, member filter chips, create/edit/delete events via Google | OAuth, calendar picker, unimplemented product surfaces |
-| Lists | Multi-column checklists via Google Tasks | OAuth, chores/Tasks screen, unimplemented product surfaces |
-| Settings | Google login/logout, which calendar is “the family calendar”, household members and their colors | Event rendering, unimplemented product surfaces |
+| App shell (`src/app` layout + rail) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
+| Calendar | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
+| Lists | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
+| Settings | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, per-Display UI scale | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
 
-Household member list (names, pastels, avatars) is display configuration, not an auth directory. Each member owns a unique pastel; that color is stored on the Google Calendar event (`colorId`) and read back as that person, so children do not need email addresses. Optional email still maps to attendees. Do not fork a parallel people database.
+Household Members are shared server data, not an auth directory. There may be
+at most six active members, each representing one person with a unique active
+tone. Retiring a member keeps the identity record for existing events, removes
+it from new-event choices, and frees the tone for reuse. Member email is not a
+v1 field.
 
 ## 4. Data Flow and Contracts
 
 ```
-Touch display (Pi 5 + FullPageOS Chromium)
+Display(s) (paired browser profiles)
+  -> local Server Installation (Next.js App Router)
+       -> Household Configuration
+       -> paired Display records + per-Display UI scale
+       -> account-bound last-known provider cache
+       -> Google Calendar API  (events; one selected calendar)
+       -> Google Tasks API     (explicitly selected lists / items)
+
+Reference wall Display
+  -> FullPageOS Chromium
   -> kiosk/osk extension (text fields only)
-  -> Next.js App Router (src/app)
-       -> Google Calendar API  (events; selected calendar id)
-       -> Google Tasks API     (lists / items)
-       -> Device-local settings (OAuth tokens + selected calendar id)
 ```
 
-Straightforward request/response. No event bus, no multi-tenant routing.
+Straightforward request/response. No event bus, multi-tenant routing, or
+peer-to-peer Display synchronization.
 
 **Canonical contracts**
-- Visual spec: week calendar in `src/components/calendar/` plus design-skill tokens and `.d.ts` contracts. `docs/calendar.png` is a README capture of that UI, not a spec.
+- Domain language: `CONTEXT.md`
+- Visual spec: Calendar and Lists components in `src/` plus design-skill tokens
+  and `.d.ts` contracts.
 - Product scope: `docs/requirements.md`
 - Wall device: `docs/kiosk.md`
 - UI components/tokens: `.cursor/skills/familyos-design/` (`.d.ts` + `tokens/`); production copies live in `src/`
 - Event shape: Google Calendar API events. Wrap at the adapter boundary; do not let Google’s payload leak through every component.
 
-Settings persistence is device-local and gitignored (this repo already ignores `.env*`). Do not commit OAuth client secrets or refresh tokens.
+Household Configuration, pairing credentials, provider tokens, and caches are
+server-local and gitignored. Only UI scale is Display-specific in v1. Do not
+commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 ## 5. Security Model
 
-- **Authentication:** Google OAuth for Calendar and Tasks APIs. No FamilyOS user/password/session for household members.
-- **Authorization:** The signed-in Google account may see every calendar it can access; the kiosk operates on **one** selected calendar. Do not write to other calendars.
-- **Data:** Family names, events, and photos are household PII. They stay on the device and in Google Calendar. This is a local kiosk, not a public internet product — don’t add signup, sharing links, or a hosted multi-family backend.
-- **Secrets:** Google client credentials and tokens never land in git. `.env*` is already ignored.
+- **Display trust:** An unpaired client may load only readiness and pairing.
+  Household reads and writes require a revocable Display credential.
+- **People:** No FamilyOS user/password/session exists for Household Members.
+  All Trusted Displays have equal control.
+- **Provider authorization:** Google OAuth is one Household-level Provider
+  Connection for Calendar and Tasks. The connected Google account is not
+  automatically a Household Member.
+- **Provider scope:** The account may see many calendars and tasklists;
+  FamilyOS reads/writes one selected calendar and explicitly selected
+  tasklists only.
+- **Data:** Family names and provider data are household PII. They stay on the
+  local server and in Google. Do not add signup, sharing links, or a hosted
+  multi-family backend.
+- **Secrets:** Google client credentials, tokens, and Display credentials
+  never land in git.
 
-## 6. Known Traps
+## 6. Availability and Concurrency
 
-- `src/app` is still the create-next-app starter (Geist, dark mode, “Deploy Now”). Replace it; don’t build FamilyOS around that page.
+- One Household Time Zone controls dates and day boundaries on every Display.
+- The server owns one last-known Calendar/Lists cache per Google account and
+  source. Disconnected or unavailable provider data remains visible but
+  read-only.
+- A different Google account never inherits or blends another account's cache.
+- Google versions/ETags reject stale event and List Item writes. FamilyOS
+  reloads the newer provider state instead of silently overwriting it.
+- Household Configuration has a server-managed version and follows the same
+  reject-and-reload rule for concurrent Settings edits.
+- No offline write queue: Google remains the event/list write authority.
+
+## 7. Known Traps
+
 - Do not import from `.cursor/skills/`. The kit’s `window.DS` / unpkg Lucide pattern is invalid in this Next app.
 - Do not delete or “clean up” the `nextjs-agent-rules` block in `AGENTS.md`.
 - The rail is 74px and always visible. No hamburger, no collapsing sidebar, no mobile bottom tab bar.
-- Member pastels are identity: the same person uses the same tint on chips, events, and (later) tasks. Don’t pick colors for decoration. The pastel is written to Google Calendar as that event’s `colorId`; coloring an event in Google Calendar is how FamilyOS knows whose it is.
-- Google Calendar allows one `colorId` per event. Multi-person events use graphite plus a private `familyosTones` property so the kiosk can round-trip several members.
+- Stable Household Member IDs in Google private event properties are the only
+  Event Participant identity. Do not infer participants from `colorId`,
+  attendees, or email.
+- Member tones are presentation. They are unique only among active members and
+  may be reused after retirement.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Tasks, Rewards, Meals, Recipes, Photos, Sleep, or Settings beyond existing chrome.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
@@ -112,9 +201,13 @@ Settings persistence is device-local and gitignored (this repo already ignores `
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
+- Current implementation gaps are not product decisions: APIs are
+  unauthenticated, UI scale is household-wide, Calendar renders seven days,
+  event identity uses tones/attendees, Lists exposes all tasklists, and caches
+  and optimistic concurrency are absent. Bring these into line with this SSD;
+  do not document the current behavior as canonical.
 
-## 7. Future Direction
+## 8. Future Direction
 
 - Tasks (chores) should follow the design-skill kit (`ui_kits/wall-display`) after Lists is real. Keep shell/calendar/lists code from depending on those remaining feature modules.
-- A local cache for calendar events may appear for snappy kiosk UX; Google Calendar remains authoritative.
 - Companion surfaces (phone/tablet) are mentioned in the design skill and are not v1. Don’t add a responsive breakpoint architecture “for later.”

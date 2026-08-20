@@ -4,6 +4,7 @@
 
 ## Entry Points
 - App shell: `src/app/layout.tsx`
+- Domain language: `CONTEXT.md`
 - Product spec: `docs/requirements.md`
 - Calendar UI: `src/components/calendar/`
 - Lists UI: `src/components/lists/`
@@ -18,14 +19,16 @@
 - `pnpm-lock.yaml`
 
 ## Non-Obvious Rules
-- Wall kiosk for one household, not a phone-first or multi-tenant app. The 74px rail never collapses. Light-only — do not keep create-next-app dark mode or Geist fonts.
-- Calendar reads/writes go to the Google Calendar selected in Settings. Do not add a local event database as source of truth. Household members are identified by event color (`colorId`), not by requiring each person to have an email attendee.
-- Lists reads/writes go to Google Tasks (each panel is a tasklist). Do not add a local list database as source of truth.
+- One local Server Installation serves one Household and multiple paired Displays. It is not phone-first or multi-tenant. The 74px rail never collapses. Light-only — do not keep create-next-app dark mode or Geist fonts.
+- Calendar reads/writes go to the one Google Calendar selected in Settings. Do not add a local event database as source of truth. Stable Household Member IDs in Google private event properties are the only participant identity; colors are presentation only.
+- The Calendar is a rolling five-day view with five-day paging and visibly contrasted weekend columns.
+- Lists reads/writes go to explicitly selected Google tasklists. Do not expose every tasklist on the connected account or add a local list database as source of truth.
 - Unimplemented rail items (Tasks, Rewards, Meals, Recipes, Photos, Sleep) stay "not yet implemented" stubs until those screens are in scope.
 - Reimplement UI in `src/` from the design skill; the skill kit uses `window.DS` and CDN icons and will not run as Next modules.
 - Kiosk typing is the Chromium extension in `kiosk/osk/`, not a React overlay and not Onboard. Do not import `kiosk/` into the Next app.
 
 ## Key Documents
+- For canonical domain terms, see `CONTEXT.md`
 - For architecture and constraints, see `docs/SSD.md`
 - For visual language and component contracts, see `.cursor/skills/familyos-design/readme.md`
 - For v1 scope, see `docs/requirements.md`

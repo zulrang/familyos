@@ -1,8 +1,17 @@
 # Install FamilyOS
 
-FamilyOS is a **kitchen-wall kiosk**, not a hosted app. One household, one display, a week calendar that reads and writes a Google Calendar you pick in Settings, and lists that read and write Google Tasks. Other nav items (Tasks, and the rest) are stubs until those screens exist.
+FamilyOS is a **locally hosted kitchen-wall command center**, not a cloud
+service. One server represents one household and serves one or more displays.
+v1 uses a rolling five-day view of one selected Google Calendar and explicitly
+selected Google Tasks lists. Other nav items (Tasks, and the rest) are stubs
+until those screens exist.
 
 You can run it in a desktop browser while you set it up. The wall unit is optional.
+
+> The current implementation predates the v1 pairing gate described in
+> `docs/requirements.md`. Until that work lands, any client that can reach the
+> server on the LAN can call its household APIs; run it only on a trusted
+> network.
 
 ## What you need
 
@@ -24,7 +33,9 @@ pnpm install
 
 ## 2. Google OAuth
 
-FamilyOS has no accounts of its own. Google sign-in exists only so the kiosk can talk to Calendar and Tasks.
+FamilyOS has no per-person accounts. Google sign-in exists only so the
+Household's server can talk to Calendar and Tasks; it is separate from
+Household Member identity.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project (or reuse one).
 2. Enable **Google Calendar API** and **Google Tasks API**.
