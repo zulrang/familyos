@@ -1,6 +1,6 @@
 /**
- * HTTP acceptance seam for selected Household Lists (#8).
- * Uses shared Lists Fake — no live Google.
+ * HTTP acceptance seam for selected Household Lists (#8) and
+ * List Item mutations (#9). Uses shared Lists Fake — no live Google.
  */
 
 import assert from "node:assert/strict";
@@ -258,6 +258,52 @@ describe("Household Lists HTTP", () => {
     assert.equal(clear.status, 200);
     assert.equal(
       store.get("tl-selected")?.items.some((i) => i.id === added.item.id),
+      false,
+    );
+  });
+
+  test("rename and delete List Items on selected Household Lists", async () => {
+    const add = await handleAddItem(
+      req("http://familyos.test/api/lists/tl-also/items", {
+        method: "POST",
+        body: JSON.stringify({ title: "Cheese" }),
+      }),
+      "tl-also",
+      gateway,
+    );
+    assert.equal(add.status, 200);
+    const added = (await add.json()) as { item: TaskItem };
+
+    const rename = await handlePatchItem(
+      req(`http://familyos.test/api/lists/tl-also/items/${added.item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: "Cheddar" }),
+      }),
+      "tl-also",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(rename.status, 200);
+    assert.equal(
+      ((await rename.json()) as { item: TaskItem }).item.title,
+      "Cheddar",
+    );
+    assert.equal(
+      store.get("tl-also")?.items.find((i) => i.id === added.item.id)?.title,
+      "Cheddar",
+    );
+
+    const del = await handleDeleteItem(
+      req(`http://familyos.test/api/lists/tl-also/items/${added.item.id}`, {
+        method: "DELETE",
+      }),
+      "tl-also",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(del.status, 200);
+    assert.equal(
+      store.get("tl-also")?.items.some((i) => i.id === added.item.id),
       false,
     );
   });

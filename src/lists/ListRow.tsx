@@ -1,6 +1,9 @@
-import type { CSSProperties } from "react";
+import { type CSSProperties, type PointerEvent, useRef } from "react";
 import type { MemberTone } from "@/shared/member-tone";
 import { Checkbox } from "@/shared/ui/Checkbox";
+
+const HOLD_MS = 500;
+const HOLD_MOVE_PX = 8;
 
 export function ListRow({
   label,
@@ -8,6 +11,7 @@ export function ListRow({
   checked = false,
   tone = "sand",
   onToggle,
+  onEdit,
   style,
 }: {
   label: string;
@@ -15,12 +19,61 @@ export function ListRow({
   checked?: boolean;
   tone?: MemberTone;
   onToggle?: (next: boolean) => void;
+  onEdit?: () => void;
   style?: CSSProperties;
 }) {
+  const hold = useRef<number | null>(null);
+  const origin = useRef<{ x: number; y: number } | null>(null);
+  const openedEdit = useRef(false);
+
+  function clearHold() {
+    if (hold.current != null) {
+      window.clearTimeout(hold.current);
+      hold.current = null;
+    }
+    origin.current = null;
+  }
+
+  function startHold(e: PointerEvent<HTMLButtonElement>) {
+    openedEdit.current = false;
+    if (!onEdit) return;
+    origin.current = { x: e.clientX, y: e.clientY };
+    hold.current = window.setTimeout(() => {
+      openedEdit.current = true;
+      onEdit();
+      hold.current = null;
+    }, HOLD_MS);
+  }
+
+  function moveHold(e: PointerEvent<HTMLButtonElement>) {
+    if (!origin.current) return;
+    const dx = e.clientX - origin.current.x;
+    const dy = e.clientY - origin.current.y;
+    if (dx * dx + dy * dy > HOLD_MOVE_PX * HOLD_MOVE_PX) clearHold();
+  }
+
   return (
     <button
       type="button"
-      onClick={() => onToggle?.(!checked)}
+      onPointerDown={startHold}
+      onPointerMove={moveHold}
+      onPointerUp={clearHold}
+      onPointerCancel={clearHold}
+      onPointerLeave={clearHold}
+      onContextMenu={(e) => {
+        if (!onEdit) return;
+        e.preventDefault();
+        openedEdit.current = true;
+        clearHold();
+        onEdit();
+      }}
+      onClick={() => {
+        if (openedEdit.current) {
+          openedEdit.current = false;
+          return;
+        }
+        onToggle?.(!checked);
+      }}
       style={{
         display: "flex",
         alignItems: "center",
