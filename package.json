@@ -16,7 +16,8 @@
     "check:displays": "node --experimental-strip-types src/lib/displays-http.check.ts",
     "check:settings": "node --experimental-strip-types src/lib/settings-http.check.ts",
     "check:provider": "node --experimental-strip-types src/lib/provider.check.ts",
-    "check:members": "node --experimental-strip-types src/lib/members.check.ts"
+    "check:members": "node --experimental-strip-types src/lib/members.check.ts",
+    "check:participants": "node --experimental-strip-types src/lib/participants.check.ts"
   },
   "dependencies": {
     "next": "16.3.1",

@@ -56,6 +56,10 @@ export function EventSheet({
     else set({ who, memberIds: [who] });
   };
   const assignable = members.filter((m) => m.status === "active");
+  // Historical Event Participants (Retired) stay visible but not newly choosable.
+  const historical = members.filter(
+    (m) => m.status === "retired" && draft.memberIds.includes(m.id),
+  );
   return (
     <div
       style={{
@@ -182,6 +186,11 @@ export function EventSheet({
                 {m.name || "Unnamed"}
               </option>
             ))}
+            {historical.map((m) => (
+              <option key={m.id} value={m.id} disabled>
+                {m.name || "Unnamed"} (retired)
+              </option>
+            ))}
             {assignable.length >= 2 ? (
               <option value="several">Several people</option>
             ) : null}
@@ -203,6 +212,15 @@ export function EventSheet({
                   })
                 }
                 style={{ flex: "0 0 auto" }}
+              />
+            ))}
+            {historical.map((m) => (
+              <MemberChip
+                key={m.id}
+                name={`${m.name || "Unnamed"} (retired)`}
+                tone="sand"
+                active
+                style={{ flex: "0 0 auto", opacity: 0.85 }}
               />
             ))}
           </div>

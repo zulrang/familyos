@@ -18,13 +18,14 @@ import {
   nowLineTop,
   nowLineY,
   peopleOf,
+  presentationTonesFor,
   remainingDays,
   slotStart,
   startOfDay,
   statusEvent,
   TONE_COLOR_ID,
   toneFromColorId,
-  tonesFromGoogle,
+  visibleUnderMemberFilter,
   weekDays,
 } from "./calendar.ts";
 import { type CalEvent, MEMBER_TONES, type Member } from "./types.ts";
@@ -84,6 +85,7 @@ assert.equal(byStart[100].cols, 1);
 const members: Member[] = [
   { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
   { id: "mom", name: "Mom", status: "active", color: "#f9c0bc" },
+  { id: "ex", name: "Ex", status: "retired" },
 ];
 const ev: CalEvent = {
   id: "1",
@@ -91,8 +93,7 @@ const ev: CalEvent = {
   allDay: false,
   startMs: 0,
   endMs: 1,
-  attendeeEmails: ["DAD@x.test", "mom@x.test"],
-  tones: ["teal", "coral"],
+  participantIds: ["dad", "mom"],
 };
 assert.deepEqual(
   peopleOf(members, ev).map((m) => m.id),
@@ -103,44 +104,57 @@ assert.deepEqual(eventTone(peopleOf(members, ev)), {
   multi: true,
 });
 assert.deepEqual(
-  eventTone(
-    peopleOf(members, {
-      ...ev,
-      tones: ["teal"],
-      attendeeEmails: ["dad@x.test"],
-    }),
-  ),
-  {
-    tone: "teal",
-    multi: false,
-  },
+  eventTone(peopleOf(members, { ...ev, participantIds: ["dad"] })),
+  { tone: "teal", multi: false },
 );
 assert.deepEqual(eventTone([]), { tone: "sand", multi: false });
+
+// Retired Member retains historical identity
+assert.deepEqual(
+  peopleOf(members, { ...ev, participantIds: ["ex"] }).map((m) => m.id),
+  ["ex"],
+);
+assert.deepEqual(
+  eventTone(peopleOf(members, { ...ev, participantIds: ["ex", "dad"] })),
+  { tone: "teal", multi: true },
+);
+
+// Color / email never establish participation — only stored IDs
+assert.deepEqual(
+  peopleOf(members, { ...ev, participantIds: [] }).map((m) => m.id),
+  [],
+);
+
+// Household Event visible under every member filter
+const household: CalEvent = { ...ev, participantIds: [] };
+assert.equal(visibleUnderMemberFilter(household, members, { dad: true }), true);
+assert.equal(
+  visibleUnderMemberFilter(ev, members, { dad: true, mom: true }),
+  false,
+);
+assert.equal(
+  visibleUnderMemberFilter(ev, members, { dad: true, mom: false }),
+  true,
+);
+// Non-empty IDs that resolve to nobody are not Household Events
+assert.equal(
+  visibleUnderMemberFilter({ ...ev, participantIds: ["ghost"] }, members, {}),
+  false,
+);
 
 const kids: Member[] = [
   { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
   { id: "harper", name: "Harper", status: "active", color: "#dccfea" },
 ];
 assert.deepEqual(
-  peopleOf(kids, { ...ev, attendeeEmails: [], tones: ["blush"] }).map(
-    (m) => m.id,
-  ),
+  peopleOf(kids, { ...ev, participantIds: ["ellie"] }).map((m) => m.id),
   ["ellie"],
 );
 assert.deepEqual(
-  peopleOf(kids, {
-    ...ev,
-    attendeeEmails: [],
-    tones: ["blush", "lilac"],
-  }).map((m) => m.id),
-  ["ellie", "harper"],
-);
-// Email alone no longer establishes participation
-assert.deepEqual(
-  peopleOf(members, { ...ev, tones: [], attendeeEmails: ["dad@x.test"] }).map(
+  peopleOf(kids, { ...ev, participantIds: ["ellie", "harper"] }).map(
     (m) => m.id,
   ),
-  [],
+  ["ellie", "harper"],
 );
 
 assert.equal(new Set(Object.values(TONE_COLOR_ID)).size, MEMBER_TONES.length);
@@ -150,16 +164,11 @@ for (const t of MEMBER_TONES) {
 assert.equal(colorIdForTones(["blush"]), TONE_COLOR_ID.blush);
 assert.equal(colorIdForTones(["blush", "lilac"]), MULTI_COLOR_ID);
 assert.equal(colorIdForTones([]), null);
-assert.deepEqual(tonesFromGoogle({ colorId: TONE_COLOR_ID.blush }), ["blush"]);
-assert.deepEqual(tonesFromGoogle({ colorId: MULTI_COLOR_ID }), []);
-assert.deepEqual(
-  tonesFromGoogle({ colorId: TONE_COLOR_ID.blush, stored: "teal,coral" }),
-  ["teal", "coral"],
-);
-assert.deepEqual(
-  tonesFromGoogle({ colorId: TONE_COLOR_ID.blush, stored: "" }),
-  ["blush"],
-);
+assert.deepEqual(presentationTonesFor(members, ["dad", "mom"]), [
+  "teal",
+  "coral",
+]);
+assert.deepEqual(presentationTonesFor(members, ["ex"]), []);
 
 const trip: CalEvent = {
   id: "v",
@@ -167,8 +176,7 @@ const trip: CalEvent = {
   allDay: true,
   startMs: fromDateOnly("2026-08-01"),
   endMs: fromDateOnly("2026-09-18"),
-  attendeeEmails: [],
-  tones: [],
+  participantIds: [],
 };
 assert.equal(coversDay(trip, new Date(2026, 7, 19)), true);
 assert.equal(coversDay(trip, new Date(2026, 8, 18)), false);
