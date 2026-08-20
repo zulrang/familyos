@@ -86,21 +86,10 @@ Agent: before implementing, state the types the change needs, the constraints on
 
 The defaults bind components, hooks, and UI state. Most translate directly (#1, #3, #8, #9 as written; #6 and #10 via UI state modeling below). The ones that need frontend vocabulary:
 
-- **#4 in UI terms:** assert what the user can observe — rendered output, accessible roles/names, resulting DOM state after interaction (`@testing-library/react` queries). Never assert render counts, hook call order, which child components mounted, or internal state values. Spy exception example: an analytics or audit event emitted once.
+- **#4 in UI terms:** assert what the user can observe — rendered output, accessible roles/names, resulting DOM state after interaction (Testing Library queries). Never assert render counts, hook call order, which child components mounted, or internal state values. Spy exception example: an analytics or audit event emitted once.
 - **#7 in UI terms:** the pure core is plain functions — calendar slot/overlap layout math, five-day paging arithmetic, list sorting and grouping — importable and testable without React. Components and hooks are the shell: they call the core and own effects, subscriptions, and rendering. If logic can be tested without rendering, it does not belong inside a component.
 - **#6/#10 in UI terms:** model UI state as discriminated unions (`idle | loading | loaded | error`), not independent boolean flags whose illegal combinations (`loading && error`) each need a guard. Async data, form state, and pairing/selection flows are the main candidates. Think the states and transitions through before writing the component.
 - **Network doubles:** the Fake for a Google-backed port is an in-memory client (or MSW handlers) with real state, subject to the parity rule below.
-
-## Test infrastructure
-
-Vitest is the runner. Two lanes:
-
-| Script | Config | What runs |
-| --- | --- | --- |
-| `pnpm test` | `vitest.config.mts` | Fast lane: domain and Fake-backed HTTP tests under `src/**/*.test.{ts,tsx}` (excludes `*.contract.test.*`). Default environment is Node; component tests add `// @vitest-environment jsdom` and use `@testing-library/react`. |
-| `pnpm test:contract` | `vitest.contract.config.mts` | Parity lane for `src/**/*.contract.test.{ts,tsx}` (recorded Google responses or a manually-triggered live run). Empty until a Fake/adapter pair grows a shared suite. |
-
-`pnpm test:watch` is the unit lane in watch mode. Assert observable behavior (#4); `node:assert/strict` and Vitest `expect` are both fine.
 
 ## Test doubles
 
@@ -113,7 +102,7 @@ Taxonomy, narrowest to widest coupling:
 Rules:
 - Prefer a Fake and assert resulting state. Reach for a Stub when a Fake would be more code than the test needs (don't hand-roll a stateful Fake where one canned return suffices — that is itself a #9 violation).
 - One hand-written Fake per port, maintained beside the real adapter.
-- **Parity:** the Fake and the real adapter must pass one shared contract-test suite (`*.contract.test.ts` via `pnpm test:contract`). Run Fake cases that need no network in the unit lane too when that is the cheaper path; keep real-adapter / recorded-response runs in the contract lane so live deps do not gate every unit test. Without this, the Fake silently drifts from real behavior and tests pass against a fiction.
+- **Parity:** the Fake and the real adapter must pass one shared contract-test suite. Run it against the Fake in the fast unit lane and against the real adapter in a slower integration lane. Without this, the Fake silently drifts from real behavior and tests pass against a fiction. (Keep the real-adapter run out of the fast lane so the live dependency doesn't gate every unit test.)
   When the real adapter is an authenticated external SaaS (the Google Calendar and Tasks clients here), a live integration lane can't run in CI on every merge. Acceptable substitute: run the shared suite against recorded real responses, or against the live API in a manually-triggered/scheduled lane. Not acceptable: skipping the shared suite — a Fake with no parity check of any kind is the drift risk the rule exists to prevent.
 - High mock/patch count is a misplaced-seam signal (logic entangled with I/O, or a collaborator costly to construct). Fix the seam, not the test.
 
