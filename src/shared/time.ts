@@ -13,8 +13,10 @@ export function isIanaTimeZone(value: unknown): value is string {
   }
 }
 
+/** Server host zone when called on the Server Installation. */
 export function fallbackTimeZone(): string {
-  return "UTC";
+  const z = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return isIanaTimeZone(z) ? z : "UTC";
 }
 
 export function parseTimeZone(

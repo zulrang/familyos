@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {
   addZonedDays,
+  fallbackTimeZone,
   formatClock,
   isIanaTimeZone,
   msToZonedDate,
@@ -27,6 +28,11 @@ describe("Household Time Zone", () => {
     assert.equal(parseTimeZone("Not/A_Zone", "UTC"), "UTC");
     assert.equal(parseTimeZone("", "Pacific/Auckland"), "Pacific/Auckland");
     assert.equal(parseTimeZone(undefined, "UTC"), "UTC");
+    assert.equal(isIanaTimeZone(fallbackTimeZone()), true);
+    assert.equal(
+      fallbackTimeZone(),
+      parseTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone, "UTC"),
+    );
   });
 
   test("clocks the same instant in the given Household Time Zone", () => {

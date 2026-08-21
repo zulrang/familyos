@@ -13,7 +13,7 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import { MEMBER_TONES } from "@/shared/member-tone";
-import { fallbackTimeZone, isIanaTimeZone } from "@/shared/time";
+import { isIanaTimeZone } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { parseUiScale, UI_SCALES, type UiScale } from "@/shared/ui-scale";
 
@@ -70,7 +70,7 @@ export function SettingsScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   const [calendarId, setCalendarId] = useState("");
   const [listIds, setListIds] = useState<string[]>([]);
-  const [timeZone, setTimeZone] = useState(fallbackTimeZone);
+  const [timeZone, setTimeZone] = useState("");
   const [uiScale, setUiScale] = useState<UiScale>(1);
   const [displays, setDisplays] = useState<DisplayRecord[]>([]);
   const [currentDisplayId, setCurrentDisplayId] = useState<string | null>(null);
@@ -338,7 +338,8 @@ export function SettingsScreen() {
                       color: "var(--text-muted)",
                     }}
                   >
-                    Paired {formatPairedAt(d.createdAt, timeZone)}
+                    Paired{" "}
+                    {timeZone ? formatPairedAt(d.createdAt, timeZone) : ""}
                   </div>
                 </div>
                 <Button variant="ghost" onClick={() => void revoke(d.id)}>
@@ -553,30 +554,32 @@ export function SettingsScreen() {
             onChange={(e) => setFamilyName(e.target.value)}
           />
         </label>
-        <label style={{ display: "block", marginBottom: 16 }}>
-          <div
-            style={{
-              font: "var(--type-card-meta)",
-              color: "var(--text-muted)",
-              marginBottom: 6,
-            }}
-          >
-            Household Time Zone
-          </div>
-          <select
-            className="fos-input"
-            value={timeZone}
-            onChange={(e) => {
-              if (isIanaTimeZone(e.target.value)) setTimeZone(e.target.value);
-            }}
-          >
-            {HOUSEHOLD_TIME_ZONES.map((z) => (
-              <option key={z} value={z}>
-                {z}
-              </option>
-            ))}
-          </select>
-        </label>
+        {timeZone ? (
+          <label style={{ display: "block", marginBottom: 16 }}>
+            <div
+              style={{
+                font: "var(--type-card-meta)",
+                color: "var(--text-muted)",
+                marginBottom: 6,
+              }}
+            >
+              Household Time Zone
+            </div>
+            <select
+              className="fos-input"
+              value={timeZone}
+              onChange={(e) => {
+                if (isIanaTimeZone(e.target.value)) setTimeZone(e.target.value);
+              }}
+            >
+              {HOUSEHOLD_TIME_ZONES.map((z) => (
+                <option key={z} value={z}>
+                  {z}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <p
           style={{
             font: "var(--type-card-meta)",

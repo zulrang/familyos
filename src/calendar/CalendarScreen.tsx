@@ -37,7 +37,7 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import type { MemberTone } from "@/shared/member-tone";
-import { fallbackTimeZone, formatClock, zonedDayOfMonth } from "@/shared/time";
+import { formatClock, zonedDayOfMonth } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { AllDayBar } from "./AllDayBar";
@@ -112,11 +112,14 @@ export function CalendarScreen() {
   const gridRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
-  const timeZone = settings?.timeZone ?? fallbackTimeZone();
-  const days = weekDays(today, timeZone);
+  const timeZone = settings?.timeZone;
+  const days = timeZone ? weekDays(today, timeZone) : [];
   const members = settings?.members ?? [];
-  const from = days[0].toISOString();
-  const to = addDays(days[days.length - 1], 1, timeZone).toISOString();
+  const from = days[0]?.toISOString();
+  const to =
+    timeZone && days.length
+      ? addDays(days[days.length - 1], 1, timeZone).toISOString()
+      : undefined;
 
   async function load() {
     const sRes = await fetch("/api/settings");
@@ -127,8 +130,15 @@ export function CalendarScreen() {
       setEvents([]);
       return;
     }
+    const range = weekDays(today, s.timeZone);
+    const rangeFrom = range[0].toISOString();
+    const rangeTo = addDays(
+      range[range.length - 1],
+      1,
+      s.timeZone,
+    ).toISOString();
     const eRes = await fetch(
-      `/api/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `/api/events?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`,
     );
     if (await redirectIfPairingRequired(eRes)) return;
     if (eRes.status === 401) {
@@ -146,6 +156,7 @@ export function CalendarScreen() {
   }
 
   useEffect(() => {
+    if (!timeZone) return;
     const t = setInterval(() => {
       const n = new Date();
       setToday((p) => (isSameDay(p, n, timeZone) ? p : n));
@@ -159,6 +170,7 @@ export function CalendarScreen() {
   }, [from, to]);
 
   useEffect(() => {
+    if (!timeZone) return;
     const el = gridRef.current;
     if (!el) return;
     const base = mountGridScrollTop(savedGridScroll, new Date(), timeZone);
@@ -176,9 +188,10 @@ export function CalendarScreen() {
 
   const visible = (ev: CalEvent) => visibleUnderMemberFilter(ev, members, off);
 
-  const status = statusEvent(events, today, timeZone);
+  const status = timeZone ? statusEvent(events, today, timeZone) : null;
 
   async function save(draft: EventDraft) {
+    if (!timeZone) return;
     setBusy(true);
     try {
       const startMs = draft.allDay
@@ -271,7 +284,7 @@ export function CalendarScreen() {
     >
       <AppHeader
         title={settings?.familyName ?? "Family"}
-        time={<LiveClock timeZone={timeZone} />}
+        time={timeZone ? <LiveClock timeZone={timeZone} /> : null}
         actions={
           <>
             <Button
@@ -281,7 +294,9 @@ export function CalendarScreen() {
                   const headerH = headerRef.current?.offsetHeight ?? 0;
                   gridRef.current.scrollTop = Math.max(
                     0,
-                    nowLineTop(new Date(), timeZone) - HOUR_PX + headerH,
+                    timeZone
+                      ? nowLineTop(new Date(), timeZone) - HOUR_PX + headerH
+                      : 0,
                   );
                 }
               }}
@@ -310,9 +325,11 @@ export function CalendarScreen() {
               }}
             >
               {status.title}{" "}
-              <span style={{ color: "var(--text-muted)" }}>
-                {remainingDays(status, today, timeZone)} days
-              </span>
+              {timeZone ? (
+                <span style={{ color: "var(--text-muted)" }}>
+                  {remainingDays(status, today, timeZone)} days
+                </span>
+              ) : null}
             </span>
           ) : null}
           {members.map((p) => (
@@ -340,172 +357,175 @@ export function CalendarScreen() {
           {banner}
         </div>
       ) : null}
-      <div
-        ref={gridRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          borderTop: "1px solid var(--surface-grid-line)",
-          touchAction: "pan-y",
-          overscrollBehavior: "contain",
-        }}
-      >
+      {timeZone ? (
         <div
-          ref={headerRef}
+          ref={gridRef}
           style={{
-            display: "grid",
-            gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
-            position: "sticky",
-            top: 0,
-            zIndex: 3,
-            background: "var(--surface-screen)",
-          }}
-        >
-          <div />
-          {days.map((d) => (
-            <div
-              key={d.toISOString()}
-              style={{
-                minWidth: 0,
-                borderLeft: "1px solid var(--surface-grid-line)",
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <DayHeader
-                weekday={weekdayLabel(d, timeZone)}
-                date={zonedDayOfMonth(d, timeZone)}
-                today={isSameDay(d, today, timeZone)}
-              />
-              <div
-                style={{
-                  minHeight: 34,
-                  padding: "0 6px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
-                {events
-                  .filter(
-                    (e) => e.allDay && coversDay(e, d, timeZone) && visible(e),
-                  )
-                  .map((e) => {
-                    const people = peopleOf(members, e);
-                    const { tone, multi } = eventTone(people);
-                    return (
-                      <AllDayBar
-                        key={e.id}
-                        label={e.title}
-                        tone={tone}
-                        multi={multi}
-                        style={{ height: 30, cursor: "pointer" }}
-                        onClick={() => setSheet(toDraft(e, timeZone))}
-                      />
-                    );
-                  })}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
             borderTop: "1px solid var(--surface-grid-line)",
+            touchAction: "pan-y",
+            overscrollBehavior: "contain",
           }}
         >
-          <TimeGutter
-            hours={hours}
-            rowHeight={HOUR_PX}
-            width={76}
-            style={{ height: gh }}
-          />
-          {days.map((d) => {
-            const timed = layoutColumns(
-              events.filter((e) => timedOnDay(e, d, timeZone) && visible(e)),
-            );
-            const isToday = isSameDay(d, today, timeZone);
-            return (
+          <div
+            ref={headerRef}
+            style={{
+              display: "grid",
+              gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
+              position: "sticky",
+              top: 0,
+              zIndex: 3,
+              background: "var(--surface-screen)",
+            }}
+          >
+            <div />
+            {days.map((d) => (
               <div
-                key={`g-${d.toISOString()}`}
+                key={d.toISOString()}
                 style={{
                   minWidth: 0,
                   borderLeft: "1px solid var(--surface-grid-line)",
-                  position: "relative",
-                  height: gh,
-                  backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX}px)`,
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
-                <button
-                  type="button"
-                  className="fos-hit"
-                  aria-label={`Add event ${weekdayLabel(d, timeZone)}`}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                  }}
-                  onClick={(e) => {
-                    const start = slotStart(
-                      d,
-                      e.clientY - e.currentTarget.getBoundingClientRect().top,
-                      timeZone,
-                    );
-                    if (!start) return;
-                    const end = new Date(start.getTime() + 3600000);
-                    setSheet({
-                      ...createDraft(start, timeZone),
-                      date: msToDateInput(start.getTime(), timeZone),
-                      endDate: msToDateInput(start.getTime(), timeZone),
-                      startTime: msToTimeInput(start.getTime(), timeZone),
-                      endTime: msToTimeInput(end.getTime(), timeZone),
-                    });
-                  }}
+                <DayHeader
+                  weekday={weekdayLabel(d, timeZone)}
+                  date={zonedDayOfMonth(d, timeZone)}
+                  today={isSameDay(d, today, timeZone)}
                 />
-                {timed.map((e) => {
-                  const people = peopleOf(members, e);
-                  const { tone, multi } = eventTone(people);
-                  const h = heightPx(e.startMs, e.endMs);
-                  const w = `calc((100% - 12px) / ${e.cols})`;
-                  return (
-                    <div
-                      key={e.id}
-                      style={{
-                        position: "absolute",
-                        left: `calc(6px + ${e.col} * ${w})`,
-                        width: w,
-                        top: topPx(e.startMs, timeZone),
-                        height: h,
-                        zIndex: 2,
-                      }}
-                    >
-                      <EventCard
-                        title={e.title}
-                        time={formatTimeRange(e.startMs, e.endMs, timeZone)}
-                        tone={tone}
-                        multi={multi}
-                        height={h}
-                        people={people.map((p) => ({
-                          name: p.name,
-                          tone: chipTone(p),
-                        }))}
-                        onClick={() => setSheet(toDraft(e, timeZone))}
-                        style={{ height: "100%", minHeight: 0 }}
-                      />
-                    </div>
-                  );
-                })}
-                {isToday ? <NowLine timeZone={timeZone} /> : null}
+                <div
+                  style={{
+                    minHeight: 34,
+                    padding: "0 6px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                >
+                  {events
+                    .filter(
+                      (e) =>
+                        e.allDay && coversDay(e, d, timeZone) && visible(e),
+                    )
+                    .map((e) => {
+                      const people = peopleOf(members, e);
+                      const { tone, multi } = eventTone(people);
+                      return (
+                        <AllDayBar
+                          key={e.id}
+                          label={e.title}
+                          tone={tone}
+                          multi={multi}
+                          style={{ height: 30, cursor: "pointer" }}
+                          onClick={() => setSheet(toDraft(e, timeZone))}
+                        />
+                      );
+                    })}
+                </div>
               </div>
-            );
-          })}
+            ))}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
+              borderTop: "1px solid var(--surface-grid-line)",
+            }}
+          >
+            <TimeGutter
+              hours={hours}
+              rowHeight={HOUR_PX}
+              width={76}
+              style={{ height: gh }}
+            />
+            {days.map((d) => {
+              const timed = layoutColumns(
+                events.filter((e) => timedOnDay(e, d, timeZone) && visible(e)),
+              );
+              const isToday = isSameDay(d, today, timeZone);
+              return (
+                <div
+                  key={`g-${d.toISOString()}`}
+                  style={{
+                    minWidth: 0,
+                    borderLeft: "1px solid var(--surface-grid-line)",
+                    position: "relative",
+                    height: gh,
+                    backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX}px)`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="fos-hit"
+                    aria-label={`Add event ${weekdayLabel(d, timeZone)}`}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                    }}
+                    onClick={(e) => {
+                      const start = slotStart(
+                        d,
+                        e.clientY - e.currentTarget.getBoundingClientRect().top,
+                        timeZone,
+                      );
+                      if (!start) return;
+                      const end = new Date(start.getTime() + 3600000);
+                      setSheet({
+                        ...createDraft(start, timeZone),
+                        date: msToDateInput(start.getTime(), timeZone),
+                        endDate: msToDateInput(start.getTime(), timeZone),
+                        startTime: msToTimeInput(start.getTime(), timeZone),
+                        endTime: msToTimeInput(end.getTime(), timeZone),
+                      });
+                    }}
+                  />
+                  {timed.map((e) => {
+                    const people = peopleOf(members, e);
+                    const { tone, multi } = eventTone(people);
+                    const h = heightPx(e.startMs, e.endMs);
+                    const w = `calc((100% - 12px) / ${e.cols})`;
+                    return (
+                      <div
+                        key={e.id}
+                        style={{
+                          position: "absolute",
+                          left: `calc(6px + ${e.col} * ${w})`,
+                          width: w,
+                          top: topPx(e.startMs, timeZone),
+                          height: h,
+                          zIndex: 2,
+                        }}
+                      >
+                        <EventCard
+                          title={e.title}
+                          time={formatTimeRange(e.startMs, e.endMs, timeZone)}
+                          tone={tone}
+                          multi={multi}
+                          height={h}
+                          people={people.map((p) => ({
+                            name: p.name,
+                            tone: chipTone(p),
+                          }))}
+                          onClick={() => setSheet(toDraft(e, timeZone))}
+                          style={{ height: "100%", minHeight: 0 }}
+                        />
+                      </div>
+                    );
+                  })}
+                  {isToday ? <NowLine timeZone={timeZone} /> : null}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
-      {settings?.signedIn && settings.calendarId ? (
+      ) : null}
+      {settings?.signedIn && settings.calendarId && timeZone ? (
         <Fab onClick={() => setSheet(createDraft(new Date(), timeZone))} />
       ) : null}
       {sheet ? (

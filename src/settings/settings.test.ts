@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
-import { isIanaTimeZone } from "@/shared/time";
+import { fallbackTimeZone, isIanaTimeZone } from "@/shared/time";
 
 describe("Household Time Zone store", () => {
   let dataRoot: string;
@@ -50,6 +50,7 @@ describe("Household Time Zone store", () => {
       })}\n`,
     );
     const cfg = await readHousehold();
+    assert.equal(cfg.timeZone, fallbackTimeZone());
     assert.equal(isIanaTimeZone(cfg.timeZone), true);
   });
 

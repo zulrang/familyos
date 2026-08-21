@@ -113,15 +113,21 @@ async function migrateFromLegacy(): Promise<HouseholdConfig | null> {
 
 export async function readHousehold(): Promise<HouseholdConfig> {
   try {
-    const raw = await readFile(householdFile(), "utf8");
-    return normalize(JSON.parse(raw) as Partial<HouseholdConfig>);
+    const parsed = JSON.parse(
+      await readFile(householdFile(), "utf8"),
+    ) as Partial<HouseholdConfig>;
+    const cfg = normalize(parsed);
+    if (!isIanaTimeZone(parsed.timeZone)) await writeHousehold(cfg);
+    return cfg;
   } catch {
     const legacy = await migrateFromLegacy();
     if (legacy) {
       await writeHousehold(legacy);
       return legacy;
     }
-    return { ...EMPTY };
+    const empty = { ...EMPTY };
+    await writeHousehold(empty);
+    return empty;
   }
 }
 

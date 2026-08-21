@@ -7,7 +7,7 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import type { MemberTone } from "@/shared/member-tone";
-import { fallbackTimeZone, formatClock } from "@/shared/time";
+import { formatClock } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
@@ -334,8 +334,8 @@ export function ListsScreen() {
       }}
     >
       <AppHeader
-        title={headerDate(now, settings?.timeZone ?? fallbackTimeZone())}
-        time={<LiveClock timeZone={settings?.timeZone ?? fallbackTimeZone()} />}
+        title={settings ? headerDate(now, settings.timeZone) : ""}
+        time={settings ? <LiveClock timeZone={settings.timeZone} /> : null}
       />
       {banner ? (
         <div
