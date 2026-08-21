@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { splitLeadingEmoji } from "@/lists/list-text";
 import type { TaskItem, TaskList } from "@/lists/types";
 import type { PublicSettings } from "@/settings/types";
@@ -43,7 +43,14 @@ function LiveClock() {
 
 type Sheet =
   | { kind: "create"; title: string }
-  | { kind: "edit"; id: string; title: string; confirmDelete: boolean };
+  | { kind: "edit"; id: string; title: string; confirmDelete: boolean }
+  | {
+      kind: "edit-item";
+      listId: string;
+      itemId: string;
+      title: string;
+      confirmDelete: boolean;
+    };
 
 export function ListsScreen() {
   const [now, setNow] = useState(() => new Date());
@@ -114,21 +121,25 @@ export function ListsScreen() {
   async function toggle(listId: string, item: TaskItem) {
     const done = !item.done;
     patchItem(listId, item.id, { done });
-    const res = await fetch(
-      `/api/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(item.id)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ done }),
-      },
-    );
-    if (await redirectIfPairingRequired(res)) return;
-    if (res.status === 401) {
+    try {
+      const res = await fetch(
+        `/api/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ done }),
+        },
+      );
+      if (await redirectIfPairingRequired(res)) return;
+      if (res.status === 401) {
+        patchItem(listId, item.id, { done: item.done });
+        setNeedsReauth(true);
+        return;
+      }
+      if (!res.ok) patchItem(listId, item.id, { done: item.done });
+    } catch {
       patchItem(listId, item.id, { done: item.done });
-      setNeedsReauth(true);
-      return;
     }
-    if (!res.ok) patchItem(listId, item.id, { done: item.done });
   }
 
   async function addItem(listId: string) {
@@ -204,6 +215,24 @@ export function ListsScreen() {
         if (typeof data.configVersion === "number") {
           setConfigVersion(data.configVersion);
         }
+      } else if (sheet.kind === "edit-item") {
+        const res = await fetch(
+          `/api/lists/${encodeURIComponent(sheet.listId)}/items/${encodeURIComponent(sheet.itemId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title }),
+          },
+        );
+        if (await redirectIfPairingRequired(res)) return;
+        if (res.status === 401) {
+          setNeedsReauth(true);
+          return;
+        }
+        if (!res.ok) {
+          setError("Could not rename List Item.");
+          return;
+        }
       } else {
         const res = await fetch(`/api/lists/${encodeURIComponent(sheet.id)}`, {
           method: "PATCH",
@@ -217,6 +246,35 @@ export function ListsScreen() {
       }
       setSheet(null);
       await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeItem(listId: string, itemId: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`,
+        { method: "DELETE" },
+      );
+      if (await redirectIfPairingRequired(res)) return;
+      if (res.status === 401) {
+        setNeedsReauth(true);
+        return;
+      }
+      if (!res.ok) {
+        setError("Could not delete List Item.");
+        return;
+      }
+      setLists((ls) =>
+        ls.map((l) =>
+          l.id !== listId
+            ? l
+            : { ...l, items: l.items.filter((i) => i.id !== itemId) },
+        ),
+      );
+      setSheet(null);
     } finally {
       setBusy(false);
     }
@@ -382,6 +440,15 @@ export function ListsScreen() {
                       checked={item.done}
                       tone={tone}
                       onToggle={() => toggle(list.id, item)}
+                      onEdit={() =>
+                        setSheet({
+                          kind: "edit-item",
+                          listId: list.id,
+                          itemId: item.id,
+                          title: item.title,
+                          confirmDelete: false,
+                        })
+                      }
                     />
                   );
                 })}
@@ -404,7 +471,11 @@ export function ListsScreen() {
           onClose={() => setSheet(null)}
           onSave={saveSheet}
           onDelete={
-            sheet.kind === "edit" ? () => removeList(sheet.id) : undefined
+            sheet.kind === "edit"
+              ? () => removeList(sheet.id)
+              : sheet.kind === "edit-item"
+                ? () => removeItem(sheet.listId, sheet.itemId)
+                : undefined
           }
         />
       ) : null}
@@ -427,6 +498,7 @@ function ListSheet({
   onSave: () => void;
   onDelete?: () => void;
 }) {
+  const closeFromBackdrop = useRef(false);
   return (
     <div
       style={{
@@ -441,7 +513,14 @@ function ListSheet({
       <button
         type="button"
         aria-label="Close"
-        onClick={onClose}
+        onPointerDown={() => {
+          closeFromBackdrop.current = true;
+        }}
+        onClick={() => {
+          if (!closeFromBackdrop.current) return;
+          closeFromBackdrop.current = false;
+          onClose();
+        }}
         style={{
           position: "absolute",
           inset: 0,
@@ -466,7 +545,11 @@ function ListSheet({
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <h2 style={{ font: "var(--type-section)", flex: 1 }}>
-            {sheet.kind === "create" ? "New list" : "List"}
+            {sheet.kind === "create"
+              ? "New list"
+              : sheet.kind === "edit-item"
+                ? "List Item"
+                : "List"}
           </h2>
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
@@ -477,14 +560,16 @@ function ListSheet({
           onChange={(e) => onChange({ ...sheet, title: e.target.value })}
         />
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          {sheet.kind === "edit" && onDelete ? (
+          {sheet.kind !== "create" && onDelete ? (
             sheet.confirmDelete ? (
               <Button
                 disabled={busy}
                 onClick={onDelete}
                 style={{ marginRight: "auto" }}
               >
-                Remove from wall?
+                {sheet.kind === "edit-item"
+                  ? "Delete List Item?"
+                  : "Remove from wall?"}
               </Button>
             ) : (
               <Button
@@ -492,7 +577,7 @@ function ListSheet({
                 onClick={() => onChange({ ...sheet, confirmDelete: true })}
                 style={{ marginRight: "auto" }}
               >
-                Remove
+                {sheet.kind === "edit-item" ? "Delete" : "Remove"}
               </Button>
             )
           ) : null}
