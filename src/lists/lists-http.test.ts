@@ -60,6 +60,7 @@ describe("Household Lists HTTP", () => {
       calendarId: null,
       calendarTimeZone: null,
       listIds: ["tl-selected", "tl-also"],
+      timeZone: "America/New_York",
       configVersion: 1,
     });
     await writeProvider({

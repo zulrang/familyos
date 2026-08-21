@@ -10,6 +10,8 @@ export type PublicSettings = {
   calendarId: string | null;
   /** Ordered Household List IDs (zero or more). */
   listIds: HouseholdListId[];
+  /** IANA Household Time Zone. */
+  timeZone: string;
   signedIn: boolean;
   googleConfigured: boolean;
   uiScale: UiScale;

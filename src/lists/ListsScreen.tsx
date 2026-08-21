@@ -23,22 +23,23 @@ const LIST_TONES: MemberTone[] = [
   "coral",
 ];
 
-function headerDate(d: Date): string {
+function headerDate(d: Date, timeZone: string): string {
   return d.toLocaleDateString("en-US", {
+    timeZone,
     weekday: "short",
     month: "short",
     day: "numeric",
   });
 }
 
-function LiveClock() {
+function LiveClock({ timeZone }: { timeZone: string }) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 15000);
     return () => clearInterval(id);
   }, []);
-  return now ? formatClock(now) : null;
+  return now ? formatClock(now, timeZone) : null;
 }
 
 type Sheet =
@@ -332,7 +333,10 @@ export function ListsScreen() {
         position: "relative",
       }}
     >
-      <AppHeader title={headerDate(now)} time={<LiveClock />} />
+      <AppHeader
+        title={settings ? headerDate(now, settings.timeZone) : ""}
+        time={settings ? <LiveClock timeZone={settings.timeZone} /> : null}
+      />
       {banner ? (
         <div
           style={{

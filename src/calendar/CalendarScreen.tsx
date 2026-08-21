@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  addDays,
   coversDay,
   eventTone,
   formatTimeRange,
@@ -21,7 +22,6 @@ import {
   peopleOf,
   remainingDays,
   slotStart,
-  startOfDay,
   statusEvent,
   timedOnDay,
   topPx,
@@ -37,7 +37,7 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import type { MemberTone } from "@/shared/member-tone";
-import { formatClock } from "@/shared/time";
+import { formatClock, zonedDayOfMonth } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { AllDayBar } from "./AllDayBar";
@@ -53,16 +53,18 @@ function chipTone(m: Member): MemberTone {
   return legacyToneForColor(m.color) ?? "sand";
 }
 
-function toDraft(ev: CalEvent): EventDraft {
-  const endInclusive = ev.allDay ? ev.endMs - 86400000 : ev.endMs;
+function toDraft(ev: CalEvent, timeZone: string): EventDraft {
+  const endInclusive = ev.allDay
+    ? addDays(new Date(ev.endMs), -1, timeZone).getTime()
+    : ev.endMs;
   return {
     id: ev.id,
     title: ev.title,
     allDay: ev.allDay,
-    date: msToDateInput(ev.startMs),
-    endDate: msToDateInput(endInclusive),
-    startTime: msToTimeInput(ev.startMs),
-    endTime: msToTimeInput(ev.endMs),
+    date: msToDateInput(ev.startMs, timeZone),
+    endDate: msToDateInput(endInclusive, timeZone),
+    startTime: msToTimeInput(ev.startMs, timeZone),
+    endTime: msToTimeInput(ev.endMs, timeZone),
     // Round-trip stored IDs even if some no longer resolve on the roster.
     memberIds: [...ev.participantIds],
     who: whoFromIds(ev.participantIds),
@@ -71,29 +73,29 @@ function toDraft(ev: CalEvent): EventDraft {
   };
 }
 
-function createDraft(now: Date): EventDraft {
-  const n = nextHour(now);
+function createDraft(now: Date, timeZone: string): EventDraft {
+  const n = nextHour(now, timeZone);
   return {
     title: "",
     allDay: false,
-    date: msToDateInput(n.startMs),
-    endDate: msToDateInput(n.startMs),
-    startTime: msToTimeInput(n.startMs),
-    endTime: msToTimeInput(n.endMs),
+    date: msToDateInput(n.startMs, timeZone),
+    endDate: msToDateInput(n.startMs, timeZone),
+    startTime: msToTimeInput(n.startMs, timeZone),
+    endTime: msToTimeInput(n.endMs, timeZone),
     memberIds: [],
     who: "none",
     scope: "this",
   };
 }
 
-function LiveClock() {
+function LiveClock({ timeZone }: { timeZone: string }) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 15000);
     return () => clearInterval(id);
   }, []);
-  return now ? formatClock(now) : null;
+  return now ? formatClock(now, timeZone) : null;
 }
 
 let savedGridScroll: number | null = null;
@@ -110,12 +112,14 @@ export function CalendarScreen() {
   const gridRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
-  const days = weekDays(today);
+  const timeZone = settings?.timeZone;
+  const days = timeZone ? weekDays(today, timeZone) : [];
   const members = settings?.members ?? [];
-  const from = startOfDay(days[0]).toISOString();
-  const to = new Date(
-    startOfDay(days[days.length - 1]).getTime() + 86400000,
-  ).toISOString();
+  const from = days[0]?.toISOString();
+  const to =
+    timeZone && days.length
+      ? addDays(days[days.length - 1], 1, timeZone).toISOString()
+      : undefined;
 
   async function load() {
     const sRes = await fetch("/api/settings");
@@ -126,8 +130,15 @@ export function CalendarScreen() {
       setEvents([]);
       return;
     }
+    const range = weekDays(today, s.timeZone);
+    const rangeFrom = range[0].toISOString();
+    const rangeTo = addDays(
+      range[range.length - 1],
+      1,
+      s.timeZone,
+    ).toISOString();
     const eRes = await fetch(
-      `/api/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      `/api/events?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`,
     );
     if (await redirectIfPairingRequired(eRes)) return;
     if (eRes.status === 401) {
@@ -145,12 +156,13 @@ export function CalendarScreen() {
   }
 
   useEffect(() => {
+    if (!timeZone) return;
     const t = setInterval(() => {
       const n = new Date();
-      setToday((p) => (isSameDay(p, n) ? p : n));
+      setToday((p) => (isSameDay(p, n, timeZone) ? p : n));
     }, 60_000);
     return () => clearInterval(t);
-  }, []);
+  }, [timeZone]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible week bounds change
   useEffect(() => {
@@ -158,9 +170,10 @@ export function CalendarScreen() {
   }, [from, to]);
 
   useEffect(() => {
+    if (!timeZone) return;
     const el = gridRef.current;
     if (!el) return;
-    const base = mountGridScrollTop(savedGridScroll, new Date());
+    const base = mountGridScrollTop(savedGridScroll, new Date(), timeZone);
     const headerH = headerRef.current?.offsetHeight ?? 0;
     el.scrollTop = savedGridScroll == null && base > 0 ? base + headerH : base;
     const save = () => {
@@ -171,21 +184,26 @@ export function CalendarScreen() {
       save();
       el.removeEventListener("scroll", save);
     };
-  }, []);
+  }, [timeZone]);
 
   const visible = (ev: CalEvent) => visibleUnderMemberFilter(ev, members, off);
 
-  const status = statusEvent(events, today);
+  const status = timeZone ? statusEvent(events, today, timeZone) : null;
 
   async function save(draft: EventDraft) {
+    if (!timeZone) return;
     setBusy(true);
     try {
       const startMs = draft.allDay
-        ? fromDateOnly(draft.date)
-        : fromDateAndTime(draft.date, draft.startTime);
+        ? fromDateOnly(draft.date, timeZone)
+        : fromDateAndTime(draft.date, draft.startTime, timeZone);
       const endMs = draft.allDay
-        ? fromDateOnly(draft.endDate) + 86400000
-        : fromDateAndTime(draft.date, draft.endTime);
+        ? addDays(
+            new Date(fromDateOnly(draft.endDate, timeZone)),
+            1,
+            timeZone,
+          ).getTime()
+        : fromDateAndTime(draft.date, draft.endTime, timeZone);
       const body = {
         title: draft.title.trim() || "Busy",
         allDay: draft.allDay,
@@ -266,7 +284,7 @@ export function CalendarScreen() {
     >
       <AppHeader
         title={settings?.familyName ?? "Family"}
-        time={<LiveClock />}
+        time={timeZone ? <LiveClock timeZone={timeZone} /> : null}
         actions={
           <>
             <Button
@@ -276,7 +294,9 @@ export function CalendarScreen() {
                   const headerH = headerRef.current?.offsetHeight ?? 0;
                   gridRef.current.scrollTop = Math.max(
                     0,
-                    nowLineTop(new Date()) - HOUR_PX + headerH,
+                    timeZone
+                      ? nowLineTop(new Date(), timeZone) - HOUR_PX + headerH
+                      : 0,
                   );
                 }
               }}
@@ -305,9 +325,11 @@ export function CalendarScreen() {
               }}
             >
               {status.title}{" "}
-              <span style={{ color: "var(--text-muted)" }}>
-                {remainingDays(status, today)} days
-              </span>
+              {timeZone ? (
+                <span style={{ color: "var(--text-muted)" }}>
+                  {remainingDays(status, today, timeZone)} days
+                </span>
+              ) : null}
             </span>
           ) : null}
           {members.map((p) => (
@@ -335,170 +357,176 @@ export function CalendarScreen() {
           {banner}
         </div>
       ) : null}
-      <div
-        ref={gridRef}
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: "auto",
-          borderTop: "1px solid var(--surface-grid-line)",
-          touchAction: "pan-y",
-          overscrollBehavior: "contain",
-        }}
-      >
+      {timeZone ? (
         <div
-          ref={headerRef}
+          ref={gridRef}
           style={{
-            display: "grid",
-            gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
-            position: "sticky",
-            top: 0,
-            zIndex: 3,
-            background: "var(--surface-screen)",
-          }}
-        >
-          <div />
-          {days.map((d) => (
-            <div
-              key={d.toISOString()}
-              style={{
-                minWidth: 0,
-                borderLeft: "1px solid var(--surface-grid-line)",
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <DayHeader
-                weekday={weekdayLabel(d)}
-                date={d.getDate()}
-                today={isSameDay(d, today)}
-              />
-              <div
-                style={{
-                  minHeight: 34,
-                  padding: "0 6px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
-                {events
-                  .filter((e) => e.allDay && coversDay(e, d) && visible(e))
-                  .map((e) => {
-                    const people = peopleOf(members, e);
-                    const { tone, multi } = eventTone(people);
-                    return (
-                      <AllDayBar
-                        key={e.id}
-                        label={e.title}
-                        tone={tone}
-                        multi={multi}
-                        style={{ height: 30, cursor: "pointer" }}
-                        onClick={() => setSheet(toDraft(e))}
-                      />
-                    );
-                  })}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
             borderTop: "1px solid var(--surface-grid-line)",
+            touchAction: "pan-y",
+            overscrollBehavior: "contain",
           }}
         >
-          <TimeGutter
-            hours={hours}
-            rowHeight={HOUR_PX}
-            width={76}
-            style={{ height: gh }}
-          />
-          {days.map((d) => {
-            const timed = layoutColumns(
-              events.filter((e) => timedOnDay(e, d) && visible(e)),
-            );
-            const isToday = isSameDay(d, today);
-            return (
+          <div
+            ref={headerRef}
+            style={{
+              display: "grid",
+              gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
+              position: "sticky",
+              top: 0,
+              zIndex: 3,
+              background: "var(--surface-screen)",
+            }}
+          >
+            <div />
+            {days.map((d) => (
               <div
-                key={`g-${d.toISOString()}`}
+                key={d.toISOString()}
                 style={{
                   minWidth: 0,
                   borderLeft: "1px solid var(--surface-grid-line)",
-                  position: "relative",
-                  height: gh,
-                  backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX}px)`,
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
-                <button
-                  type="button"
-                  className="fos-hit"
-                  aria-label={`Add event ${weekdayLabel(d)}`}
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                  }}
-                  onClick={(e) => {
-                    const start = slotStart(
-                      d,
-                      e.clientY - e.currentTarget.getBoundingClientRect().top,
-                    );
-                    if (!start) return;
-                    const end = new Date(start.getTime() + 3600000);
-                    setSheet({
-                      ...createDraft(start),
-                      date: msToDateInput(start.getTime()),
-                      endDate: msToDateInput(start.getTime()),
-                      startTime: msToTimeInput(start.getTime()),
-                      endTime: msToTimeInput(end.getTime()),
-                    });
-                  }}
+                <DayHeader
+                  weekday={weekdayLabel(d, timeZone)}
+                  date={zonedDayOfMonth(d, timeZone)}
+                  today={isSameDay(d, today, timeZone)}
                 />
-                {timed.map((e) => {
-                  const people = peopleOf(members, e);
-                  const { tone, multi } = eventTone(people);
-                  const h = heightPx(e.startMs, e.endMs);
-                  const w = `calc((100% - 12px) / ${e.cols})`;
-                  return (
-                    <div
-                      key={e.id}
-                      style={{
-                        position: "absolute",
-                        left: `calc(6px + ${e.col} * ${w})`,
-                        width: w,
-                        top: topPx(e.startMs),
-                        height: h,
-                        zIndex: 2,
-                      }}
-                    >
-                      <EventCard
-                        title={e.title}
-                        time={formatTimeRange(e.startMs, e.endMs)}
-                        tone={tone}
-                        multi={multi}
-                        height={h}
-                        people={people.map((p) => ({
-                          name: p.name,
-                          tone: chipTone(p),
-                        }))}
-                        onClick={() => setSheet(toDraft(e))}
-                        style={{ height: "100%", minHeight: 0 }}
-                      />
-                    </div>
-                  );
-                })}
-                {isToday ? <NowLine /> : null}
+                <div
+                  style={{
+                    minHeight: 34,
+                    padding: "0 6px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                >
+                  {events
+                    .filter(
+                      (e) =>
+                        e.allDay && coversDay(e, d, timeZone) && visible(e),
+                    )
+                    .map((e) => {
+                      const people = peopleOf(members, e);
+                      const { tone, multi } = eventTone(people);
+                      return (
+                        <AllDayBar
+                          key={e.id}
+                          label={e.title}
+                          tone={tone}
+                          multi={multi}
+                          style={{ height: 30, cursor: "pointer" }}
+                          onClick={() => setSheet(toDraft(e, timeZone))}
+                        />
+                      );
+                    })}
+                </div>
               </div>
-            );
-          })}
+            ))}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `76px repeat(${days.length}, minmax(0, 1fr))`,
+              borderTop: "1px solid var(--surface-grid-line)",
+            }}
+          >
+            <TimeGutter
+              hours={hours}
+              rowHeight={HOUR_PX}
+              width={76}
+              style={{ height: gh }}
+            />
+            {days.map((d) => {
+              const timed = layoutColumns(
+                events.filter((e) => timedOnDay(e, d, timeZone) && visible(e)),
+              );
+              const isToday = isSameDay(d, today, timeZone);
+              return (
+                <div
+                  key={`g-${d.toISOString()}`}
+                  style={{
+                    minWidth: 0,
+                    borderLeft: "1px solid var(--surface-grid-line)",
+                    position: "relative",
+                    height: gh,
+                    backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX}px)`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="fos-hit"
+                    aria-label={`Add event ${weekdayLabel(d, timeZone)}`}
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                    }}
+                    onClick={(e) => {
+                      const start = slotStart(
+                        d,
+                        e.clientY - e.currentTarget.getBoundingClientRect().top,
+                        timeZone,
+                      );
+                      if (!start) return;
+                      const end = new Date(start.getTime() + 3600000);
+                      setSheet({
+                        ...createDraft(start, timeZone),
+                        date: msToDateInput(start.getTime(), timeZone),
+                        endDate: msToDateInput(start.getTime(), timeZone),
+                        startTime: msToTimeInput(start.getTime(), timeZone),
+                        endTime: msToTimeInput(end.getTime(), timeZone),
+                      });
+                    }}
+                  />
+                  {timed.map((e) => {
+                    const people = peopleOf(members, e);
+                    const { tone, multi } = eventTone(people);
+                    const h = heightPx(e.startMs, e.endMs);
+                    const w = `calc((100% - 12px) / ${e.cols})`;
+                    return (
+                      <div
+                        key={e.id}
+                        style={{
+                          position: "absolute",
+                          left: `calc(6px + ${e.col} * ${w})`,
+                          width: w,
+                          top: topPx(e.startMs, timeZone),
+                          height: h,
+                          zIndex: 2,
+                        }}
+                      >
+                        <EventCard
+                          title={e.title}
+                          time={formatTimeRange(e.startMs, e.endMs, timeZone)}
+                          tone={tone}
+                          multi={multi}
+                          height={h}
+                          people={people.map((p) => ({
+                            name: p.name,
+                            tone: chipTone(p),
+                          }))}
+                          onClick={() => setSheet(toDraft(e, timeZone))}
+                          style={{ height: "100%", minHeight: 0 }}
+                        />
+                      </div>
+                    );
+                  })}
+                  {isToday ? <NowLine timeZone={timeZone} /> : null}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
-      {settings?.signedIn && settings.calendarId ? (
-        <Fab onClick={() => setSheet(createDraft(new Date()))} />
+      ) : null}
+      {settings?.signedIn && settings.calendarId && timeZone ? (
+        <Fab onClick={() => setSheet(createDraft(new Date(), timeZone))} />
       ) : null}
       {sheet ? (
         <EventSheet

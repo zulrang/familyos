@@ -44,6 +44,7 @@ describe("Household Configuration HTTP", () => {
       calendarId: null,
       calendarTimeZone: null,
       listIds: [],
+      timeZone: "America/New_York",
       configVersion: 1,
     });
     await writeProvider({
@@ -109,6 +110,7 @@ describe("Household Configuration HTTP", () => {
       configVersion: number;
       signedIn: boolean;
       listIds: string[];
+      timeZone: string;
     };
   }
 
@@ -313,5 +315,42 @@ describe("Household Configuration HTTP", () => {
     assert.equal(res.status, 200);
     const body = (await res.json()) as { listIds: string[] };
     assert.deepEqual(body.listIds, ["tl-a", "tl-b"]);
+  });
+
+  test("GET exposes the Household Time Zone", async () => {
+    const body = await getSettings(first.cookie);
+    assert.equal(body.timeZone, "America/New_York");
+  });
+
+  test("a valid Household Time Zone patch bumps configVersion", async () => {
+    const cur = await getSettings(first.cookie);
+    const res = await patchSettings(first.cookie, {
+      timeZone: "Pacific/Auckland",
+      expectedVersion: cur.configVersion,
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      timeZone: string;
+      configVersion: number;
+    };
+    assert.equal(body.timeZone, "Pacific/Auckland");
+    assert.equal(body.configVersion, cur.configVersion + 1);
+    assert.equal(
+      (await getSettings(second.cookie)).timeZone,
+      "Pacific/Auckland",
+    );
+  });
+
+  test("an invalid Household Time Zone is rejected without writing", async () => {
+    const before = await readHousehold();
+    const res = await patchSettings(first.cookie, {
+      timeZone: "Not/A_Zone",
+      expectedVersion: before.configVersion,
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, "invalid time zone");
+    assert.equal((await readHousehold()).timeZone, before.timeZone);
+    assert.equal((await readHousehold()).configVersion, before.configVersion);
   });
 });
