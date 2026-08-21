@@ -13,8 +13,8 @@ data, not authentication principals. Companion phones/tablets are out of v1
 scope, although any paired browser profile follows the same Trusted Display
 rules.
 
-v1: pairing, the Five-Day Calendar in `src/components/calendar/`, Lists in
-`src/components/lists/` (Google Tasks), Settings, and the fixed left rail.
+v1: pairing, the Five-Day Calendar in `src/calendar/`, Lists in
+`src/lists/` (Google Tasks), Settings, and the fixed left rail.
 Other rail destinations are stubs.
 
 ## 2. Architectural Decisions
@@ -109,9 +109,9 @@ Other rail destinations are stubs.
 | Component | Owns | Must not own |
 |-----------|------|----------------|
 | App shell (`src/app` layout + rail) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
-| Calendar | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
-| Lists | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
-| Settings | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, per-Display UI scale | Event rendering, unimplemented product surfaces |
+| Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
+| Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
+| Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, per-Display UI scale | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
 
@@ -202,11 +202,11 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
 - Current implementation gaps are not product decisions: Calendar still
-  renders seven days (target is Five-Day View with five-day paging),
-  Household Time Zone is not yet the calendar date authority, and the
-  account-bound last-known provider cache (outage read-only) plus Google
-  ETag rejection for stale event / List Item writes are absent. Bring these
-  into line with this SSD; do not document the current behavior as canonical.
+  renders seven days (target is Five-Day View with five-day paging; #11),
+  and the account-bound last-known provider cache (outage read-only; #12,
+  #13) plus Google ETag rejection for stale event / List Item writes
+  (#14, #15) are absent. Bring these into line with this SSD; do not
+  document the current behavior as canonical.
 
 ## 8. Future Direction
 
