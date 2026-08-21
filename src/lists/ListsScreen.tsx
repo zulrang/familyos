@@ -7,7 +7,7 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import type { MemberTone } from "@/shared/member-tone";
-import { formatClock } from "@/shared/time";
+import { fallbackTimeZone, formatClock } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
@@ -23,22 +23,23 @@ const LIST_TONES: MemberTone[] = [
   "coral",
 ];
 
-function headerDate(d: Date): string {
+function headerDate(d: Date, timeZone: string): string {
   return d.toLocaleDateString("en-US", {
+    timeZone,
     weekday: "short",
     month: "short",
     day: "numeric",
   });
 }
 
-function LiveClock() {
+function LiveClock({ timeZone }: { timeZone: string }) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 15000);
     return () => clearInterval(id);
   }, []);
-  return now ? formatClock(now) : null;
+  return now ? formatClock(now, timeZone) : null;
 }
 
 type Sheet =
@@ -332,7 +333,10 @@ export function ListsScreen() {
         position: "relative",
       }}
     >
-      <AppHeader title={headerDate(now)} time={<LiveClock />} />
+      <AppHeader
+        title={headerDate(now, settings?.timeZone ?? fallbackTimeZone())}
+        time={<LiveClock timeZone={settings?.timeZone ?? fallbackTimeZone()} />}
+      />
       {banner ? (
         <div
           style={{

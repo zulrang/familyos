@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  addDays,
   coversDay,
   eventTone,
   formatTimeRange,
@@ -21,7 +22,6 @@ import {
   peopleOf,
   remainingDays,
   slotStart,
-  startOfDay,
   statusEvent,
   timedOnDay,
   topPx,
@@ -37,7 +37,7 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import type { MemberTone } from "@/shared/member-tone";
-import { formatClock } from "@/shared/time";
+import { fallbackTimeZone, formatClock, zonedDayOfMonth } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { AllDayBar } from "./AllDayBar";
@@ -53,16 +53,18 @@ function chipTone(m: Member): MemberTone {
   return legacyToneForColor(m.color) ?? "sand";
 }
 
-function toDraft(ev: CalEvent): EventDraft {
-  const endInclusive = ev.allDay ? ev.endMs - 86400000 : ev.endMs;
+function toDraft(ev: CalEvent, timeZone: string): EventDraft {
+  const endInclusive = ev.allDay
+    ? addDays(new Date(ev.endMs), -1, timeZone).getTime()
+    : ev.endMs;
   return {
     id: ev.id,
     title: ev.title,
     allDay: ev.allDay,
-    date: msToDateInput(ev.startMs),
-    endDate: msToDateInput(endInclusive),
-    startTime: msToTimeInput(ev.startMs),
-    endTime: msToTimeInput(ev.endMs),
+    date: msToDateInput(ev.startMs, timeZone),
+    endDate: msToDateInput(endInclusive, timeZone),
+    startTime: msToTimeInput(ev.startMs, timeZone),
+    endTime: msToTimeInput(ev.endMs, timeZone),
     // Round-trip stored IDs even if some no longer resolve on the roster.
     memberIds: [...ev.participantIds],
     who: whoFromIds(ev.participantIds),
@@ -71,29 +73,29 @@ function toDraft(ev: CalEvent): EventDraft {
   };
 }
 
-function createDraft(now: Date): EventDraft {
-  const n = nextHour(now);
+function createDraft(now: Date, timeZone: string): EventDraft {
+  const n = nextHour(now, timeZone);
   return {
     title: "",
     allDay: false,
-    date: msToDateInput(n.startMs),
-    endDate: msToDateInput(n.startMs),
-    startTime: msToTimeInput(n.startMs),
-    endTime: msToTimeInput(n.endMs),
+    date: msToDateInput(n.startMs, timeZone),
+    endDate: msToDateInput(n.startMs, timeZone),
+    startTime: msToTimeInput(n.startMs, timeZone),
+    endTime: msToTimeInput(n.endMs, timeZone),
     memberIds: [],
     who: "none",
     scope: "this",
   };
 }
 
-function LiveClock() {
+function LiveClock({ timeZone }: { timeZone: string }) {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
     setNow(new Date());
     const id = setInterval(() => setNow(new Date()), 15000);
     return () => clearInterval(id);
   }, []);
-  return now ? formatClock(now) : null;
+  return now ? formatClock(now, timeZone) : null;
 }
 
 let savedGridScroll: number | null = null;
@@ -110,12 +112,11 @@ export function CalendarScreen() {
   const gridRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
-  const days = weekDays(today);
+  const timeZone = settings?.timeZone ?? fallbackTimeZone();
+  const days = weekDays(today, timeZone);
   const members = settings?.members ?? [];
-  const from = startOfDay(days[0]).toISOString();
-  const to = new Date(
-    startOfDay(days[days.length - 1]).getTime() + 86400000,
-  ).toISOString();
+  const from = days[0].toISOString();
+  const to = addDays(days[days.length - 1], 1, timeZone).toISOString();
 
   async function load() {
     const sRes = await fetch("/api/settings");
@@ -147,10 +148,10 @@ export function CalendarScreen() {
   useEffect(() => {
     const t = setInterval(() => {
       const n = new Date();
-      setToday((p) => (isSameDay(p, n) ? p : n));
+      setToday((p) => (isSameDay(p, n, timeZone) ? p : n));
     }, 60_000);
     return () => clearInterval(t);
-  }, []);
+  }, [timeZone]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible week bounds change
   useEffect(() => {
@@ -160,7 +161,7 @@ export function CalendarScreen() {
   useEffect(() => {
     const el = gridRef.current;
     if (!el) return;
-    const base = mountGridScrollTop(savedGridScroll, new Date());
+    const base = mountGridScrollTop(savedGridScroll, new Date(), timeZone);
     const headerH = headerRef.current?.offsetHeight ?? 0;
     el.scrollTop = savedGridScroll == null && base > 0 ? base + headerH : base;
     const save = () => {
@@ -171,21 +172,25 @@ export function CalendarScreen() {
       save();
       el.removeEventListener("scroll", save);
     };
-  }, []);
+  }, [timeZone]);
 
   const visible = (ev: CalEvent) => visibleUnderMemberFilter(ev, members, off);
 
-  const status = statusEvent(events, today);
+  const status = statusEvent(events, today, timeZone);
 
   async function save(draft: EventDraft) {
     setBusy(true);
     try {
       const startMs = draft.allDay
-        ? fromDateOnly(draft.date)
-        : fromDateAndTime(draft.date, draft.startTime);
+        ? fromDateOnly(draft.date, timeZone)
+        : fromDateAndTime(draft.date, draft.startTime, timeZone);
       const endMs = draft.allDay
-        ? fromDateOnly(draft.endDate) + 86400000
-        : fromDateAndTime(draft.date, draft.endTime);
+        ? addDays(
+            new Date(fromDateOnly(draft.endDate, timeZone)),
+            1,
+            timeZone,
+          ).getTime()
+        : fromDateAndTime(draft.date, draft.endTime, timeZone);
       const body = {
         title: draft.title.trim() || "Busy",
         allDay: draft.allDay,
@@ -266,7 +271,7 @@ export function CalendarScreen() {
     >
       <AppHeader
         title={settings?.familyName ?? "Family"}
-        time={<LiveClock />}
+        time={<LiveClock timeZone={timeZone} />}
         actions={
           <>
             <Button
@@ -276,7 +281,7 @@ export function CalendarScreen() {
                   const headerH = headerRef.current?.offsetHeight ?? 0;
                   gridRef.current.scrollTop = Math.max(
                     0,
-                    nowLineTop(new Date()) - HOUR_PX + headerH,
+                    nowLineTop(new Date(), timeZone) - HOUR_PX + headerH,
                   );
                 }
               }}
@@ -306,7 +311,7 @@ export function CalendarScreen() {
             >
               {status.title}{" "}
               <span style={{ color: "var(--text-muted)" }}>
-                {remainingDays(status, today)} days
+                {remainingDays(status, today, timeZone)} days
               </span>
             </span>
           ) : null}
@@ -369,9 +374,9 @@ export function CalendarScreen() {
               }}
             >
               <DayHeader
-                weekday={weekdayLabel(d)}
-                date={d.getDate()}
-                today={isSameDay(d, today)}
+                weekday={weekdayLabel(d, timeZone)}
+                date={zonedDayOfMonth(d, timeZone)}
+                today={isSameDay(d, today, timeZone)}
               />
               <div
                 style={{
@@ -383,7 +388,9 @@ export function CalendarScreen() {
                 }}
               >
                 {events
-                  .filter((e) => e.allDay && coversDay(e, d) && visible(e))
+                  .filter(
+                    (e) => e.allDay && coversDay(e, d, timeZone) && visible(e),
+                  )
                   .map((e) => {
                     const people = peopleOf(members, e);
                     const { tone, multi } = eventTone(people);
@@ -394,7 +401,7 @@ export function CalendarScreen() {
                         tone={tone}
                         multi={multi}
                         style={{ height: 30, cursor: "pointer" }}
-                        onClick={() => setSheet(toDraft(e))}
+                        onClick={() => setSheet(toDraft(e, timeZone))}
                       />
                     );
                   })}
@@ -417,9 +424,9 @@ export function CalendarScreen() {
           />
           {days.map((d) => {
             const timed = layoutColumns(
-              events.filter((e) => timedOnDay(e, d) && visible(e)),
+              events.filter((e) => timedOnDay(e, d, timeZone) && visible(e)),
             );
-            const isToday = isSameDay(d, today);
+            const isToday = isSameDay(d, today, timeZone);
             return (
               <div
                 key={`g-${d.toISOString()}`}
@@ -434,7 +441,7 @@ export function CalendarScreen() {
                 <button
                   type="button"
                   className="fos-hit"
-                  aria-label={`Add event ${weekdayLabel(d)}`}
+                  aria-label={`Add event ${weekdayLabel(d, timeZone)}`}
                   style={{
                     position: "absolute",
                     inset: 0,
@@ -446,15 +453,16 @@ export function CalendarScreen() {
                     const start = slotStart(
                       d,
                       e.clientY - e.currentTarget.getBoundingClientRect().top,
+                      timeZone,
                     );
                     if (!start) return;
                     const end = new Date(start.getTime() + 3600000);
                     setSheet({
-                      ...createDraft(start),
-                      date: msToDateInput(start.getTime()),
-                      endDate: msToDateInput(start.getTime()),
-                      startTime: msToTimeInput(start.getTime()),
-                      endTime: msToTimeInput(end.getTime()),
+                      ...createDraft(start, timeZone),
+                      date: msToDateInput(start.getTime(), timeZone),
+                      endDate: msToDateInput(start.getTime(), timeZone),
+                      startTime: msToTimeInput(start.getTime(), timeZone),
+                      endTime: msToTimeInput(end.getTime(), timeZone),
                     });
                   }}
                 />
@@ -470,14 +478,14 @@ export function CalendarScreen() {
                         position: "absolute",
                         left: `calc(6px + ${e.col} * ${w})`,
                         width: w,
-                        top: topPx(e.startMs),
+                        top: topPx(e.startMs, timeZone),
                         height: h,
                         zIndex: 2,
                       }}
                     >
                       <EventCard
                         title={e.title}
-                        time={formatTimeRange(e.startMs, e.endMs)}
+                        time={formatTimeRange(e.startMs, e.endMs, timeZone)}
                         tone={tone}
                         multi={multi}
                         height={h}
@@ -485,20 +493,20 @@ export function CalendarScreen() {
                           name: p.name,
                           tone: chipTone(p),
                         }))}
-                        onClick={() => setSheet(toDraft(e))}
+                        onClick={() => setSheet(toDraft(e, timeZone))}
                         style={{ height: "100%", minHeight: 0 }}
                       />
                     </div>
                   );
                 })}
-                {isToday ? <NowLine /> : null}
+                {isToday ? <NowLine timeZone={timeZone} /> : null}
               </div>
             );
           })}
         </div>
       </div>
       {settings?.signedIn && settings.calendarId ? (
-        <Fab onClick={() => setSheet(createDraft(new Date()))} />
+        <Fab onClick={() => setSheet(createDraft(new Date(), timeZone))} />
       ) : null}
       {sheet ? (
         <EventSheet

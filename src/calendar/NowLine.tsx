@@ -3,19 +3,21 @@ import { NOW_LINE_PX, nowLineY } from "@/calendar/calendar";
 
 export function NowLine({
   top,
+  timeZone,
   style,
 }: {
   top?: number;
+  timeZone: string;
   style?: CSSProperties;
 }) {
-  const [live, setLive] = useState(() => top ?? nowLineY(new Date()));
+  const [live, setLive] = useState(() => top ?? nowLineY(new Date(), timeZone));
   useEffect(() => {
     if (top != null) return;
-    const tick = () => setLive(nowLineY(new Date()));
+    const tick = () => setLive(nowLineY(new Date(), timeZone));
     tick();
     const id = setInterval(tick, 15000);
     return () => clearInterval(id);
-  }, [top]);
+  }, [top, timeZone]);
   const y = top ?? live;
   return (
     <div

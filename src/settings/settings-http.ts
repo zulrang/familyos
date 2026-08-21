@@ -15,6 +15,7 @@ function publicSettings(
     members: s.members,
     calendarId: s.calendarId,
     listIds: s.listIds,
+    timeZone: s.timeZone,
     signedIn,
     googleConfigured: googleConfigured(),
     uiScale,
@@ -48,6 +49,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
     members?: unknown;
     calendarId?: string | null;
     listIds?: unknown;
+    timeZone?: unknown;
     uiScale?: unknown;
     expectedVersion?: unknown;
   };
@@ -56,7 +58,8 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
     body.familyName !== undefined ||
     body.members !== undefined ||
     body.calendarId !== undefined ||
-    body.listIds !== undefined;
+    body.listIds !== undefined ||
+    body.timeZone !== undefined;
 
   let uiScale = display.uiScale;
   const provider = await readProvider();
@@ -85,10 +88,19 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
       calendarId,
       calendarTimeZone,
       listIds: body.listIds,
+      timeZone:
+        body.timeZone === undefined
+          ? undefined
+          : typeof body.timeZone === "string"
+            ? body.timeZone
+            : "",
     });
     if (!result.ok) {
       if (result.reason === "roster") {
         return Response.json({ error: result.error }, { status: 400 });
+      }
+      if (result.reason === "timeZone") {
+        return Response.json({ error: "invalid time zone" }, { status: 400 });
       }
       return Response.json(
         publicSettings(

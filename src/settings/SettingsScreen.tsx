@@ -13,8 +13,14 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import { MEMBER_TONES } from "@/shared/member-tone";
+import { fallbackTimeZone, isIanaTimeZone } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { parseUiScale, UI_SCALES, type UiScale } from "@/shared/ui-scale";
+
+const HOUSEHOLD_TIME_ZONES = (() => {
+  const zones = Intl.supportedValuesOf("timeZone");
+  return zones.includes("UTC") ? zones : ["UTC", ...zones];
+})();
 
 type GoogleCalendar = {
   id: string;
@@ -47,9 +53,13 @@ function newMember(existing: Member[]): Member {
   };
 }
 
-function formatPairedAt(createdAt: number): string {
-  // ponytail: UTC calendar date avoids browser-TZ drift; upgrade to Household Time Zone when settings expose it.
-  return new Date(createdAt).toISOString().slice(0, 10);
+function formatPairedAt(createdAt: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(createdAt));
 }
 
 export function SettingsScreen() {
@@ -60,6 +70,7 @@ export function SettingsScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   const [calendarId, setCalendarId] = useState("");
   const [listIds, setListIds] = useState<string[]>([]);
+  const [timeZone, setTimeZone] = useState(fallbackTimeZone);
   const [uiScale, setUiScale] = useState<UiScale>(1);
   const [displays, setDisplays] = useState<DisplayRecord[]>([]);
   const [currentDisplayId, setCurrentDisplayId] = useState<string | null>(null);
@@ -86,6 +97,7 @@ export function SettingsScreen() {
     setMembers(s.members);
     setCalendarId(s.calendarId ?? "");
     setListIds(s.listIds ?? []);
+    setTimeZone(s.timeZone);
     setUiScale(parseUiScale(s.uiScale));
   }
 
@@ -128,6 +140,7 @@ export function SettingsScreen() {
       familyName !== settings.familyName ||
       (calendarId || null) !== settings.calendarId ||
       JSON.stringify(listIds) !== JSON.stringify(settings.listIds) ||
+      timeZone !== settings.timeZone ||
       JSON.stringify(members) !== JSON.stringify(settings.members);
     const scaleDirty = !settings || uiScale !== settings.uiScale;
 
@@ -140,6 +153,7 @@ export function SettingsScreen() {
           members,
           calendarId: calendarId || null,
           listIds,
+          timeZone,
           expectedVersion: settings?.configVersion,
         }),
       });
@@ -324,7 +338,7 @@ export function SettingsScreen() {
                       color: "var(--text-muted)",
                     }}
                   >
-                    Paired {formatPairedAt(d.createdAt)}
+                    Paired {formatPairedAt(d.createdAt, timeZone)}
                   </div>
                 </div>
                 <Button variant="ghost" onClick={() => void revoke(d.id)}>
@@ -538,6 +552,30 @@ export function SettingsScreen() {
             value={familyName}
             onChange={(e) => setFamilyName(e.target.value)}
           />
+        </label>
+        <label style={{ display: "block", marginBottom: 16 }}>
+          <div
+            style={{
+              font: "var(--type-card-meta)",
+              color: "var(--text-muted)",
+              marginBottom: 6,
+            }}
+          >
+            Household Time Zone
+          </div>
+          <select
+            className="fos-input"
+            value={timeZone}
+            onChange={(e) => {
+              if (isIanaTimeZone(e.target.value)) setTimeZone(e.target.value);
+            }}
+          >
+            {HOUSEHOLD_TIME_ZONES.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
         </label>
         <p
           style={{

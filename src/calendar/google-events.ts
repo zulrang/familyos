@@ -1,6 +1,8 @@
 import {
   colorIdForTones,
+  fromDateOnly,
   googleDateTime,
+  msToDateInput,
   TONES_PROP,
 } from "@/calendar/calendar";
 import {
@@ -60,23 +62,23 @@ type GEvent = {
   extendedProperties?: { private?: Record<string, string | null> };
 };
 
-function parseGDate(d?: GDate): { ms: number; allDay: boolean } | null {
+function parseGDate(
+  d: GDate | undefined,
+  timeZone: string,
+): { ms: number; allDay: boolean } | null {
   if (!d) return null;
   if (d.dateTime) return { ms: new Date(d.dateTime).getTime(), allDay: false };
-  if (d.date) {
-    const [y, m, day] = d.date.split("-").map(Number);
-    return { ms: new Date(y, m - 1, day).getTime(), allDay: true };
-  }
+  if (d.date) return { ms: fromDateOnly(d.date, timeZone), allDay: true };
   return null;
 }
 
-function toCalEvent(g: GEvent): CalEvent | null {
+function toCalEvent(g: GEvent, timeZone: string): CalEvent | null {
   if (!g.id) return null;
-  const start = parseGDate(g.start);
-  const end = parseGDate(g.end);
+  const start = parseGDate(g.start, timeZone);
+  const end = parseGDate(g.end, timeZone);
   if (!start || !end) return null;
   const stored = g.extendedProperties?.private?.[PARTICIPANTS_PROP];
-  const original = parseGDate(g.originalStartTime);
+  const original = parseGDate(g.originalStartTime, timeZone);
   return {
     id: g.id,
     title: g.summary || "Busy",
@@ -96,6 +98,7 @@ export async function listEvents(
   calendarId: string,
   timeMin: string,
   timeMax: string,
+  timeZone: string,
 ): Promise<CalEvent[]> {
   const events: CalEvent[] = [];
   let pageToken = "";
@@ -116,7 +119,7 @@ export async function listEvents(
       nextPageToken?: string;
     };
     for (const item of data.items ?? []) {
-      const ev = toCalEvent(item);
+      const ev = toCalEvent(item, timeZone);
       if (ev) events.push(ev);
     }
     if (!data.nextPageToken) break;
@@ -135,30 +138,18 @@ export type EventWrite = {
   presentationTones?: MemberTone[];
 };
 
-function eventTimeZone(g: GEvent): string {
-  return (
-    g.start?.timeZone ||
-    g.end?.timeZone ||
-    Intl.DateTimeFormat().resolvedOptions().timeZone
-  );
-}
-
 function gBody(
   w: EventWrite,
   mode: "insert" | "update",
-  timeZone?: string,
+  timeZone: string,
 ): Record<string, unknown> {
   const participantIds = normalizeParticipantIds(w.participantIds);
   const tones = w.presentationTones ?? [];
   let start: GDate;
   let end: GDate;
   if (w.allDay) {
-    const s = new Date(w.startMs);
-    const e = new Date(w.endMs);
-    const fmt = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    start = { date: fmt(s) };
-    end = { date: fmt(e) };
+    start = { date: msToDateInput(w.startMs, timeZone) };
+    end = { date: msToDateInput(w.endMs, timeZone) };
   } else {
     start = googleDateTime(w.startMs, timeZone);
     end = googleDateTime(w.endMs, timeZone);
@@ -186,15 +177,16 @@ function gBody(
 export async function insertEvent(
   calendarId: string,
   w: EventWrite,
+  timeZone: string,
 ): Promise<CalEvent> {
   const res = await gfetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=none`,
-    { method: "POST", body: JSON.stringify(gBody(w, "insert")) },
+    { method: "POST", body: JSON.stringify(gBody(w, "insert", timeZone)) },
   );
   if (!res.ok) {
     throw new Error(`insert ${res.status} ${await res.text()}`);
   }
-  const ev = toCalEvent((await res.json()) as GEvent);
+  const ev = toCalEvent((await res.json()) as GEvent, timeZone);
   if (!ev) throw new Error("insert returned no event");
   return ev;
 }
@@ -230,8 +222,9 @@ async function calFromPatch(
   calendarId: string,
   eventId: string,
   body: Record<string, unknown>,
+  timeZone: string,
 ): Promise<CalEvent> {
-  const ev = toCalEvent(await patchGEvent(calendarId, eventId, body));
+  const ev = toCalEvent(await patchGEvent(calendarId, eventId, body), timeZone);
   if (!ev) throw new Error("update returned no event");
   return ev;
 }
@@ -240,9 +233,13 @@ function writeForMaster(
   master: GEvent,
   instance: GEvent,
   w: EventWrite,
+  timeZone: string,
 ): EventWrite {
-  const orig = parseGDate(instance.originalStartTime ?? instance.start);
-  const mStart = parseGDate(master.start);
+  const orig = parseGDate(
+    instance.originalStartTime ?? instance.start,
+    timeZone,
+  );
+  const mStart = parseGDate(master.start, timeZone);
   if (!orig || !mStart) return w;
   const duration = w.endMs - w.startMs;
   return {
@@ -256,6 +253,7 @@ async function countInstancesBefore(
   calendarId: string,
   masterId: string,
   splitMs: number,
+  timeZone: string,
 ): Promise<number> {
   let n = 0;
   let pageToken = "";
@@ -273,7 +271,7 @@ async function countInstancesBefore(
     };
     for (const item of data.items ?? []) {
       if (item.status === "cancelled") continue;
-      const s = parseGDate(item.originalStartTime ?? item.start);
+      const s = parseGDate(item.originalStartTime ?? item.start, timeZone);
       if (s && s.ms < splitMs) n++;
     }
     if (!data.nextPageToken) break;
@@ -287,6 +285,7 @@ async function updateFollowing(
   master: GEvent,
   orig: { ms: number; allDay: boolean },
   w: EventWrite,
+  timeZone: string,
 ): Promise<CalEvent> {
   const masterId = master.id;
   if (!masterId) throw new Error("master has no id");
@@ -294,22 +293,30 @@ async function updateFollowing(
   const until = untilStamp({
     originalStartMs: orig.ms,
     allDay: orig.allDay,
+    timeZone,
   });
-  const oldRec = truncateRecurrence(recurrence, until, orig.ms);
+  const oldRec = truncateRecurrence(recurrence, until, orig.ms, timeZone);
   const count = rruleCount(recurrence);
   const remaining =
     count == null
       ? null
       : Math.max(
           1,
-          count - (await countInstancesBefore(calendarId, masterId, orig.ms)),
+          count -
+            (await countInstancesBefore(
+              calendarId,
+              masterId,
+              orig.ms,
+              timeZone,
+            )),
         );
   const newRec = shiftRecurrenceStart(
-    followingRecurrence(recurrence, orig.ms, remaining),
+    followingRecurrence(recurrence, orig.ms, remaining, timeZone),
     w.startMs,
+    timeZone,
   );
   const insertBody: Record<string, unknown> = {
-    ...gBody(w, "insert", orig.allDay ? undefined : eventTimeZone(master)),
+    ...gBody(w, "insert", timeZone),
     recurrence: newRec,
   };
   if (master.description) insertBody.description = master.description;
@@ -322,7 +329,7 @@ async function updateFollowing(
       body: JSON.stringify(insertBody),
     });
     if (!res.ok) throw new Error(`insert ${res.status} ${await res.text()}`);
-    const ev = toCalEvent((await res.json()) as GEvent);
+    const ev = toCalEvent((await res.json()) as GEvent, timeZone);
     if (!ev) throw new Error("insert returned no event");
     return ev;
   } catch (e) {
@@ -336,48 +343,70 @@ export async function updateEvent(
   eventId: string,
   w: EventWrite,
   scope: SeriesScope = "this",
+  timeZone: string,
 ): Promise<CalEvent> {
   if (scope === "this") {
-    return calFromPatch(calendarId, eventId, gBody(w, "update"));
+    return calFromPatch(
+      calendarId,
+      eventId,
+      gBody(w, "update", timeZone),
+      timeZone,
+    );
   }
   const instance = await getGEvent(calendarId, eventId);
   const masterId = instance.recurringEventId;
   if (!masterId) {
-    return calFromPatch(calendarId, eventId, gBody(w, "update"));
+    return calFromPatch(
+      calendarId,
+      eventId,
+      gBody(w, "update", timeZone),
+      timeZone,
+    );
   }
   const master = await getGEvent(calendarId, masterId);
-  const orig = parseGDate(instance.originalStartTime ?? instance.start);
-  const mStart = parseGDate(master.start);
+  const orig = parseGDate(
+    instance.originalStartTime ?? instance.start,
+    timeZone,
+  );
+  const mStart = parseGDate(master.start, timeZone);
   if (!orig || !mStart) {
-    return calFromPatch(calendarId, eventId, gBody(w, "update"));
+    return calFromPatch(
+      calendarId,
+      eventId,
+      gBody(w, "update", timeZone),
+      timeZone,
+    );
   }
   const head = isSeriesHead(orig.ms, mStart.ms);
   if (scope === "all" || head) {
-    const shifted = writeForMaster(master, instance, w);
-    const body = gBody(
-      shifted,
-      "update",
-      shifted.allDay ? undefined : eventTimeZone(master),
-    );
+    const shifted = writeForMaster(master, instance, w, timeZone);
+    const body = gBody(shifted, "update", timeZone);
     if (master.recurrence?.length) {
       body.recurrence = shiftRecurrenceStart(
         master.recurrence,
         shifted.startMs,
+        timeZone,
       );
     }
-    return calFromPatch(calendarId, masterId, body);
+    return calFromPatch(calendarId, masterId, body, timeZone);
   }
   // ponytail: no RRULE to split; later exceptions are not copied onto the new series.
   if (!master.recurrence?.length) {
-    return calFromPatch(calendarId, eventId, gBody(w, "update"));
+    return calFromPatch(
+      calendarId,
+      eventId,
+      gBody(w, "update", timeZone),
+      timeZone,
+    );
   }
-  return updateFollowing(calendarId, master, orig, w);
+  return updateFollowing(calendarId, master, orig, w, timeZone);
 }
 
 export async function deleteEvent(
   calendarId: string,
   eventId: string,
   scope: SeriesScope = "this",
+  timeZone: string,
 ): Promise<void> {
   const del = async (id: string) => {
     const res = await gfetch(eventsUrl(calendarId, id), { method: "DELETE" });
@@ -395,8 +424,11 @@ export async function deleteEvent(
     return;
   }
   const master = await getGEvent(calendarId, masterId);
-  const orig = parseGDate(instance.originalStartTime ?? instance.start);
-  const mStart = parseGDate(master.start);
+  const orig = parseGDate(
+    instance.originalStartTime ?? instance.start,
+    timeZone,
+  );
+  const mStart = parseGDate(master.start, timeZone);
   const head = orig && mStart ? isSeriesHead(orig.ms, mStart.ms) : false;
   if (scope === "all" || head || !orig || !master.recurrence?.length) {
     await del(masterId);
@@ -405,8 +437,9 @@ export async function deleteEvent(
   const until = untilStamp({
     originalStartMs: orig.ms,
     allDay: orig.allDay,
+    timeZone,
   });
   await patchGEvent(calendarId, masterId, {
-    recurrence: truncateRecurrence(master.recurrence, until, orig.ms),
+    recurrence: truncateRecurrence(master.recurrence, until, orig.ms, timeZone),
   });
 }

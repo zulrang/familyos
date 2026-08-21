@@ -48,6 +48,7 @@ describe("Provider Connection", () => {
       calendarId: null,
       calendarTimeZone: null,
       listIds: [],
+      timeZone: "America/New_York",
       configVersion: 1,
     });
   });

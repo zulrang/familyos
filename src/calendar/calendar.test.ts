@@ -18,6 +18,8 @@ import {
   layoutColumns,
   MULTI_COLOR_ID,
   mountGridScrollTop,
+  msToDateInput,
+  msToTimeInput,
   NOW_LINE_PX,
   nowLineTop,
   nowLineY,
@@ -31,6 +33,7 @@ import {
   toneFromColorId,
   visibleUnderMemberFilter,
   weekDays,
+  weekdayLabel,
 } from "./calendar";
 
 const members: Member[] = [
@@ -38,6 +41,8 @@ const members: Member[] = [
   { id: "mom", name: "Mom", status: "active", color: "#f9c0bc" },
   { id: "ex", name: "Ex", status: "retired" },
 ];
+
+const HOST = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const bath: CalEvent = {
   id: "1",
@@ -52,40 +57,43 @@ describe("Household Calendar", () => {
   test("pages a rolling day window from a given day", () => {
     const wed = new Date(2026, 7, 19, 11, 20);
     assert.equal(DAY_COUNT, 7);
-    const days = weekDays(wed);
+    const days = weekDays(wed, HOST);
     assert.equal(days.length, 7);
     assert.equal(days[0].getDate(), 19);
     assert.equal(days[0].getHours(), 0);
     assert.equal(days[6].getDate(), 25);
-    assert.equal(weekDays(wed, 5).length, 5);
+    assert.equal(weekDays(wed, HOST, 5).length, 5);
   });
 
   test("formats timed ranges for the wall", () => {
     assert.equal(
       formatTimeRange(
-        fromDateAndTime("2026-08-19", "10:00"),
-        fromDateAndTime("2026-08-19", "11:30"),
+        fromDateAndTime("2026-08-19", "10:00", HOST),
+        fromDateAndTime("2026-08-19", "11:30", HOST),
+        HOST,
       ),
       "10 - 11:30 AM",
     );
     assert.equal(
       formatTimeRange(
-        fromDateAndTime("2026-08-19", "09:30"),
-        fromDateAndTime("2026-08-19", "10:15"),
+        fromDateAndTime("2026-08-19", "09:30", HOST),
+        fromDateAndTime("2026-08-19", "10:15", HOST),
+        HOST,
       ),
       "9:30 - 10:15 AM",
     );
     assert.equal(
       formatTimeRange(
-        fromDateAndTime("2026-08-19", "11:00"),
-        fromDateAndTime("2026-08-19", "12:00"),
+        fromDateAndTime("2026-08-19", "11:00", HOST),
+        fromDateAndTime("2026-08-19", "12:00", HOST),
+        HOST,
       ),
       "11 AM - 12 PM",
     );
   });
 
   test("encodes Google dateTimes in local and zoned forms", () => {
-    const wed350 = fromDateAndTime("2026-08-19", "15:50");
+    const wed350 = fromDateAndTime("2026-08-19", "15:50", HOST);
     assert.equal(new Date(googleDateTime(wed350).dateTime).getTime(), wed350);
     assert.equal(
       googleDateTime(Date.UTC(2026, 7, 20, 19, 50, 0)).dateTime,
@@ -206,47 +214,103 @@ describe("Household Calendar", () => {
       id: "v",
       title: "Vacation",
       allDay: true,
-      startMs: fromDateOnly("2026-08-01"),
-      endMs: fromDateOnly("2026-09-18"),
+      startMs: fromDateOnly("2026-08-01", HOST),
+      endMs: fromDateOnly("2026-09-18", HOST),
       participantIds: [],
     };
-    assert.equal(coversDay(trip, new Date(2026, 7, 19)), true);
-    assert.equal(coversDay(trip, new Date(2026, 8, 18)), false);
-    assert.equal(remainingDays(trip, new Date(2026, 7, 19)), 30);
-    assert.equal(statusEvent([trip], new Date(2026, 7, 19))?.title, "Vacation");
-    assert.equal(startOfDay(addDays(wed, 1)).getDate(), 20);
+    assert.equal(coversDay(trip, new Date(2026, 7, 19), HOST), true);
+    assert.equal(coversDay(trip, new Date(2026, 8, 18), HOST), false);
+    assert.equal(remainingDays(trip, new Date(2026, 7, 19), HOST), 30);
+    assert.equal(
+      statusEvent([trip], new Date(2026, 7, 19), HOST)?.title,
+      "Vacation",
+    );
+    assert.equal(startOfDay(addDays(wed, 1, HOST), HOST).getDate(), 20);
+  });
+
+  test("forms round-trip timed and all-day values in the Household Time Zone", () => {
+    const tz = "America/New_York";
+    const timed = fromDateAndTime("2026-08-19", "15:50", tz);
+    assert.equal(timed, Date.parse("2026-08-19T19:50:00.000Z"));
+    assert.equal(msToDateInput(timed, tz), "2026-08-19");
+    assert.equal(msToTimeInput(timed, tz), "15:50");
+    assert.equal(msToDateInput(timed, "Asia/Tokyo"), "2026-08-20");
+    assert.equal(msToTimeInput(timed, "Asia/Tokyo"), "04:50");
+
+    const allDay = fromDateOnly("2026-03-08", tz);
+    assert.equal(allDay, Date.parse("2026-03-08T05:00:00.000Z"));
+    assert.equal(msToDateInput(allDay, tz), "2026-03-08");
+  });
+
+  test("the same instant is the same Household date in every zone", () => {
+    const instant = new Date("2026-08-19T19:50:00.000Z");
+    const tz = "America/New_York";
+    assert.equal(msToDateInput(instant.getTime(), tz), "2026-08-19");
+    assert.equal(weekdayLabel(instant, tz), "Wed");
+    assert.equal(
+      formatTimeRange(instant.getTime(), instant.getTime() + 3_600_000, tz),
+      "3:50 - 4:50 PM",
+    );
+    assert.equal(
+      formatTimeRange(
+        instant.getTime(),
+        instant.getTime() + 3_600_000,
+        "Asia/Tokyo",
+      ),
+      "4:50 - 5:50 AM",
+    );
+  });
+
+  test("fetch bounds and day placement stay civil across DST", () => {
+    const tz = "America/New_York";
+    const afternoon = new Date("2026-03-08T17:00:00.000Z");
+    const days = weekDays(afternoon, tz, 7);
+    assert.equal(days[0].toISOString(), "2026-03-08T05:00:00.000Z");
+    assert.equal(days[1].toISOString(), "2026-03-09T04:00:00.000Z");
+    assert.equal(days[6].toISOString(), "2026-03-14T04:00:00.000Z");
+
+    const march8 = {
+      id: "dst",
+      title: "Spring",
+      allDay: true,
+      startMs: fromDateOnly("2026-03-08", tz),
+      endMs: fromDateOnly("2026-03-09", tz),
+      participantIds: [],
+    };
+    assert.equal(coversDay(march8, days[0], tz), true);
+    assert.equal(coversDay(march8, days[1], tz), false);
   });
 
   test("maps grid slots to hour starts within the day", () => {
     const slotDay = new Date(2026, 7, 19);
-    assert.equal(slotStart(slotDay, 0)?.getHours(), 7);
-    assert.equal(slotStart(slotDay, 119)?.getHours(), 7);
-    assert.equal(slotStart(slotDay, 120)?.getHours(), 8);
-    assert.equal(slotStart(slotDay, 13 * 120)?.getHours(), 20);
-    assert.equal(slotStart(slotDay, 14 * 120), null);
-    assert.equal(slotStart(slotDay, -1), null);
+    assert.equal(slotStart(slotDay, 0, HOST)?.getHours(), 7);
+    assert.equal(slotStart(slotDay, 119, HOST)?.getHours(), 7);
+    assert.equal(slotStart(slotDay, 120, HOST)?.getHours(), 8);
+    assert.equal(slotStart(slotDay, 13 * 120, HOST)?.getHours(), 20);
+    assert.equal(slotStart(slotDay, 14 * 120, HOST), null);
+    assert.equal(slotStart(slotDay, -1, HOST), null);
   });
 
   test("clamps the now line to the grid and restores scroll position", () => {
     const morning = new Date(2026, 7, 17, 11, 20);
-    assert.equal(nowLineY(morning), nowLineTop(morning));
-    assert.equal(nowLineY(new Date(2026, 7, 17, 6, 0)), 0);
+    assert.equal(nowLineY(morning, HOST), nowLineTop(morning, HOST));
+    assert.equal(nowLineY(new Date(2026, 7, 17, 6, 0), HOST), 0);
     assert.equal(
-      nowLineY(new Date(2026, 7, 17, 22, 0)),
+      nowLineY(new Date(2026, 7, 17, 22, 0), HOST),
       gridHeight() - NOW_LINE_PX,
     );
 
     const evening = new Date(2026, 7, 17, 20, 30);
     assert.equal(
-      mountGridScrollTop(null, evening),
-      nowLineTop(evening) - HOUR_PX,
+      mountGridScrollTop(null, evening, HOST),
+      nowLineTop(evening, HOST) - HOUR_PX,
     );
-    assert.equal(mountGridScrollTop(0, evening), 0);
-    assert.equal(mountGridScrollTop(240, evening), 240);
+    assert.equal(mountGridScrollTop(0, evening, HOST), 0);
+    assert.equal(mountGridScrollTop(240, evening, HOST), 240);
     assert.equal(
-      mountGridScrollTop(null, morning),
-      nowLineTop(morning) - HOUR_PX,
+      mountGridScrollTop(null, morning, HOST),
+      nowLineTop(morning, HOST) - HOUR_PX,
     );
-    assert.equal(mountGridScrollTop(80, morning), 80);
+    assert.equal(mountGridScrollTop(80, morning, HOST), 80);
   });
 });

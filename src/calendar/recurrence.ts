@@ -1,4 +1,11 @@
 import type { SeriesScope } from "@/calendar/types";
+import {
+  addZonedDays,
+  msToZonedDate,
+  zonedDateTimeToMs,
+  zonedDayOfMonth,
+  zonedWeekdayIndex,
+} from "@/shared/time";
 
 export function parseScope(s: unknown): SeriesScope {
   return s === "following" || s === "all" ? s : "this";
@@ -17,11 +24,15 @@ export function isSeriesHead(
 export function untilStamp(opts: {
   originalStartMs: number;
   allDay: boolean;
+  timeZone: string;
 }): string {
   if (opts.allDay) {
-    const d = new Date(opts.originalStartMs);
-    d.setDate(d.getDate() - 1);
-    return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
+    const prev = addZonedDays(
+      new Date(opts.originalStartMs),
+      -1,
+      opts.timeZone,
+    );
+    return msToZonedDate(prev.getTime(), opts.timeZone).replaceAll("-", "");
   }
   const t = new Date(opts.originalStartMs - 1000);
   return `${ymd(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate())}T${pad(t.getUTCHours())}${pad(t.getUTCMinutes())}${pad(t.getUTCSeconds())}Z`;
@@ -40,6 +51,7 @@ export function truncateRecurrence(
   recurrence: string[],
   until: string,
   splitMs: number,
+  timeZone: string,
 ): string[] {
   return mapRecurrence(
     recurrence,
@@ -50,7 +62,7 @@ export function truncateRecurrence(
       map.UNTIL = until;
       return formatRrule(keys, map);
     },
-    (line) => filterStampLine(line, (ms) => ms < splitMs),
+    (line) => filterStampLine(line, timeZone, (ms) => ms < splitMs),
   );
 }
 
@@ -58,6 +70,7 @@ export function followingRecurrence(
   recurrence: string[],
   splitMs: number,
   remainingCount: number | null,
+  timeZone: string,
 ): string[] {
   return mapRecurrence(
     recurrence,
@@ -70,7 +83,7 @@ export function followingRecurrence(
       }
       return formatRrule(keys, map);
     },
-    (line) => filterStampLine(line, (ms) => ms >= splitMs),
+    (line) => filterStampLine(line, timeZone, (ms) => ms >= splitMs),
   );
 }
 
@@ -80,17 +93,17 @@ const WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 export function shiftRecurrenceStart(
   recurrence: string[],
   toMs: number,
+  timeZone: string,
 ): string[] {
-  const to = new Date(toMs);
   return recurrence.map((line) => {
     if (!line.toUpperCase().startsWith("RRULE")) return line;
     const { keys, map } = parseRrule(line);
     const freq = (map.FREQ ?? "").toUpperCase();
     if (freq === "WEEKLY" && map.BYDAY && !map.BYDAY.includes(",")) {
-      map.BYDAY = WEEKDAYS[to.getDay()];
+      map.BYDAY = WEEKDAYS[zonedWeekdayIndex(toMs, timeZone)];
     }
     if (freq === "MONTHLY" && map.BYMONTHDAY && !map.BYMONTHDAY.includes(",")) {
-      map.BYMONTHDAY = String(to.getDate());
+      map.BYMONTHDAY = String(zonedDayOfMonth(new Date(toMs), timeZone));
     }
     return formatRrule(keys, map);
   });
@@ -158,6 +171,7 @@ function mapRecurrence(
 
 function filterStampLine(
   line: string,
+  timeZone: string,
   keep: (ms: number) => boolean,
 ): string | null {
   const colon = line.indexOf(":");
@@ -167,15 +181,14 @@ function filterStampLine(
     .split(",")
     .map((s) => s.trim())
     .filter((s) => {
-      const ms = stampMs(s);
+      const ms = stampMs(s, timeZone);
       return Number.isNaN(ms) || keep(ms);
     });
   if (!kept.length) return null;
   return line.slice(0, colon + 1) + kept.join(",");
 }
 
-/** ponytail: floating stamps use the device TZ; store calendar TZ if that ever drifts. */
-export function stampMs(stamp: string): number {
+export function stampMs(stamp: string, timeZone: string): number {
   const m = stamp.match(
     /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/,
   );
@@ -183,10 +196,18 @@ export function stampMs(stamp: string): number {
   const y = Number(m[1]);
   const mo = Number(m[2]);
   const d = Number(m[3]);
-  if (!m[4]) return new Date(y, mo - 1, d).getTime();
+  const date = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  if (!m[4]) return zonedDateTimeToMs(date, "00:00", timeZone);
   const hh = Number(m[4]);
   const mm = Number(m[5]);
   const ss = Number(m[6]);
   if (m[7]) return Date.UTC(y, mo - 1, d, hh, mm, ss);
-  return new Date(y, mo - 1, d, hh, mm, ss).getTime();
+  return (
+    zonedDateTimeToMs(
+      date,
+      `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`,
+      timeZone,
+    ) +
+    ss * 1000
+  );
 }

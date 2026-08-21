@@ -25,6 +25,7 @@ const settings: PublicSettings = {
   members: [],
   calendarId: null,
   listIds: ["tl-1"],
+  timeZone: "America/New_York",
   signedIn: true,
   googleConfigured: true,
   uiScale: 1,

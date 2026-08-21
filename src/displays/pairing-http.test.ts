@@ -43,6 +43,7 @@ describe("Display pairing HTTP", () => {
       calendarId: "secret-cal@group.calendar.google.com",
       calendarTimeZone: "America/New_York",
       listIds: [],
+      timeZone: "America/New_York",
       configVersion: 1,
     });
     await writeProvider({

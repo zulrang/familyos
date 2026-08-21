@@ -8,6 +8,7 @@ import {
 } from "@/members/members";
 import type { HouseholdListId } from "@/settings/types";
 import { dataDir } from "@/shared/data-path";
+import { fallbackTimeZone, isIanaTimeZone, parseTimeZone } from "@/shared/time";
 
 export type HouseholdConfig = {
   familyName: string;
@@ -16,6 +17,8 @@ export type HouseholdConfig = {
   calendarTimeZone: string | null;
   /** Ordered selection of Household Lists (provider tasklist IDs). */
   listIds: HouseholdListId[];
+  /** IANA Household Time Zone — dates on every Display. */
+  timeZone: string;
   configVersion: number;
 };
 
@@ -25,6 +28,7 @@ const EMPTY: HouseholdConfig = {
   calendarId: null,
   calendarTimeZone: null,
   listIds: [],
+  timeZone: fallbackTimeZone(),
   configVersion: 1,
 };
 
@@ -82,6 +86,7 @@ function normalize(
     calendarId: raw.calendarId ?? null,
     calendarTimeZone: raw.calendarTimeZone ?? null,
     listIds: parseListIds(raw.listIds),
+    timeZone: parseTimeZone(raw.timeZone),
     configVersion: version,
   };
 }
@@ -130,6 +135,7 @@ export async function writeHousehold(next: HouseholdConfig): Promise<void> {
 export type HouseholdUpdateResult =
   | { ok: true; config: HouseholdConfig }
   | { ok: false; reason: "version"; config: HouseholdConfig }
+  | { ok: false; reason: "timeZone"; config: HouseholdConfig }
   | {
       ok: false;
       reason: "roster";
@@ -170,6 +176,10 @@ export async function updateHousehold(
     members = parsed.members;
   }
 
+  if (patch.timeZone !== undefined && !isIanaTimeZone(patch.timeZone)) {
+    return { ok: false, reason: "timeZone", config: cur };
+  }
+
   const next: HouseholdConfig = {
     familyName:
       typeof patch.familyName === "string" ? patch.familyName : cur.familyName,
@@ -182,6 +192,7 @@ export async function updateHousehold(
         : patch.calendarTimeZone,
     listIds:
       patch.listIds === undefined ? cur.listIds : parseListIds(patch.listIds),
+    timeZone: patch.timeZone === undefined ? cur.timeZone : patch.timeZone,
     configVersion: cur.configVersion + 1,
   };
   await writeHousehold(next);

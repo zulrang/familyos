@@ -15,14 +15,14 @@ function jsonError(error: string, status: number) {
   return Response.json({ error }, { status });
 }
 
-async function requireCalendarId(
+async function requireHouseholdCalendar(
   request: Request,
-): Promise<{ calendarId: string } | Response> {
+): Promise<{ calendarId: string; timeZone: string } | Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
   const s = await readHousehold();
   if (!s.calendarId) return jsonError("no calendar", 400);
-  return { calendarId: s.calendarId };
+  return { calendarId: s.calendarId, timeZone: s.timeZone };
 }
 
 function catchAuth(e: unknown): Response {
@@ -31,14 +31,14 @@ function catchAuth(e: unknown): Response {
 }
 
 export async function handleListEvents(request: Request): Promise<Response> {
-  const gate = await requireCalendarId(request);
+  const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const url = new URL(request.url);
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   if (!from || !to) return jsonError("from and to required", 400);
   try {
-    const events = await listEvents(gate.calendarId, from, to);
+    const events = await listEvents(gate.calendarId, from, to, gate.timeZone);
     return Response.json({ events });
   } catch (e) {
     return catchAuth(e);
@@ -46,7 +46,7 @@ export async function handleListEvents(request: Request): Promise<Response> {
 }
 
 export async function handleCreateEvent(request: Request): Promise<Response> {
-  const gate = await requireCalendarId(request);
+  const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const s = await readHousehold();
   const body = (await request.json()) as {
@@ -58,14 +58,18 @@ export async function handleCreateEvent(request: Request): Promise<Response> {
   };
   const participantIds = normalizeParticipantIds(body.participantIds ?? []);
   try {
-    const event = await insertEvent(gate.calendarId, {
-      title: body.title,
-      allDay: body.allDay,
-      startMs: body.startMs,
-      endMs: body.endMs,
-      participantIds,
-      presentationTones: presentationTonesFor(s.members, participantIds),
-    });
+    const event = await insertEvent(
+      gate.calendarId,
+      {
+        title: body.title,
+        allDay: body.allDay,
+        startMs: body.startMs,
+        endMs: body.endMs,
+        participantIds,
+        presentationTones: presentationTonesFor(s.members, participantIds),
+      },
+      gate.timeZone,
+    );
     return Response.json({ event });
   } catch (e) {
     return catchAuth(e);
@@ -76,7 +80,7 @@ export async function handleUpdateEvent(
   request: Request,
   id: string,
 ): Promise<Response> {
-  const gate = await requireCalendarId(request);
+  const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const s = await readHousehold();
   const body = (await request.json()) as {
@@ -101,6 +105,7 @@ export async function handleUpdateEvent(
         presentationTones: presentationTonesFor(s.members, participantIds),
       },
       parseScope(body.scope),
+      gate.timeZone,
     );
     return Response.json({ event });
   } catch (e) {
@@ -114,7 +119,7 @@ export async function handleDeleteEvent(
   request: Request,
   id: string,
 ): Promise<Response> {
-  const gate = await requireCalendarId(request);
+  const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const url = new URL(request.url);
   try {
@@ -122,6 +127,7 @@ export async function handleDeleteEvent(
       gate.calendarId,
       id,
       parseScope(url.searchParams.get("scope")),
+      gate.timeZone,
     );
     return Response.json({ ok: true });
   } catch (e) {
