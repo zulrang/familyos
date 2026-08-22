@@ -202,11 +202,11 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
 - Current implementation gaps are not product decisions: Calendar still
-  renders seven days (target is Five-Day View with five-day paging; #11),
-  and the account-bound last-known provider cache (outage read-only; #12,
-  #13) plus Google ETag rejection for stale event / List Item writes
-  (#14, #15) are absent. Bring these into line with this SSD; do not
-  document the current behavior as canonical.
+  renders seven days (target is Five-Day View with five-day paging),
+  and the account-bound last-known provider cache (outage read-only)
+  plus Google ETag rejection for stale event / List Item writes are
+  absent. Bring these into line with this SSD; do not document the
+  current behavior as canonical.
 
 ## 8. Future Direction
 
