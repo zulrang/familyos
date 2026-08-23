@@ -4,6 +4,7 @@ import {
   LEGACY_TONE_COLORS,
   legacyToneForColor,
   memberSurface,
+  onFillInk,
   resolveMembers,
 } from "@/members/members";
 import type { MemberTone } from "@/shared/member-tone";
@@ -265,15 +266,20 @@ export function eventPaint(people: Member[]): {
   multi: boolean;
   fill: string;
   soft: string;
+  onFill: string;
 } {
   const multi = people.length > 1;
   const active = people.filter((p) => p.status === "active");
-  if (active.length === 1) {
-    const surface = memberSurface(active[0].color);
-    return { multi, fill: surface.fill, soft: surface.soft };
-  }
-  const sand = memberSurface(LEGACY_TONE_COLORS.sand);
-  return { multi, fill: sand.fill, soft: sand.soft };
+  const surface =
+    active.length === 1
+      ? memberSurface(active[0].color)
+      : memberSurface(LEGACY_TONE_COLORS.sand);
+  return {
+    multi,
+    fill: surface.fill,
+    soft: surface.soft,
+    onFill: onFillInk(surface.fill),
+  };
 }
 
 export function coversDay(

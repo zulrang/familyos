@@ -178,11 +178,13 @@ describe("Household Calendar", () => {
       multi: false,
       fill: "#4a90d9",
       soft: "#aecdee",
+      onFill: "#ffffff",
     });
     assert.deepEqual(eventPaint([]), {
       multi: false,
       fill: "#f7e3c8",
       soft: "#fbf1e3",
+      onFill: "#1f2a33",
     });
     assert.equal(eventPaint(peopleOf(members, bath)).multi, true);
   });

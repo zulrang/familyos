@@ -236,3 +236,16 @@ export function memberSurface(color: MemberColor): MemberSurface {
     ink: mixHex(color, "#1f2a33", 0.72),
   };
 }
+
+/** Text on a Member Color fill. `MemberSurface.ink` is for `soft`, not fill. */
+export function onFillInk(fill: MemberColor): MemberColor {
+  return relativeLuminance(fill) >= 0.45 ? "#1f2a33" : "#ffffff";
+}
+
+function relativeLuminance(color: MemberColor): number {
+  const lin = (i: number) => {
+    const s = hexByte(color, i) / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(0) + 0.7152 * lin(1) + 0.0722 * lin(2);
+}

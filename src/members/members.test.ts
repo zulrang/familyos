@@ -11,6 +11,7 @@ import {
   memberById,
   memberSurface,
   migrateRoster,
+  onFillInk,
   parseMemberColor,
   parseRoster,
   resolveMembers,
@@ -254,5 +255,12 @@ describe("Household Members", () => {
       soft: "#aecdee",
       ink: "#2b4761",
     });
+  });
+
+  test("on-fill ink stays dark on pastels and light on dark fills", () => {
+    assert.equal(onFillInk("#a9d8d2"), "#1f2a33");
+    assert.equal(onFillInk("#ffffff"), "#1f2a33");
+    assert.equal(onFillInk("#1a2744"), "#ffffff");
+    assert.equal(onFillInk("#000000"), "#ffffff");
   });
 });

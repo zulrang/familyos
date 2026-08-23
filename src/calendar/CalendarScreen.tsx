@@ -508,6 +508,7 @@ export function CalendarScreen() {
                           title={e.title}
                           time={formatTimeRange(e.startMs, e.endMs, timeZone)}
                           fill={paint.fill}
+                          ink={paint.onFill}
                           multi={paint.multi}
                           height={h}
                           people={people.map((p) => ({
