@@ -4,15 +4,15 @@ import { useEffect, useState } from "react";
 import {
   activeMembers,
   LEGACY_TONE_COLORS,
-  legacyToneForColor,
   MAX_ACTIVE_MEMBERS,
   type Member,
+  memberSurface,
+  parseMemberColor,
   retireMember,
 } from "@/members/members";
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
-import { MEMBER_TONES } from "@/shared/member-tone";
 import { isIanaTimeZone } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { parseUiScale, UI_SCALES, type UiScale } from "@/shared/ui-scale";
@@ -166,6 +166,17 @@ export function SettingsScreen() {
         return;
       }
       if (!householdRes.ok) {
+        const body = (await householdRes.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        if (body?.error === "duplicate_active_color") {
+          setError("Each Active Member needs a different Member Color.");
+          return;
+        }
+        if (body?.error === "too_many_active") {
+          setError("At most six Active Members.");
+          return;
+        }
         setError("Could not save.");
         return;
       }
@@ -231,6 +242,11 @@ export function SettingsScreen() {
     }
     await loadDisplays();
   }
+
+  const colorTaken = (id: string, color: string) =>
+    members.some(
+      (x) => x.status === "active" && x.id !== id && x.color === color,
+    );
 
   const patchMember = (id: string, patch: { name?: string; color?: string }) =>
     setMembers((ms) =>
@@ -587,8 +603,8 @@ export function SettingsScreen() {
             marginBottom: 12,
           }}
         >
-          Each Active Member has a FamilyOS color. Retiring frees the color and
-          keeps the person on past events.
+          Each Active Member has a Member Color (#rrggbb). Retiring frees the
+          color and keeps the person on past events.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {members.map((m) =>
@@ -637,39 +653,34 @@ export function SettingsScreen() {
                     height: 28,
                     flex: "0 0 28px",
                     borderRadius: 8,
-                    background:
-                      legacyToneForColor(m.color) != null
-                        ? `var(--member-${legacyToneForColor(m.color)})`
-                        : m.color,
+                    background: memberSurface(m.color).fill,
                   }}
                 />
-                <select
+                <input
+                  aria-label={`Member Color for ${m.name || "member"}`}
                   className="fos-input"
-                  value={legacyToneForColor(m.color) ?? ""}
+                  type="color"
+                  value={m.color}
                   onChange={(e) => {
-                    const tone = e.target
-                      .value as (typeof MEMBER_TONES)[number];
-                    patchMember(m.id, {
-                      color: LEGACY_TONE_COLORS[tone],
-                    });
+                    const color = parseMemberColor(e.target.value);
+                    if (!color) return;
+                    if (colorTaken(m.id, color)) {
+                      setError(
+                        "Each Active Member needs a different Member Color.",
+                      );
+                      return;
+                    }
+                    setError(null);
+                    patchMember(m.id, { color });
                   }}
-                  style={{ width: 120, flex: "0 0 120px" }}
-                >
-                  {MEMBER_TONES.map((t) => (
-                    <option
-                      key={t}
-                      value={t}
-                      disabled={members.some(
-                        (x) =>
-                          x.status === "active" &&
-                          x.id !== m.id &&
-                          x.color === LEGACY_TONE_COLORS[t],
-                      )}
-                    >
-                      {t}
-                    </option>
-                  ))}
-                </select>
+                  style={{
+                    width: 48,
+                    height: 40,
+                    flex: "0 0 48px",
+                    padding: 2,
+                    cursor: "pointer",
+                  }}
+                />
                 <Button
                   variant="ghost"
                   onClick={() =>

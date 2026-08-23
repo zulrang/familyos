@@ -1,6 +1,6 @@
 /**
- * Member roster domain seam (#6).
- * Pure parse/validate/retire — no HTTP, no Settings UI.
+ * Member roster domain seam (#6) and Member Color surfaces (#20).
+ * Pure parse/validate/retire/paint — no HTTP, no Settings UI.
  */
 
 import assert from "node:assert/strict";
@@ -9,6 +9,7 @@ import {
   activeMembers,
   MAX_ACTIVE_MEMBERS,
   memberById,
+  memberSurface,
   migrateRoster,
   parseMemberColor,
   parseRoster,
@@ -211,5 +212,47 @@ describe("Household Members", () => {
         status: "retired",
       });
     }
+  });
+
+  test("palette Member Colors keep design-skill soft and ink", () => {
+    assert.deepEqual(memberSurface("#a9d8d2"), {
+      fill: "#a9d8d2",
+      soft: "#d6ece9",
+      ink: "#2c5d58",
+    });
+    assert.deepEqual(memberSurface("#f6c9c5"), {
+      fill: "#f6c9c5",
+      soft: "#fbe3e1",
+      ink: "#7d413d",
+    });
+    assert.deepEqual(memberSurface("#dccfea"), {
+      fill: "#dccfea",
+      soft: "#efe8f5",
+      ink: "#54406b",
+    });
+    assert.deepEqual(memberSurface("#c8e5cd"), {
+      fill: "#c8e5cd",
+      soft: "#e5f2e7",
+      ink: "#3a6144",
+    });
+    assert.deepEqual(memberSurface("#f9c0bc"), {
+      fill: "#f9c0bc",
+      soft: "#fce0de",
+      ink: "#8a4340",
+    });
+    assert.deepEqual(memberSurface("#f7e3c8"), {
+      fill: "#f7e3c8",
+      soft: "#fbf1e3",
+      ink: "#7a5a2c",
+    });
+  });
+
+  test("custom #rrggbb Member Colors get readable soft and ink", () => {
+    // Mix fill with white 55% for soft, #1f2a33 72% for ink.
+    assert.deepEqual(memberSurface("#4a90d9"), {
+      fill: "#4a90d9",
+      soft: "#aecdee",
+      ink: "#2b4761",
+    });
   });
 });

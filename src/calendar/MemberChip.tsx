@@ -6,6 +6,7 @@ export function MemberChip({
   name,
   src,
   tone = "teal",
+  surface,
   count,
   active = true,
   onClick,
@@ -14,6 +15,7 @@ export function MemberChip({
   name: string;
   src?: string;
   tone?: MemberTone;
+  surface?: { soft: string; ink: string };
   count?: string;
   active?: boolean;
   onClick?: () => void;
@@ -31,7 +33,7 @@ export function MemberChip({
         border: "none",
         borderRadius: "var(--radius-pill)",
         background: active
-          ? `var(--member-${tone}-soft)`
+          ? (surface?.soft ?? `var(--member-${tone}-soft)`)
           : "var(--surface-sunken)",
         color: "var(--text-body)",
         font: "var(--type-card-meta)",
@@ -42,7 +44,7 @@ export function MemberChip({
         ...style,
       }}
     >
-      <Avatar name={name} src={src} tone={tone} size={30} />
+      <Avatar name={name} src={src} tone={tone} surface={surface} size={30} />
       <span
         style={{
           overflow: "hidden",
