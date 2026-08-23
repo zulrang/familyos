@@ -1,8 +1,8 @@
-import type { TaskItem, TaskList } from "@/lists/types";
+import type { HouseholdList, ListItem } from "@/lists/types";
 import type { ListsGateway } from "./lists-gateway";
 
 export type FakeListsGateway = ListsGateway & {
-  readonly store: Map<string, TaskList>;
+  readonly store: Map<string, HouseholdList>;
   readonly createCount: number;
 };
 
@@ -10,9 +10,9 @@ export type FakeListsGateway = ListsGateway & {
  * In-memory ListsGateway. Lives beside the Google Tasks adapter (`tasks.ts`).
  */
 export function createFakeListsGateway(
-  seed: Iterable<TaskList> = [],
+  seed: Iterable<HouseholdList> = [],
 ): FakeListsGateway {
-  const store = new Map<string, TaskList>();
+  const store = new Map<string, HouseholdList>();
   for (const list of seed) {
     store.set(list.id, {
       id: list.id,
@@ -34,7 +34,7 @@ export function createFakeListsGateway(
     async listSelected(listIds) {
       return listIds
         .map((id) => store.get(id))
-        .filter((l): l is TaskList => l !== undefined)
+        .filter((l): l is HouseholdList => l !== undefined)
         .map((l) => ({
           id: l.id,
           title: l.title,
@@ -45,7 +45,7 @@ export function createFakeListsGateway(
     async createList(title) {
       createCount += 1;
       const id = `tl-new-${createCount}`;
-      const list: TaskList = { id, title, items: [] };
+      const list: HouseholdList = { id, title, items: [] };
       store.set(id, list);
       return { ...list, items: [] };
     },
@@ -60,7 +60,7 @@ export function createFakeListsGateway(
     async addItem(listId, title) {
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
-      const item: TaskItem = {
+      const item: ListItem = {
         id: `item-${cur.items.length + 1}`,
         title,
         done: false,

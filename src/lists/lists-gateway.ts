@@ -1,20 +1,20 @@
-import type { TaskItem, TaskList } from "@/lists/types";
+import type { HouseholdList, ListItem } from "@/lists/types";
 import * as tasks from "./tasks";
 
 /** Port for Household Lists provider operations (Google Tasks adapter / Fake). */
 export type ListsGateway = {
-  listSelected: (listIds: string[]) => Promise<TaskList[]>;
-  createList: (title: string) => Promise<TaskList>;
+  listSelected: (listIds: string[]) => Promise<HouseholdList[]>;
+  createList: (title: string) => Promise<HouseholdList>;
   renameList: (
     listId: string,
     title: string,
   ) => Promise<{ id: string; title: string }>;
-  addItem: (listId: string, title: string) => Promise<TaskItem>;
+  addItem: (listId: string, title: string) => Promise<ListItem>;
   patchItem: (
     listId: string,
     itemId: string,
     patch: { title?: string; done?: boolean },
-  ) => Promise<TaskItem>;
+  ) => Promise<ListItem>;
   clearCompleted: (listId: string) => Promise<void>;
   deleteItem: (listId: string, itemId: string) => Promise<void>;
 };

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 
 export function Avatar({
   name = "",
@@ -12,7 +12,7 @@ export function Avatar({
 }: {
   name?: string;
   src?: string;
-  tone?: MemberTone | string;
+  tone?: MemberPastel | string;
   surface?: { soft: string; ink: string };
   size?: number;
   ring?: boolean;

@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import type { TaskItem, TaskList } from "@/lists/types";
+import type { HouseholdList, ListItem } from "@/lists/types";
 import type { PublicSettings } from "@/settings/types";
 import { ListsScreen } from "./ListsScreen";
 
@@ -45,7 +45,7 @@ function urlOf(input: RequestInfo | URL): string {
   return input.url;
 }
 
-function installFetch(lists: TaskList[]) {
+function installFetch(lists: HouseholdList[]) {
   const store = structuredClone(lists);
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -68,7 +68,7 @@ function installFetch(lists: TaskList[]) {
         if (method === "PATCH") {
           const body = JSON.parse(
             String(init?.body ?? "{}"),
-          ) as Partial<TaskItem>;
+          ) as Partial<ListItem>;
           if (!item) return json({ error: "missing" }, 404);
           Object.assign(item, body);
           return json({ item: { ...item } });
@@ -87,7 +87,7 @@ function installFetch(lists: TaskList[]) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           title: string;
         };
-        const item: TaskItem = {
+        const item: ListItem = {
           id: `new-${body.title}`,
           title: body.title,
           done: false,
@@ -111,13 +111,13 @@ function installFetch(lists: TaskList[]) {
   return { store, fetchMock };
 }
 
-const grocery: TaskList = {
+const grocery: HouseholdList = {
   id: "tl-1",
   title: "Grocery",
   items: [{ id: "i1", title: "Milk", done: false }],
 };
 
-async function renderGrocery(lists: TaskList[] = [grocery]) {
+async function renderGrocery(lists: HouseholdList[] = [grocery]) {
   installFetch(lists);
   render(<ListsScreen />);
   await screen.findByRole("button", { name: "Grocery" });

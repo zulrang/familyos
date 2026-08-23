@@ -1,9 +1,9 @@
 import {
-  colorIdForTones,
+  colorIdForLegacyTones,
   fromDateOnly,
   googleDateTime,
+  LEGACY_TONES_PROP,
   msToDateInput,
-  TONES_PROP,
 } from "@/calendar/calendar";
 import {
   normalizeParticipantIds,
@@ -20,8 +20,8 @@ import {
   untilStamp,
 } from "@/calendar/recurrence";
 import type { CalEvent, GoogleCalendar, SeriesScope } from "@/calendar/types";
+import type { LegacyTone } from "@/members/members";
 import { gfetch } from "@/shared/google";
-import type { MemberTone } from "@/shared/member-tone";
 
 export async function listCalendars(): Promise<GoogleCalendar[]> {
   const res = await gfetch(
@@ -135,7 +135,7 @@ export type EventWrite = {
   endMs: number;
   participantIds: string[];
   /** Google colorId only — never Event Participant identity. */
-  presentationTones?: MemberTone[];
+  legacyTones?: LegacyTone[];
 };
 
 function gBody(
@@ -144,7 +144,7 @@ function gBody(
   timeZone: string,
 ): Record<string, unknown> {
   const participantIds = normalizeParticipantIds(w.participantIds);
-  const tones = w.presentationTones ?? [];
+  const tones = w.legacyTones ?? [];
   let start: GDate;
   let end: GDate;
   if (w.allDay) {
@@ -159,7 +159,7 @@ function gBody(
     start,
     end,
   };
-  const colorId = colorIdForTones(tones);
+  const colorId = colorIdForLegacyTones(tones);
   if (colorId) body.colorId = colorId;
   else if (mode === "update") body.colorId = null;
   // ponytail: Google 400s on null private props ("Required"); "" clears prior lists.
@@ -167,7 +167,7 @@ function gBody(
   const privateProps: Record<string, string> = {
     [PARTICIPANTS_PROP]: serializeParticipantIds(participantIds),
   };
-  if (mode === "update") privateProps[TONES_PROP] = "";
+  if (mode === "update") privateProps[LEGACY_TONES_PROP] = "";
   if (participantIds.length > 0 || mode === "update") {
     body.extendedProperties = { private: privateProps };
   }
