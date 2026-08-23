@@ -1,17 +1,26 @@
 import { presentationTonesFor } from "@/calendar/calendar";
-import {
-  deleteEvent,
-  type EventWrite,
-  insertEvent,
-  listEvents,
-  updateEvent,
-} from "@/calendar/google-events";
+import type { EventWrite } from "@/calendar/google-events";
 import { normalizeParticipantIds } from "@/calendar/participants";
 import { parseScope } from "@/calendar/recurrence";
 import type { SeriesScope } from "@/calendar/types";
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { AuthError } from "@/shared/google";
+import type { CalendarGateway } from "./calendar-gateway";
+
+export type { CalendarGateway };
+
+// ponytail: lazy default so tests can inject a Fake without loading Google.
+async function defaultGateway(): Promise<CalendarGateway> {
+  const { googleCalendarGateway } = await import("./calendar-gateway.ts");
+  return googleCalendarGateway();
+}
+
+async function resolveGateway(
+  gateway?: CalendarGateway,
+): Promise<CalendarGateway> {
+  return gateway ?? (await defaultGateway());
+}
 
 function jsonError(error: string, status: number) {
   return Response.json({ error }, { status });
@@ -75,7 +84,10 @@ function catchAuth(e: unknown): Response {
   return jsonError("failed", 500);
 }
 
-export async function handleListEvents(request: Request): Promise<Response> {
+export async function handleListEvents(
+  request: Request,
+  gateway?: CalendarGateway,
+): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const url = new URL(request.url);
@@ -83,14 +95,23 @@ export async function handleListEvents(request: Request): Promise<Response> {
   const to = url.searchParams.get("to");
   if (!from || !to) return jsonError("from and to required", 400);
   try {
-    const events = await listEvents(gate.calendarId, from, to, gate.timeZone);
+    const gw = await resolveGateway(gateway);
+    const events = await gw.listEvents(
+      gate.calendarId,
+      from,
+      to,
+      gate.timeZone,
+    );
     return Response.json({ events });
   } catch (e) {
     return catchAuth(e);
   }
 }
 
-export async function handleCreateEvent(request: Request): Promise<Response> {
+export async function handleCreateEvent(
+  request: Request,
+  gateway?: CalendarGateway,
+): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const body = parseEventWrite(await readJson(request));
@@ -98,7 +119,8 @@ export async function handleCreateEvent(request: Request): Promise<Response> {
   const s = await readHousehold();
   const participantIds = normalizeParticipantIds(body.participantIds);
   try {
-    const event = await insertEvent(
+    const gw = await resolveGateway(gateway);
+    const event = await gw.insertEvent(
       gate.calendarId,
       {
         title: body.title,
@@ -119,6 +141,7 @@ export async function handleCreateEvent(request: Request): Promise<Response> {
 export async function handleUpdateEvent(
   request: Request,
   id: string,
+  gateway?: CalendarGateway,
 ): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
@@ -127,7 +150,8 @@ export async function handleUpdateEvent(
   const s = await readHousehold();
   const participantIds = normalizeParticipantIds(body.participantIds);
   try {
-    const event = await updateEvent(
+    const gw = await resolveGateway(gateway);
+    const event = await gw.updateEvent(
       gate.calendarId,
       id,
       {
@@ -152,12 +176,14 @@ export async function handleUpdateEvent(
 export async function handleDeleteEvent(
   request: Request,
   id: string,
+  gateway?: CalendarGateway,
 ): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
   const url = new URL(request.url);
   try {
-    await deleteEvent(
+    const gw = await resolveGateway(gateway);
+    await gw.deleteEvent(
       gate.calendarId,
       id,
       parseScope(url.searchParams.get("scope")),
