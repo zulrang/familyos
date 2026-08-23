@@ -9,6 +9,66 @@ import type { ListsGateway } from "./lists-gateway";
 
 export type { ListsGateway };
 
+function jsonError(error: string, status: number) {
+  return Response.json({ error }, { status });
+}
+
+async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function asObject(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return raw as Record<string, unknown>;
+}
+
+function parseRequiredTitle(raw: unknown): string | null {
+  const o = asObject(raw);
+  if (!o || typeof o.title !== "string") return null;
+  const title = o.title.trim();
+  return title || null;
+}
+
+type CreateListBody = { title: string; expectedVersion: unknown };
+
+function parseCreateList(raw: unknown): CreateListBody | null {
+  const title = parseRequiredTitle(raw);
+  if (!title) return null;
+  const o = asObject(raw);
+  return { title, expectedVersion: o?.expectedVersion };
+}
+
+type ItemPatchBody = { title?: string; done?: boolean };
+
+function parseItemPatch(
+  raw: unknown,
+): { ok: true; value: ItemPatchBody } | { ok: false; error: string } {
+  const o = asObject(raw);
+  if (!o) return { ok: false, error: "nothing to patch" };
+  const value: ItemPatchBody = {};
+  if (o.title !== undefined) {
+    if (typeof o.title !== "string")
+      return { ok: false, error: "title required" };
+    const title = o.title.trim();
+    if (!title) return { ok: false, error: "title required" };
+    value.title = title;
+  }
+  if (o.done !== undefined) {
+    if (typeof o.done !== "boolean") {
+      return { ok: false, error: "nothing to patch" };
+    }
+    value.done = o.done;
+  }
+  if (value.title === undefined && value.done === undefined) {
+    return { ok: false, error: "nothing to patch" };
+  }
+  return { ok: true, value };
+}
+
 function notSelected(): Response {
   return Response.json({ error: "not a Household List" }, { status: 404 });
 }
@@ -65,13 +125,8 @@ export async function handleCreateList(
 ): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  const body = (await request.json()) as {
-    title?: string;
-    expectedVersion?: unknown;
-  };
-  const title = body.title?.trim();
-  if (!title)
-    return Response.json({ error: "title required" }, { status: 400 });
+  const body = parseCreateList(await readJson(request));
+  if (!body) return jsonError("title required", 400);
 
   try {
     const household = await readHousehold();
@@ -83,7 +138,7 @@ export async function handleCreateList(
       return versionConflict(household);
     }
     const gw = await resolveGateway(gateway);
-    const list = await gw.createList(title);
+    const list = await gw.createList(body.title);
     const result = await updateHousehold(body.expectedVersion, {
       listIds: [...household.listIds, list.id],
     });
@@ -110,10 +165,8 @@ export async function handleRenameList(
   if (isUnauthorized(display)) return display;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
-  const body = (await request.json()) as { title?: string };
-  const title = body.title?.trim();
-  if (!title)
-    return Response.json({ error: "title required" }, { status: 400 });
+  const title = parseRequiredTitle(await readJson(request));
+  if (!title) return jsonError("title required", 400);
   try {
     const gw = await resolveGateway(gateway);
     const list = await gw.renameList(listId, title);
@@ -132,13 +185,11 @@ export async function handleUnselectList(
 ): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  const body = (await request.json().catch(() => ({}))) as {
-    expectedVersion?: unknown;
-  };
+  const expectedVersion = asObject(await readJson(request))?.expectedVersion;
   const household = await readHousehold();
   if (!isHouseholdList(listId, household.listIds)) return notSelected();
 
-  const result = await updateHousehold(body.expectedVersion, {
+  const result = await updateHousehold(expectedVersion, {
     listIds: household.listIds.filter((id) => id !== listId),
   });
   if (!result.ok) {
@@ -160,10 +211,8 @@ export async function handleAddItem(
   if (isUnauthorized(display)) return display;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
-  const body = (await request.json()) as { title?: string };
-  const title = body.title?.trim();
-  if (!title)
-    return Response.json({ error: "title required" }, { status: 400 });
+  const title = parseRequiredTitle(await readJson(request));
+  if (!title) return jsonError("title required", 400);
   try {
     const gw = await resolveGateway(gateway);
     const item = await gw.addItem(listId, title);
@@ -183,20 +232,11 @@ export async function handlePatchItem(
   if (isUnauthorized(display)) return display;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
-  const body = (await request.json()) as { title?: string; done?: boolean };
-  const title = typeof body.title === "string" ? body.title.trim() : undefined;
-  if (title === undefined && typeof body.done !== "boolean") {
-    return Response.json({ error: "nothing to patch" }, { status: 400 });
-  }
-  if (title !== undefined && !title) {
-    return Response.json({ error: "title required" }, { status: 400 });
-  }
+  const parsed = parseItemPatch(await readJson(request));
+  if (!parsed.ok) return jsonError(parsed.error, 400);
   try {
     const gw = await resolveGateway(gateway);
-    const item = await gw.patchItem(listId, itemId, {
-      title,
-      done: body.done,
-    });
+    const item = await gw.patchItem(listId, itemId, parsed.value);
     return Response.json({ item });
   } catch (e) {
     return listsError(e);

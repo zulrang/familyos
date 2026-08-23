@@ -199,6 +199,22 @@ describe("Household Lists HTTP", () => {
     assert.equal(store.get("tl-personal")?.title, "Personal");
   });
 
+  test("unparseable add-item body is rejected without reaching the provider", async () => {
+    const before = store.get("tl-selected")?.items.slice() ?? [];
+    const res = await handleAddItem(
+      req("http://familyos.test/api/lists/tl-selected/items", {
+        method: "POST",
+        body: JSON.stringify({ title: 12 }),
+      }),
+      "tl-selected",
+      gateway,
+    );
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, "title required");
+    assert.deepEqual(store.get("tl-selected")?.items, before);
+  });
+
   test("add, check, uncheck, and clear work on selected Household Lists", async () => {
     const add = await handleAddItem(
       req("http://familyos.test/api/lists/tl-selected/items", {

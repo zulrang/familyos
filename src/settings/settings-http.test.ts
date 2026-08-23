@@ -189,6 +189,19 @@ describe("Household Configuration HTTP", () => {
     assert.equal((await getSettings(second.cookie)).configVersion, 1);
   });
 
+  test("unparseable Household fields are rejected without writing", async () => {
+    const before = await readHousehold();
+    const res = await patchSettings(first.cookie, {
+      familyName: 1,
+      expectedVersion: before.configVersion,
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, "invalid body");
+    assert.equal((await readHousehold()).familyName, before.familyName);
+    assert.equal((await readHousehold()).configVersion, before.configVersion);
+  });
+
   test("Household field patch with matching expectedVersion bumps configVersion", async () => {
     const res = await patchSettings(first.cookie, {
       familyName: "RenamedHousehold",
