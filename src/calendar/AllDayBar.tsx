@@ -4,12 +4,14 @@ import type { MemberTone } from "@/shared/member-tone";
 export function AllDayBar({
   label,
   tone = "sage",
+  soft,
   multi = false,
   onClick,
   style,
 }: {
   label: string;
   tone?: MemberTone;
+  soft?: string;
   multi?: boolean;
   onClick?: () => void;
   style?: CSSProperties;
@@ -27,7 +29,7 @@ export function AllDayBar({
         borderRadius: "var(--radius-pill)",
         background: multi
           ? "var(--stripe-multi)"
-          : `var(--member-${tone}-soft)`,
+          : (soft ?? `var(--member-${tone}-soft)`),
         color: "var(--text-title)",
         font: "var(--type-card-title)",
         overflow: "hidden",

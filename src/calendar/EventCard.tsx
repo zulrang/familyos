@@ -6,6 +6,8 @@ export function EventCard({
   title,
   time,
   tone = "teal",
+  fill,
+  ink,
   multi = false,
   people = [],
   height,
@@ -15,12 +17,20 @@ export function EventCard({
   title: string;
   time?: string;
   tone?: MemberTone;
+  fill?: string;
+  ink?: string;
   multi?: boolean;
-  people?: { name?: string; src?: string; tone?: string }[];
+  people?: {
+    name?: string;
+    src?: string;
+    tone?: string;
+    surface?: { soft: string; ink: string };
+  }[];
   height?: number;
   onClick?: () => void;
   style?: CSSProperties;
 }) {
+  const onFill = multi ? undefined : ink;
   return (
     <button
       type="button"
@@ -34,8 +44,10 @@ export function EventCard({
         padding: "10px 12px",
         border: "none",
         borderRadius: "var(--radius-event)",
-        background: multi ? "var(--stripe-multi)" : `var(--member-${tone})`,
-        color: "var(--text-title)",
+        background: multi
+          ? "var(--stripe-multi)"
+          : (fill ?? `var(--member-${tone})`),
+        color: onFill ?? "var(--text-title)",
         cursor: onClick ? "pointer" : "default",
         overflow: "hidden",
         width: "100%",
@@ -48,7 +60,7 @@ export function EventCard({
         <span
           style={{
             font: "var(--type-card-meta)",
-            color: "var(--neutral-700)",
+            color: onFill ?? "var(--neutral-700)",
             marginTop: 2,
           }}
         >

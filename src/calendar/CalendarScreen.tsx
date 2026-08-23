@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   addDays,
   coversDay,
-  eventTone,
+  eventPaint,
   formatTimeRange,
   fromDateAndTime,
   fromDateOnly,
@@ -31,12 +31,14 @@ import {
 } from "@/calendar/calendar";
 import { whoFromIds } from "@/calendar/event-who";
 import type { CalEvent } from "@/calendar/types";
-import type { Member } from "@/members/members";
-import { legacyToneForColor } from "@/members/members";
+import {
+  LEGACY_TONE_COLORS,
+  type Member,
+  memberSurface,
+} from "@/members/members";
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
-import type { MemberTone } from "@/shared/member-tone";
 import { formatClock, zonedDayOfMonth } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
@@ -48,9 +50,9 @@ import { MemberChip } from "./MemberChip";
 import { NowLine } from "./NowLine";
 import { TimeGutter } from "./TimeGutter";
 
-function chipTone(m: Member): MemberTone {
-  if (m.status !== "active") return "sand";
-  return legacyToneForColor(m.color) ?? "sand";
+function chipSurface(m: Member) {
+  if (m.status !== "active") return memberSurface(LEGACY_TONE_COLORS.sand);
+  return memberSurface(m.color);
 }
 
 function toDraft(ev: CalEvent, timeZone: string): EventDraft {
@@ -336,7 +338,7 @@ export function CalendarScreen() {
             <MemberChip
               key={p.id}
               name={p.name}
-              tone={chipTone(p)}
+              surface={chipSurface(p)}
               count={String(
                 events.filter((e) => peopleOf([p], e).length).length,
               )}
@@ -412,13 +414,13 @@ export function CalendarScreen() {
                     )
                     .map((e) => {
                       const people = peopleOf(members, e);
-                      const { tone, multi } = eventTone(people);
+                      const paint = eventPaint(people);
                       return (
                         <AllDayBar
                           key={e.id}
                           label={e.title}
-                          tone={tone}
-                          multi={multi}
+                          soft={paint.soft}
+                          multi={paint.multi}
                           style={{ height: 30, cursor: "pointer" }}
                           onClick={() => setSheet(toDraft(e, timeZone))}
                         />
@@ -487,7 +489,7 @@ export function CalendarScreen() {
                   />
                   {timed.map((e) => {
                     const people = peopleOf(members, e);
-                    const { tone, multi } = eventTone(people);
+                    const paint = eventPaint(people);
                     const h = heightPx(e.startMs, e.endMs);
                     const w = `calc((100% - 12px) / ${e.cols})`;
                     return (
@@ -505,12 +507,13 @@ export function CalendarScreen() {
                         <EventCard
                           title={e.title}
                           time={formatTimeRange(e.startMs, e.endMs, timeZone)}
-                          tone={tone}
-                          multi={multi}
+                          fill={paint.fill}
+                          ink={paint.onFill}
+                          multi={paint.multi}
                           height={h}
                           people={people.map((p) => ({
                             name: p.name,
-                            tone: chipTone(p),
+                            surface: chipSurface(p),
                           }))}
                           onClick={() => setSheet(toDraft(e, timeZone))}
                           style={{ height: "100%", minHeight: 0 }}

@@ -191,8 +191,74 @@ const COLOR_TO_LEGACY_TONE = Object.fromEntries(
 
 /**
  * Map a Member Color back onto the design-skill pastel name when it matches.
- * Custom colors have no legacy tone — callers fall back for Google/CSS-var paths.
+ * Custom colors have no legacy tone — Google colorId mapping still uses this.
  */
 export function legacyToneForColor(color: MemberColor): LegacyTone | null {
   return COLOR_TO_LEGACY_TONE[color] ?? null;
+}
+
+/** Wall fill / soft / ink for a Member Color. Palette hexes keep design tokens. */
+export type MemberSurface = {
+  fill: MemberColor;
+  soft: MemberColor;
+  ink: MemberColor;
+};
+
+const LEGACY_SURFACES: Record<LegacyTone, MemberSurface> = {
+  teal: { fill: "#a9d8d2", soft: "#d6ece9", ink: "#2c5d58" },
+  blush: { fill: "#f6c9c5", soft: "#fbe3e1", ink: "#7d413d" },
+  lilac: { fill: "#dccfea", soft: "#efe8f5", ink: "#54406b" },
+  sage: { fill: "#c8e5cd", soft: "#e5f2e7", ink: "#3a6144" },
+  coral: { fill: "#f9c0bc", soft: "#fce0de", ink: "#8a4340" },
+  sand: { fill: "#f7e3c8", soft: "#fbf1e3", ink: "#7a5a2c" },
+};
+
+function hexByte(color: MemberColor, i: number): number {
+  return Number.parseInt(color.slice(1 + i * 2, 3 + i * 2), 16);
+}
+
+function mixHex(a: MemberColor, b: MemberColor, t: number): MemberColor {
+  const mix = (i: number) =>
+    Math.round(hexByte(a, i) * (1 - t) + hexByte(b, i) * t)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${mix(0)}${mix(1)}${mix(2)}`;
+}
+
+export function memberSurface(color: MemberColor): MemberSurface {
+  const tone = legacyToneForColor(color);
+  if (tone) return LEGACY_SURFACES[tone];
+  // ponytail: linear sRGB mix; switch to relative luminance if a custom fill
+  // fails contrast on the wall.
+  return {
+    fill: color,
+    soft: mixHex(color, "#ffffff", 0.55),
+    ink: mixHex(color, "#1f2a33", 0.72),
+  };
+}
+
+/** Text on a Member Color fill. `MemberSurface.ink` is for `soft`, not fill. */
+const ON_FILL_DARK = "#1f2a33";
+const ON_FILL_LIGHT = "#ffffff";
+
+export function onFillInk(fill: MemberColor): MemberColor {
+  return contrast(fill, ON_FILL_DARK) >= contrast(fill, ON_FILL_LIGHT)
+    ? ON_FILL_DARK
+    : ON_FILL_LIGHT;
+}
+
+function contrast(a: MemberColor, b: MemberColor): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const hi = Math.max(la, lb);
+  const lo = Math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+function relativeLuminance(color: MemberColor): number {
+  const lin = (i: number) => {
+    const s = hexByte(color, i) / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(0) + 0.7152 * lin(1) + 0.0722 * lin(2);
 }

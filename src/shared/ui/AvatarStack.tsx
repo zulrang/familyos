@@ -2,7 +2,12 @@ import type { CSSProperties } from "react";
 import { Avatar } from "./Avatar";
 import { Badge } from "./Badge";
 
-type Person = { name?: string; src?: string; tone?: string };
+type Person = {
+  name?: string;
+  src?: string;
+  tone?: string;
+  surface?: { soft: string; ink: string };
+};
 
 export function AvatarStack({
   people = [],
@@ -25,6 +30,7 @@ export function AvatarStack({
           name={p.name}
           src={p.src}
           tone={p.tone}
+          surface={p.surface}
           size={size}
           style={{ marginLeft: i ? -8 : 0 }}
         />

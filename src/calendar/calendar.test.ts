@@ -8,6 +8,7 @@ import {
   colorIdForTones,
   coversDay,
   DAY_COUNT,
+  eventPaint,
   eventTone,
   formatTimeRange,
   fromDateAndTime,
@@ -164,6 +165,28 @@ describe("Household Calendar", () => {
       { tone: "teal", multi: false },
     );
     assert.deepEqual(eventTone([]), { tone: "sand", multi: false });
+  });
+
+  test("paints custom Member Color fill and soft for a single Active participant", () => {
+    const kid: Member = {
+      id: "kid",
+      name: "Kid",
+      status: "active",
+      color: "#4a90d9",
+    };
+    assert.deepEqual(eventPaint([kid]), {
+      multi: false,
+      fill: "#4a90d9",
+      soft: "#aecdee",
+      onFill: "#1f2a33",
+    });
+    assert.deepEqual(eventPaint([]), {
+      multi: false,
+      fill: "#f7e3c8",
+      soft: "#fbf1e3",
+      onFill: "#1f2a33",
+    });
+    assert.equal(eventPaint(peopleOf(members, bath)).multi, true);
   });
 
   test("Household Events stay visible under every Member filter", () => {

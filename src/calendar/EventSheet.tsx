@@ -2,8 +2,11 @@
 
 import { applyWhoSelection, showSeveralOption } from "@/calendar/event-who";
 import type { SeriesScope } from "@/calendar/types";
-import type { Member } from "@/members/members";
-import { legacyToneForColor } from "@/members/members";
+import {
+  LEGACY_TONE_COLORS,
+  type Member,
+  memberSurface,
+} from "@/members/members";
 import { Button } from "@/shared/ui/Button";
 import { IconButton } from "@/shared/ui/IconButton";
 import { MemberChip } from "./MemberChip";
@@ -195,7 +198,7 @@ export function EventSheet({
               <MemberChip
                 key={m.id}
                 name={m.name}
-                tone={legacyToneForColor(m.color) ?? "sand"}
+                surface={memberSurface(m.color)}
                 active={draft.memberIds.includes(m.id)}
                 onClick={() =>
                   set({
@@ -211,7 +214,7 @@ export function EventSheet({
               <MemberChip
                 key={m.id}
                 name={`${m.name || "Unnamed"} (retired)`}
-                tone="sand"
+                surface={memberSurface(LEGACY_TONE_COLORS.sand)}
                 active
                 style={{ flex: "0 0 auto", opacity: 0.85 }}
               />

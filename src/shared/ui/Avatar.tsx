@@ -5,6 +5,7 @@ export function Avatar({
   name = "",
   src,
   tone = "teal",
+  surface,
   size = 34,
   ring = true,
   style,
@@ -12,6 +13,7 @@ export function Avatar({
   name?: string;
   src?: string;
   tone?: MemberTone | string;
+  surface?: { soft: string; ink: string };
   size?: number;
   ring?: boolean;
   style?: CSSProperties;
@@ -27,8 +29,8 @@ export function Avatar({
         width: size,
         height: size,
         borderRadius: "var(--radius-pill)",
-        background: `var(--member-${tone}-soft)`,
-        color: `var(--member-${tone}-ink)`,
+        background: surface?.soft ?? `var(--member-${tone}-soft)`,
+        color: surface?.ink ?? `var(--member-${tone}-ink)`,
         font: `var(--fw-bold) ${Math.round(size * 0.42)}px/1 var(--font-sans)`,
         boxShadow: ring ? "0 0 0 2px var(--white)" : "none",
         overflow: "hidden",

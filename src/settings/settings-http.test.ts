@@ -366,4 +366,20 @@ describe("Household Configuration HTTP", () => {
     assert.equal((await readHousehold()).timeZone, before.timeZone);
     assert.equal((await readHousehold()).configVersion, before.configVersion);
   });
+
+  test("duplicate Active Member Colors are rejected without writing", async () => {
+    const before = await readHousehold();
+    const res = await patchSettings(first.cookie, {
+      members: [
+        { id: "a", name: "Ada", status: "active", color: "#a9d8d2" },
+        { id: "b", name: "Ben", status: "active", color: "#a9d8d2" },
+      ],
+      expectedVersion: before.configVersion,
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, "duplicate_active_color");
+    assert.deepEqual((await readHousehold()).members, before.members);
+    assert.equal((await readHousehold()).configVersion, before.configVersion);
+  });
 });
