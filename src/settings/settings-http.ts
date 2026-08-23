@@ -1,8 +1,15 @@
-import { readHousehold, updateHousehold } from "@/settings/settings";
+import { type HouseholdMember, parseRoster } from "@/members/members";
+import {
+  parseListIds,
+  readHousehold,
+  updateHousehold,
+} from "@/settings/settings";
+import type { HouseholdListId } from "@/settings/types";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { googleConfigured } from "@/shared/google-env";
 import { setDisplayUiScale } from "@/shared/pairing";
 import { readProvider } from "@/shared/provider";
+import { isIanaTimeZone } from "@/shared/time";
 import { parseUiScale, type UiScale } from "@/shared/ui-scale";
 
 function publicSettings(
@@ -35,6 +42,76 @@ async function publicFromStores(uiScale: UiScale) {
   );
 }
 
+async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return undefined;
+  }
+}
+
+type SettingsPatch = {
+  familyName?: string;
+  members?: HouseholdMember[];
+  calendarId?: string | null;
+  listIds?: HouseholdListId[];
+  timeZone?: string;
+  uiScale?: UiScale;
+  expectedVersion?: unknown;
+};
+
+function parseSettingsPatch(
+  raw: unknown,
+  uiScaleFallback: UiScale,
+): { ok: true; value: SettingsPatch } | { ok: false; error: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "invalid body" };
+  }
+  const o = raw as Record<string, unknown>;
+  const value: SettingsPatch = { expectedVersion: o.expectedVersion };
+
+  if (o.familyName !== undefined) {
+    if (typeof o.familyName !== "string") {
+      return { ok: false, error: "invalid body" };
+    }
+    value.familyName = o.familyName;
+  }
+  if (o.members !== undefined) {
+    const roster = parseRoster(o.members);
+    if (!roster.ok) return { ok: false, error: roster.error };
+    value.members = roster.members;
+  }
+  if (o.calendarId !== undefined) {
+    if (o.calendarId !== null && typeof o.calendarId !== "string") {
+      return { ok: false, error: "invalid body" };
+    }
+    value.calendarId = o.calendarId;
+  }
+  if (o.listIds !== undefined) {
+    value.listIds = parseListIds(o.listIds);
+  }
+  if (o.timeZone !== undefined) {
+    if (!isIanaTimeZone(o.timeZone)) {
+      return { ok: false, error: "invalid time zone" };
+    }
+    value.timeZone = o.timeZone;
+  }
+  if (o.uiScale !== undefined) {
+    value.uiScale = parseUiScale(o.uiScale, uiScaleFallback);
+  }
+  return { ok: true, value };
+}
+
+function touchesHousehold(body: SettingsPatch): boolean {
+  return (
+    body.familyName !== undefined ||
+    body.members !== undefined ||
+    body.calendarId !== undefined ||
+    body.listIds !== undefined ||
+    body.timeZone !== undefined
+  );
+}
+
 export async function handleGetSettings(request: Request): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
@@ -44,27 +121,16 @@ export async function handleGetSettings(request: Request): Promise<Response> {
 export async function handlePatchSettings(request: Request): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  const body = (await request.json()) as {
-    familyName?: string;
-    members?: unknown;
-    calendarId?: string | null;
-    listIds?: unknown;
-    timeZone?: unknown;
-    uiScale?: unknown;
-    expectedVersion?: unknown;
-  };
-
-  const touchesHousehold =
-    body.familyName !== undefined ||
-    body.members !== undefined ||
-    body.calendarId !== undefined ||
-    body.listIds !== undefined ||
-    body.timeZone !== undefined;
+  const parsed = parseSettingsPatch(await readJson(request), display.uiScale);
+  if (!parsed.ok) {
+    return Response.json({ error: parsed.error }, { status: 400 });
+  }
+  const body = parsed.value;
 
   let uiScale = display.uiScale;
   const provider = await readProvider();
 
-  if (touchesHousehold) {
+  if (touchesHousehold(body)) {
     const current = await readHousehold();
     let calendarTimeZone = current.calendarTimeZone;
     const calendarId =
@@ -88,12 +154,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
       calendarId,
       calendarTimeZone,
       listIds: body.listIds,
-      timeZone:
-        body.timeZone === undefined
-          ? undefined
-          : typeof body.timeZone === "string"
-            ? body.timeZone
-            : "",
+      timeZone: body.timeZone,
     });
     if (!result.ok) {
       if (result.reason === "roster") {
@@ -114,7 +175,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
   }
 
   if (body.uiScale !== undefined) {
-    uiScale = parseUiScale(body.uiScale, display.uiScale);
+    uiScale = body.uiScale;
     const ok = await setDisplayUiScale(display.id, uiScale);
     if (!ok) {
       return Response.json({ error: "display missing" }, { status: 404 });

@@ -1,18 +1,63 @@
 import { presentationTonesFor } from "@/calendar/calendar";
 import {
   deleteEvent,
+  type EventWrite,
   insertEvent,
   listEvents,
   updateEvent,
 } from "@/calendar/google-events";
 import { normalizeParticipantIds } from "@/calendar/participants";
 import { parseScope } from "@/calendar/recurrence";
+import type { SeriesScope } from "@/calendar/types";
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { AuthError } from "@/shared/google";
 
 function jsonError(error: string, status: number) {
   return Response.json({ error }, { status });
+}
+
+async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function parseEventWrite(raw: unknown): EventWrite | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.title !== "string") return null;
+  if (typeof o.allDay !== "boolean") return null;
+  if (typeof o.startMs !== "number" || !Number.isFinite(o.startMs)) return null;
+  if (typeof o.endMs !== "number" || !Number.isFinite(o.endMs)) return null;
+  let participantIds: string[] = [];
+  if (o.participantIds !== undefined) {
+    if (
+      !Array.isArray(o.participantIds) ||
+      o.participantIds.some((id) => typeof id !== "string")
+    ) {
+      return null;
+    }
+    participantIds = o.participantIds;
+  }
+  return {
+    title: o.title,
+    allDay: o.allDay,
+    startMs: o.startMs,
+    endMs: o.endMs,
+    participantIds,
+  };
+}
+
+function parseEventUpdate(
+  raw: unknown,
+): (EventWrite & { scope: SeriesScope }) | null {
+  const body = parseEventWrite(raw);
+  if (!body) return null;
+  const o = raw as Record<string, unknown>;
+  return { ...body, scope: parseScope(o.scope) };
 }
 
 async function requireHouseholdCalendar(
@@ -48,15 +93,10 @@ export async function handleListEvents(request: Request): Promise<Response> {
 export async function handleCreateEvent(request: Request): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
+  const body = parseEventWrite(await readJson(request));
+  if (!body) return jsonError("invalid body", 400);
   const s = await readHousehold();
-  const body = (await request.json()) as {
-    title: string;
-    allDay: boolean;
-    startMs: number;
-    endMs: number;
-    participantIds?: string[];
-  };
-  const participantIds = normalizeParticipantIds(body.participantIds ?? []);
+  const participantIds = normalizeParticipantIds(body.participantIds);
   try {
     const event = await insertEvent(
       gate.calendarId,
@@ -82,16 +122,10 @@ export async function handleUpdateEvent(
 ): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
+  const body = parseEventUpdate(await readJson(request));
+  if (!body) return jsonError("invalid body", 400);
   const s = await readHousehold();
-  const body = (await request.json()) as {
-    title: string;
-    allDay: boolean;
-    startMs: number;
-    endMs: number;
-    participantIds?: string[];
-    scope?: string;
-  };
-  const participantIds = normalizeParticipantIds(body.participantIds ?? []);
+  const participantIds = normalizeParticipantIds(body.participantIds);
   try {
     const event = await updateEvent(
       gate.calendarId,
@@ -104,7 +138,7 @@ export async function handleUpdateEvent(
         participantIds,
         presentationTones: presentationTonesFor(s.members, participantIds),
       },
-      parseScope(body.scope),
+      body.scope,
       gate.timeZone,
     );
     return Response.json({ event });
