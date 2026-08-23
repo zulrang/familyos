@@ -257,9 +257,11 @@ describe("Household Members", () => {
     });
   });
 
-  test("on-fill ink stays dark on pastels and light on dark fills", () => {
+  test("on-fill ink picks the higher-contrast of dark and white", () => {
     assert.equal(onFillInk("#a9d8d2"), "#1f2a33");
     assert.equal(onFillInk("#ffffff"), "#1f2a33");
+    assert.equal(onFillInk("#4a90d9"), "#1f2a33");
+    assert.equal(onFillInk("#5b9bd5"), "#1f2a33");
     assert.equal(onFillInk("#1a2744"), "#ffffff");
     assert.equal(onFillInk("#000000"), "#ffffff");
   });

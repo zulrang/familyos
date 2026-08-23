@@ -178,7 +178,7 @@ describe("Household Calendar", () => {
       multi: false,
       fill: "#4a90d9",
       soft: "#aecdee",
-      onFill: "#ffffff",
+      onFill: "#1f2a33",
     });
     assert.deepEqual(eventPaint([]), {
       multi: false,

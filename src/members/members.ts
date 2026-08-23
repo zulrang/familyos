@@ -238,8 +238,21 @@ export function memberSurface(color: MemberColor): MemberSurface {
 }
 
 /** Text on a Member Color fill. `MemberSurface.ink` is for `soft`, not fill. */
+const ON_FILL_DARK = "#1f2a33";
+const ON_FILL_LIGHT = "#ffffff";
+
 export function onFillInk(fill: MemberColor): MemberColor {
-  return relativeLuminance(fill) >= 0.45 ? "#1f2a33" : "#ffffff";
+  return contrast(fill, ON_FILL_DARK) >= contrast(fill, ON_FILL_LIGHT)
+    ? ON_FILL_DARK
+    : ON_FILL_LIGHT;
+}
+
+function contrast(a: MemberColor, b: MemberColor): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const hi = Math.max(la, lb);
+  const lo = Math.min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
 }
 
 function relativeLuminance(color: MemberColor): number {
