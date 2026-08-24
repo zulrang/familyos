@@ -21,3 +21,12 @@ export type HouseholdList = {
   title: string;
   items: ListItem[];
 };
+
+/**
+ * GET /api/lists payload. `stale` means last-known cache; Display mutations
+ * are unavailable until a live read succeeds.
+ */
+export type ListsRead = {
+  lists: HouseholdList[];
+  stale: boolean;
+};

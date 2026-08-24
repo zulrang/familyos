@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { splitLeadingEmoji } from "@/lists/list-text";
-import type { HouseholdList, ListItem } from "@/lists/types";
+import type { ListItem, ListsRead } from "@/lists/types";
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
@@ -48,7 +48,10 @@ type Sheet =
 export function ListsScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
-  const [lists, setLists] = useState<HouseholdList[]>([]);
+  const [listsRead, setListsRead] = useState<ListsRead>({
+    lists: [],
+    stale: false,
+  });
   const [configVersion, setConfigVersion] = useState(1);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -75,30 +78,34 @@ export function ListsScreen() {
     const s = (await sRes.json()) as PublicSettings;
     setSettings(s);
     setConfigVersion(s.configVersion);
-    if (!s.signedIn) {
-      setLists([]);
-      return;
-    }
     const res = await fetch("/api/lists");
     if (await redirectIfPairingRequired(res)) return;
     if (res.status === 401) {
-      setLists([]);
+      setListsRead({ lists: [], stale: false });
       setNeedsReauth(true);
       return;
     }
     if (!res.ok) {
+      setListsRead((cur) => ({ ...cur, stale: true }));
       setError("Could not load lists.");
       return;
     }
-    const data = (await res.json()) as { lists: HouseholdList[] };
-    setLists(data.lists);
+    const data = (await res.json()) as ListsRead;
+    setListsRead({
+      lists: Array.isArray(data.lists) ? data.lists : [],
+      stale: data.stale === true,
+    });
     setNeedsReauth(false);
     setError(null);
   }
 
+  const lists = listsRead.lists;
+  const stale = listsRead.stale;
+
   function patchItem(listId: string, itemId: string, next: Partial<ListItem>) {
-    setLists((ls) =>
-      ls.map((l) =>
+    setListsRead((cur) => ({
+      ...cur,
+      lists: cur.lists.map((l) =>
         l.id !== listId
           ? l
           : {
@@ -108,7 +115,7 @@ export function ListsScreen() {
               ),
             },
       ),
-    );
+    }));
   }
 
   async function toggle(listId: string, item: ListItem) {
@@ -154,11 +161,12 @@ export function ListsScreen() {
     }
     const data = (await res.json()) as { item: ListItem };
     setDrafts((d) => ({ ...d, [listId]: "" }));
-    setLists((ls) =>
-      ls.map((l) =>
+    setListsRead((cur) => ({
+      ...cur,
+      lists: cur.lists.map((l) =>
         l.id !== listId ? l : { ...l, items: [data.item, ...l.items] },
       ),
-    );
+    }));
   }
 
   async function clearChecked(listId: string) {
@@ -174,11 +182,12 @@ export function ListsScreen() {
       setError("Could not clear checked items.");
       return;
     }
-    setLists((ls) =>
-      ls.map((l) =>
+    setListsRead((cur) => ({
+      ...cur,
+      lists: cur.lists.map((l) =>
         l.id !== listId ? l : { ...l, items: l.items.filter((i) => !i.done) },
       ),
-    );
+    }));
   }
 
   async function saveSheet() {
@@ -260,13 +269,14 @@ export function ListsScreen() {
         setError("Could not delete List Item.");
         return;
       }
-      setLists((ls) =>
-        ls.map((l) =>
+      setListsRead((cur) => ({
+        ...cur,
+        lists: cur.lists.map((l) =>
           l.id !== listId
             ? l
             : { ...l, items: l.items.filter((i) => i.id !== itemId) },
         ),
-      );
+      }));
       setSheet(null);
     } finally {
       setBusy(false);
@@ -304,13 +314,16 @@ export function ListsScreen() {
   }
 
   const signedIn = Boolean(settings?.signedIn) && !needsReauth;
+  const canMutate = signedIn && !stale;
   const banner = !settings
     ? null
-    : !settings.googleConfigured
-      ? "Add Google credentials in .env.local, then sign in under Settings."
-      : !settings.signedIn || needsReauth
-        ? "Sign in with Google under Settings to load lists. If you already signed in, sign out and back in to grant Tasks access."
-        : error;
+    : stale
+      ? "Google is unavailable. Lists are read-only."
+      : !settings.googleConfigured
+        ? "Add Google credentials in .env.local, then sign in under Settings."
+        : !settings.signedIn || needsReauth
+          ? "Sign in with Google under Settings to load lists. If you already signed in, sign out and back in to grant Tasks access."
+          : error;
 
   const many = lists.length > 4;
 
@@ -340,7 +353,7 @@ export function ListsScreen() {
           {banner}
         </div>
       ) : null}
-      {signedIn && lists.length === 0 && !banner ? (
+      {canMutate && lists.length === 0 && !banner ? (
         <div
           style={{
             flex: 1,
@@ -354,7 +367,7 @@ export function ListsScreen() {
           Tap + to add a list, or select lists under Settings
         </div>
       ) : null}
-      {signedIn && lists.length > 0 ? (
+      {lists.length > 0 ? (
         <div
           style={{
             display: "grid",
@@ -378,52 +391,57 @@ export function ListsScreen() {
                 title={list.title}
                 count={remaining}
                 tone={tone}
-                onTitleClick={() =>
-                  setSheet({
-                    kind: "edit",
-                    id: list.id,
-                    title: list.title,
-                    confirmDelete: false,
-                  })
+                onTitleClick={
+                  canMutate
+                    ? () =>
+                        setSheet({
+                          kind: "edit",
+                          id: list.id,
+                          title: list.title,
+                          confirmDelete: false,
+                        })
+                    : undefined
                 }
                 footer={
-                  <>
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        addItem(list.id);
-                      }}
-                    >
-                      <input
-                        className="fos-input"
-                        placeholder="Add item"
-                        value={drafts[list.id] ?? ""}
-                        onChange={(e) =>
-                          setDrafts((d) => ({
-                            ...d,
-                            [list.id]: e.target.value,
-                          }))
-                        }
-                      />
-                    </form>
-                    {list.items.some((it) => it.done) ? (
-                      <button
-                        type="button"
-                        onClick={() => clearChecked(list.id)}
-                        style={{
-                          border: "none",
-                          background: "transparent",
-                          color: "var(--text-faint)",
-                          font: "var(--type-card-meta)",
-                          cursor: "pointer",
-                          padding: "4px 2px",
-                          textAlign: "left",
+                  canMutate ? (
+                    <>
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          addItem(list.id);
                         }}
                       >
-                        Clear checked
-                      </button>
-                    ) : null}
-                  </>
+                        <input
+                          className="fos-input"
+                          placeholder="Add item"
+                          value={drafts[list.id] ?? ""}
+                          onChange={(e) =>
+                            setDrafts((d) => ({
+                              ...d,
+                              [list.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      </form>
+                      {list.items.some((it) => it.done) ? (
+                        <button
+                          type="button"
+                          onClick={() => clearChecked(list.id)}
+                          style={{
+                            border: "none",
+                            background: "transparent",
+                            color: "var(--text-faint)",
+                            font: "var(--type-card-meta)",
+                            cursor: "pointer",
+                            padding: "4px 2px",
+                            textAlign: "left",
+                          }}
+                        >
+                          Clear checked
+                        </button>
+                      ) : null}
+                    </>
+                  ) : undefined
                 }
               >
                 {list.items.map((item) => {
@@ -435,15 +453,20 @@ export function ListsScreen() {
                       emoji={emoji}
                       checked={item.done}
                       tone={tone}
-                      onToggle={() => toggle(list.id, item)}
-                      onEdit={() =>
-                        setSheet({
-                          kind: "edit-item",
-                          listId: list.id,
-                          itemId: item.id,
-                          title: item.title,
-                          confirmDelete: false,
-                        })
+                      onToggle={
+                        canMutate ? () => toggle(list.id, item) : undefined
+                      }
+                      onEdit={
+                        canMutate
+                          ? () =>
+                              setSheet({
+                                kind: "edit-item",
+                                listId: list.id,
+                                itemId: item.id,
+                                title: item.title,
+                                confirmDelete: false,
+                              })
+                          : undefined
                       }
                     />
                   );
@@ -453,7 +476,7 @@ export function ListsScreen() {
           })}
         </div>
       ) : null}
-      {signedIn ? (
+      {canMutate ? (
         <Fab
           label="Add list"
           onClick={() => setSheet({ kind: "create", title: "" })}

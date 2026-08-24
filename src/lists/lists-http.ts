@@ -3,9 +3,17 @@ import {
   readHousehold,
   updateHousehold,
 } from "@/settings/settings";
+import { AuthError } from "@/shared/auth-error";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
-import { listsError } from "./lists-error";
+import { readProvider } from "@/shared/provider";
+import {
+  dropHouseholdListCache,
+  putHouseholdListCache,
+  readSelectedListsCache,
+} from "./lists-cache";
+import { listsError, ProviderUnavailableError } from "./lists-error";
 import type { ListsGateway } from "./lists-gateway";
+import type { ListsRead } from "./types";
 
 export type { ListsGateway };
 
@@ -103,18 +111,74 @@ function versionConflict(config: {
   );
 }
 
+async function refreshSelectedListsCache(
+  connectionId: string,
+  listIds: string[],
+  lists: ListsRead["lists"],
+): Promise<void> {
+  const returned = new Set(lists.map((l) => l.id));
+  for (const list of lists) {
+    await putHouseholdListCache(connectionId, list);
+  }
+  for (const id of listIds) {
+    if (!returned.has(id)) await dropHouseholdListCache(connectionId, id);
+  }
+}
+
+async function cachedSelectedLists(
+  connectionId: string | null,
+  listIds: string[],
+): Promise<ListsRead["lists"]> {
+  if (!connectionId) return [];
+  return readSelectedListsCache(connectionId, listIds);
+}
+
+async function rejectIfReadOnly(): Promise<Response | null> {
+  const provider = await readProvider();
+  if (provider.tokens?.access_token) return null;
+  const { listIds } = await readHousehold();
+  const cached = await cachedSelectedLists(
+    provider.providerConnectionId,
+    listIds,
+  );
+  if (cached.length) return listsError(new ProviderUnavailableError());
+  return listsError(new AuthError());
+}
+
+async function requireListsWrite(request: Request): Promise<Response | null> {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
+  return rejectIfReadOnly();
+}
+
 export async function handleGetLists(
   request: Request,
   gateway?: ListsGateway,
 ): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
+  const { listIds } = await readHousehold();
+  const provider = await readProvider();
   try {
+    if (!provider.tokens?.access_token) throw new AuthError();
     const gw = await resolveGateway(gateway);
-    const { listIds } = await readHousehold();
     const lists = await gw.listSelected(listIds);
-    return Response.json({ lists });
+    if (provider.providerConnectionId) {
+      await refreshSelectedListsCache(
+        provider.providerConnectionId,
+        listIds,
+        lists,
+      );
+    }
+    return Response.json({ lists, stale: false } satisfies ListsRead);
   } catch (e) {
+    const lists = await cachedSelectedLists(
+      provider.providerConnectionId,
+      listIds,
+    );
+    if (lists.length) {
+      return Response.json({ lists, stale: true } satisfies ListsRead);
+    }
     return listsError(e);
   }
 }
@@ -123,8 +187,8 @@ export async function handleCreateList(
   request: Request,
   gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const body = parseCreateList(await readJson(request));
   if (!body) return jsonError("title required", 400);
 
@@ -161,8 +225,8 @@ export async function handleRenameList(
   listId: string,
   gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
   const title = parseRequiredTitle(await readJson(request));
@@ -182,12 +246,27 @@ export async function handleRenameList(
 export async function handleUnselectList(
   request: Request,
   listId: string,
+  gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const expectedVersion = asObject(await readJson(request))?.expectedVersion;
   const household = await readHousehold();
   if (!isHouseholdList(listId, household.listIds)) return notSelected();
+  if (
+    typeof expectedVersion !== "number" ||
+    !Number.isInteger(expectedVersion) ||
+    expectedVersion !== household.configVersion
+  ) {
+    return versionConflict(household);
+  }
+
+  try {
+    const gw = await resolveGateway(gateway);
+    await gw.listSelected([listId]);
+  } catch (e) {
+    return listsError(e);
+  }
 
   const result = await updateHousehold(expectedVersion, {
     listIds: household.listIds.filter((id) => id !== listId),
@@ -207,8 +286,8 @@ export async function handleAddItem(
   listId: string,
   gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
   const title = parseRequiredTitle(await readJson(request));
@@ -228,8 +307,8 @@ export async function handlePatchItem(
   itemId: string,
   gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
   const parsed = parseItemPatch(await readJson(request));
@@ -248,8 +327,8 @@ export async function handleClearCompleted(
   listId: string,
   gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
   try {
@@ -267,8 +346,8 @@ export async function handleDeleteItem(
   itemId: string,
   gateway?: ListsGateway,
 ): Promise<Response> {
-  const display = await requireTrustedDisplay(request);
-  if (isUnauthorized(display)) return display;
+  const deniedWrite = await requireListsWrite(request);
+  if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
   try {

@@ -1,6 +1,7 @@
 /**
- * HTTP acceptance seam for selected Household Lists (#8) and
- * List Item mutations (#9). Uses shared Lists Fake — no live Google.
+ * HTTP acceptance seam for selected Household Lists (#8), List Item
+ * mutations (#9), and account-bound outage cache (#13). Uses shared
+ * Lists Fake — no live Google.
  */
 
 import assert from "node:assert/strict";
@@ -384,6 +385,7 @@ describe("Household Lists HTTP", () => {
         body: JSON.stringify({ expectedVersion: before.configVersion }),
       }),
       target,
+      gateway,
     );
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
@@ -420,5 +422,433 @@ describe("Household Lists HTTP", () => {
     );
     assert.equal(res.status, 409);
     assert.deepEqual((await readHousehold()).listIds, before.listIds);
+  });
+});
+
+describe("Household Lists outage cache", () => {
+  let dataRoot: string;
+  let handleGetLists: typeof import("./lists-http.ts").handleGetLists;
+  let handleAddItem: typeof import("./lists-http.ts").handleAddItem;
+  let handlePatchItem: typeof import("./lists-http.ts").handlePatchItem;
+  let handleClearCompleted: typeof import("./lists-http.ts").handleClearCompleted;
+  let handleDeleteItem: typeof import("./lists-http.ts").handleDeleteItem;
+  let handleRenameList: typeof import("./lists-http.ts").handleRenameList;
+  let handleCreateList: typeof import("./lists-http.ts").handleCreateList;
+  let handleUnselectList: typeof import("./lists-http.ts").handleUnselectList;
+  let writeHousehold: typeof import("@/settings/settings").writeHousehold;
+  let readHousehold: typeof import("@/settings/settings").readHousehold;
+  let writeProvider: typeof import("@/shared/provider").writeProvider;
+  let emitStartupPairingCode: typeof import("@/shared/pairing").emitStartupPairingCode;
+  let DISPLAY_COOKIE: typeof import("@/shared/pairing").DISPLAY_COOKIE;
+  let handlePair: typeof import("@/displays/pairing-http").handlePair;
+
+  let cookieHeader: string;
+  let gateway: ReturnType<typeof createFakeListsGateway>;
+
+  beforeAll(async () => {
+    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-lists-cache-"));
+    process.env.FAMILYOS_DATA_DIR = dataRoot;
+
+    ({
+      handleGetLists,
+      handleAddItem,
+      handlePatchItem,
+      handleClearCompleted,
+      handleDeleteItem,
+      handleRenameList,
+      handleCreateList,
+      handleUnselectList,
+    } = await import("./lists-http.ts"));
+    ({ writeHousehold, readHousehold } = await import("@/settings/settings"));
+    ({ writeProvider } = await import("@/shared/provider"));
+    ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import(
+      "@/shared/pairing"
+    ));
+    ({ handlePair } = await import("@/displays/pairing-http"));
+
+    await mkdir(dataRoot, { recursive: true });
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: ["tl-groceries", "tl-chores"],
+      timeZone: "America/New_York",
+      configVersion: 1,
+    });
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+
+    gateway = createFakeListsGateway([
+      {
+        id: "tl-groceries",
+        title: "Groceries",
+        items: [{ id: "g1", title: "Milk", done: false }],
+      },
+      {
+        id: "tl-chores",
+        title: "Chores",
+        items: [{ id: "c1", title: "Trash", done: true }],
+      },
+      {
+        id: "tl-personal",
+        title: "Personal",
+        items: [{ id: "p1", title: "Secret", done: false }],
+      },
+    ]);
+
+    function cookieFrom(res: Response): string | null {
+      const raw = res.headers.getSetCookie?.() ?? [];
+      if (raw.length) {
+        const line = raw.find((c) => c.startsWith(`${DISPLAY_COOKIE}=`));
+        return line?.split(";")[0] ?? null;
+      }
+      const single = res.headers.get("set-cookie");
+      if (!single) return null;
+      return single.split(";")[0] ?? null;
+    }
+
+    const startupCode = await emitStartupPairingCode();
+    assert.ok(startupCode);
+    const pairRes = await handlePair(
+      new Request("http://familyos.test/api/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: startupCode }),
+      }),
+    );
+    assert.equal(pairRes.status, 200);
+    const cookie = cookieFrom(pairRes);
+    assert.ok(cookie);
+    cookieHeader = cookie;
+  });
+
+  afterAll(async () => {
+    await rm(dataRoot, { recursive: true, force: true });
+  });
+
+  function req(url: string, init?: RequestInit): Request {
+    return new Request(url, {
+      ...init,
+      headers: {
+        cookie: cookieHeader,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  }
+
+  test("an outage returns cached selected Household Lists as stale", async () => {
+    const live = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    assert.equal(live.status, 200);
+    const liveBody = (await live.json()) as {
+      lists: HouseholdList[];
+      stale: boolean;
+    };
+    assert.equal(liveBody.stale, false);
+    assert.deepEqual(
+      liveBody.lists.map((l) => l.id),
+      ["tl-groceries", "tl-chores"],
+    );
+
+    gateway.offline = true;
+    const stale = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    assert.equal(stale.status, 200);
+    const staleBody = (await stale.json()) as {
+      lists: HouseholdList[];
+      stale: boolean;
+    };
+    assert.equal(staleBody.stale, true);
+    assert.deepEqual(
+      staleBody.lists.map((l) => [l.id, l.title, l.items[0]?.title]),
+      [
+        ["tl-groceries", "Groceries", "Milk"],
+        ["tl-chores", "Chores", "Trash"],
+      ],
+    );
+    assert.equal(
+      staleBody.lists.some((l) => l.id === "tl-personal"),
+      false,
+    );
+  });
+
+  test("List Item and Household List mutations are unavailable while read-only", async () => {
+    gateway.offline = false;
+    assert.equal(
+      (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
+        .status,
+      200,
+    );
+    gateway.offline = true;
+    const before = await readHousehold();
+    const groceryItems = gateway.store.get("tl-groceries")?.items.slice() ?? [];
+
+    for (const res of [
+      await handleAddItem(
+        req("http://familyos.test/api/lists/tl-groceries/items", {
+          method: "POST",
+          body: JSON.stringify({ title: "Eggs" }),
+        }),
+        "tl-groceries",
+        gateway,
+      ),
+      await handlePatchItem(
+        req("http://familyos.test/api/lists/tl-groceries/items/g1", {
+          method: "PATCH",
+          body: JSON.stringify({ done: true }),
+        }),
+        "tl-groceries",
+        "g1",
+        gateway,
+      ),
+      await handleClearCompleted(
+        req("http://familyos.test/api/lists/tl-chores/clear", {
+          method: "POST",
+        }),
+        "tl-chores",
+        gateway,
+      ),
+      await handleDeleteItem(
+        req("http://familyos.test/api/lists/tl-groceries/items/g1", {
+          method: "DELETE",
+        }),
+        "tl-groceries",
+        "g1",
+        gateway,
+      ),
+      await handleRenameList(
+        req("http://familyos.test/api/lists/tl-groceries", {
+          method: "PATCH",
+          body: JSON.stringify({ title: "Market" }),
+        }),
+        "tl-groceries",
+        gateway,
+      ),
+      await handleCreateList(
+        req("http://familyos.test/api/lists", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Outage list",
+            expectedVersion: before.configVersion,
+          }),
+        }),
+        gateway,
+      ),
+      await handleUnselectList(
+        req("http://familyos.test/api/lists/tl-groceries", {
+          method: "DELETE",
+          body: JSON.stringify({ expectedVersion: before.configVersion }),
+        }),
+        "tl-groceries",
+        gateway,
+      ),
+    ]) {
+      assert.equal(res.status, 503);
+      const body = (await res.json()) as { error: string };
+      assert.equal(body.error, "read-only");
+    }
+
+    assert.deepEqual((await readHousehold()).listIds, before.listIds);
+    assert.deepEqual(gateway.store.get("tl-groceries")?.items, groceryItems);
+    assert.equal(gateway.store.get("tl-groceries")?.title, "Groceries");
+    assert.equal(gateway.store.get("tl-chores")?.items[0]?.done, true);
+  });
+
+  test("disconnect returns matching cache as stale without live provider data", async () => {
+    gateway.offline = false;
+    assert.equal(
+      (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
+        .status,
+      200,
+    );
+    await writeProvider({
+      tokens: null,
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    const stale = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    assert.equal(stale.status, 200);
+    const body = (await stale.json()) as {
+      lists: HouseholdList[];
+      stale: boolean;
+    };
+    assert.equal(body.stale, true);
+    assert.deepEqual(
+      body.lists.map((l) => l.id),
+      ["tl-groceries", "tl-chores"],
+    );
+    const add = await handleAddItem(
+      req("http://familyos.test/api/lists/tl-groceries/items", {
+        method: "POST",
+        body: JSON.stringify({ title: "Eggs" }),
+      }),
+      "tl-groceries",
+      gateway,
+    );
+    assert.equal(add.status, 503);
+  });
+
+  test("a different Provider Connection never inherits the previous cache", async () => {
+    gateway.offline = false;
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    assert.equal(
+      (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
+        .status,
+      200,
+    );
+    await writeProvider({
+      tokens: {
+        access_token: "access-b",
+        refresh_token: "refresh-b",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-b",
+    });
+    gateway.offline = true;
+    const res = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    if (res.status === 200) {
+      const body = (await res.json()) as {
+        lists: HouseholdList[];
+        stale: boolean;
+      };
+      assert.equal(
+        body.lists.some((l) => l.id === "tl-groceries" || l.id === "tl-chores"),
+        false,
+      );
+    } else {
+      assert.ok(res.status >= 400);
+    }
+    await writeProvider({
+      tokens: null,
+      oauthState: null,
+      providerConnectionId: "acct-b",
+    });
+    const disconnected = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    if (disconnected.status === 200) {
+      const body = (await disconnected.json()) as {
+        lists: HouseholdList[];
+      };
+      assert.equal(
+        body.lists.some((l) => l.id === "tl-groceries" || l.id === "tl-chores"),
+        false,
+      );
+    } else {
+      assert.ok(disconnected.status >= 400);
+    }
+  });
+
+  test("unselected Household Lists do not reappear from cache during an outage", async () => {
+    gateway.offline = false;
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: ["tl-groceries", "tl-chores"],
+      timeZone: "America/New_York",
+      configVersion: (await readHousehold()).configVersion,
+    });
+    assert.equal(
+      (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
+        .status,
+      200,
+    );
+    const before = await readHousehold();
+    const unselect = await handleUnselectList(
+      req("http://familyos.test/api/lists/tl-groceries", {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: before.configVersion }),
+      }),
+      "tl-groceries",
+      gateway,
+    );
+    assert.equal(unselect.status, 200);
+    gateway.offline = true;
+    const stale = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    assert.equal(stale.status, 200);
+    const body = (await stale.json()) as {
+      lists: HouseholdList[];
+      stale: boolean;
+    };
+    assert.equal(body.stale, true);
+    assert.deepEqual(
+      body.lists.map((l) => l.id),
+      ["tl-chores"],
+    );
+  });
+
+  test("live writable behavior resumes after Google recovers", async () => {
+    gateway.offline = false;
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    const live = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    assert.equal(live.status, 200);
+    assert.equal(((await live.json()) as { stale: boolean }).stale, false);
+    const add = await handleAddItem(
+      req("http://familyos.test/api/lists/tl-chores/items", {
+        method: "POST",
+        body: JSON.stringify({ title: "Vacuum" }),
+      }),
+      "tl-chores",
+      gateway,
+    );
+    assert.equal(add.status, 200);
+    assert.equal(
+      ((await add.json()) as { item: { title: string } }).item.title,
+      "Vacuum",
+    );
   });
 });
