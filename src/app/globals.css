@@ -43,6 +43,7 @@
   --surface-rail-active: #dcebf6;
   --surface-card: var(--white);
   --surface-sunken: var(--neutral-50);
+  --surface-weekend: var(--neutral-100);
   --surface-grid-line: var(--neutral-200);
   --text-title: var(--neutral-900);
   --text-body: var(--neutral-800);

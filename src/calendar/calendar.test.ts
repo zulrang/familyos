@@ -16,6 +16,7 @@ import {
   googleDateTime,
   gridHeight,
   HOUR_PX,
+  isWeekend,
   layoutColumns,
   MULTI_COLOR_ID,
   mountGridScrollTop,
@@ -24,6 +25,7 @@ import {
   NOW_LINE_PX,
   nowLineTop,
   nowLineY,
+  pageFiveDays,
   peopleOf,
   presentationTonesFor,
   remainingDays,
@@ -32,8 +34,9 @@ import {
   statusEvent,
   TONE_COLOR_ID,
   toneFromColorId,
+  viewDays,
+  visibleFetchBounds,
   visibleUnderMemberFilter,
-  weekDays,
   weekdayLabel,
 } from "./calendar";
 
@@ -55,15 +58,51 @@ const bath: CalEvent = {
 };
 
 describe("Household Calendar", () => {
-  test("pages a rolling day window from a given day", () => {
-    const wed = new Date(2026, 7, 19, 11, 20);
-    assert.equal(DAY_COUNT, 7);
-    const days = weekDays(wed, HOST);
-    assert.equal(days.length, 7);
-    assert.equal(days[0].getDate(), 19);
-    assert.equal(days[0].getHours(), 0);
-    assert.equal(days[6].getDate(), 25);
-    assert.equal(weekDays(wed, HOST, 5).length, 5);
+  test("opens a rolling Five-Day View and pages by five Household dates", () => {
+    const tz = "America/New_York";
+    const wed = new Date("2026-08-19T15:00:00.000Z");
+    assert.equal(DAY_COUNT, 5);
+    const days = viewDays(wed, tz);
+    assert.equal(days.length, 5);
+    assert.equal(days[0].toISOString(), "2026-08-19T04:00:00.000Z");
+    assert.equal(days[4].toISOString(), "2026-08-23T04:00:00.000Z");
+
+    const next = pageFiveDays(days[0], 1, tz);
+    assert.equal(next.toISOString(), "2026-08-24T04:00:00.000Z");
+    const nextDays = viewDays(next, tz);
+    assert.equal(nextDays[4].toISOString(), "2026-08-28T04:00:00.000Z");
+
+    const prev = pageFiveDays(days[0], -1, tz);
+    assert.equal(prev.toISOString(), "2026-08-14T04:00:00.000Z");
+
+    const today = viewDays(wed, tz);
+    assert.equal(today[0].toISOString(), "2026-08-19T04:00:00.000Z");
+    assert.equal(today[4].toISOString(), "2026-08-23T04:00:00.000Z");
+  });
+
+  test("provider fetch bounds match the visible Five-Day View", () => {
+    const tz = "America/New_York";
+    const wed = new Date("2026-08-19T15:00:00.000Z");
+    const bounds = visibleFetchBounds(wed, tz);
+    assert.equal(bounds.from, "2026-08-19T04:00:00.000Z");
+    assert.equal(bounds.to, "2026-08-24T04:00:00.000Z");
+
+    const next = visibleFetchBounds(pageFiveDays(wed, 1, tz), tz);
+    assert.equal(next.from, "2026-08-24T04:00:00.000Z");
+    assert.equal(next.to, "2026-08-29T04:00:00.000Z");
+  });
+
+  test("Saturday and Sunday are weekends in the Household Time Zone", () => {
+    const tz = "America/New_York";
+    const days = viewDays(new Date("2026-08-19T15:00:00.000Z"), tz);
+    assert.equal(isWeekend(days[0], tz), false);
+    assert.equal(isWeekend(days[1], tz), false);
+    assert.equal(isWeekend(days[2], tz), false);
+    assert.equal(isWeekend(days[3], tz), true);
+    assert.equal(isWeekend(days[4], tz), true);
+
+    const monday = viewDays(new Date("2026-08-24T15:00:00.000Z"), tz);
+    for (const d of monday) assert.equal(isWeekend(d, tz), false);
   });
 
   test("formats timed ranges for the wall", () => {
@@ -287,7 +326,7 @@ describe("Household Calendar", () => {
   test("fetch bounds and day placement stay civil across DST", () => {
     const tz = "America/New_York";
     const afternoon = new Date("2026-03-08T17:00:00.000Z");
-    const days = weekDays(afternoon, tz, 7);
+    const days = viewDays(afternoon, tz, 7);
     assert.equal(days[0].toISOString(), "2026-03-08T05:00:00.000Z");
     assert.equal(days[1].toISOString(), "2026-03-09T04:00:00.000Z");
     assert.equal(days[6].toISOString(), "2026-03-14T04:00:00.000Z");
@@ -304,7 +343,7 @@ describe("Household Calendar", () => {
     assert.equal(coversDay(march8, days[1], tz), false);
   });
 
-  test("maps grid slots to hour starts within the day", () => {
+  test("maps grid slots to hour starts on that column's Household date", () => {
     const slotDay = new Date(2026, 7, 19);
     assert.equal(slotStart(slotDay, 0, HOST)?.getHours(), 7);
     assert.equal(slotStart(slotDay, 119, HOST)?.getHours(), 7);
@@ -312,6 +351,12 @@ describe("Household Calendar", () => {
     assert.equal(slotStart(slotDay, 13 * 120, HOST)?.getHours(), 20);
     assert.equal(slotStart(slotDay, 14 * 120, HOST), null);
     assert.equal(slotStart(slotDay, -1, HOST), null);
+
+    const tz = "America/New_York";
+    const friday = new Date("2026-08-21T16:00:00.000Z");
+    const start = slotStart(friday, 0, tz);
+    assert.equal(msToDateInput(start?.getTime() ?? 0, tz), "2026-08-21");
+    assert.equal(msToTimeInput(start?.getTime() ?? 0, tz), "07:00");
   });
 
   test("clamps the now line to the grid and restores scroll position", () => {

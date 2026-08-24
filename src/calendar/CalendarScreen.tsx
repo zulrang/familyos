@@ -13,20 +13,23 @@ import {
   heightPx,
   hoursInView,
   isSameDay,
+  isWeekend,
   layoutColumns,
   mountGridScrollTop,
   msToDateInput,
   msToTimeInput,
   nextHour,
   nowLineTop,
+  pageFiveDays,
   peopleOf,
   remainingDays,
   slotStart,
   statusEvent,
   timedOnDay,
   topPx,
+  viewDays,
+  visibleFetchBounds,
   visibleUnderMemberFilter,
-  weekDays,
   weekdayLabel,
 } from "@/calendar/calendar";
 import { whoFromIds } from "@/calendar/event-who";
@@ -42,6 +45,7 @@ import { redirectIfPairingRequired } from "@/shared/display-client";
 import { formatClock, zonedDayOfMonth } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
+import { IconButton } from "@/shared/ui/IconButton";
 import { AllDayBar } from "./AllDayBar";
 import { DayHeader } from "./DayHeader";
 import { EventCard } from "./EventCard";
@@ -103,7 +107,8 @@ function LiveClock({ timeZone }: { timeZone: string }) {
 let savedGridScroll: number | null = null;
 
 export function CalendarScreen() {
-  const [today, setToday] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date());
+  const [anchor, setAnchor] = useState<Date | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [off, setOff] = useState<Record<string, boolean>>({});
@@ -115,13 +120,12 @@ export function CalendarScreen() {
   const headerRef = useRef<HTMLDivElement>(null);
 
   const timeZone = settings?.timeZone;
-  const days = timeZone ? weekDays(today, timeZone) : [];
+  const viewStart = anchor ?? now;
+  const days = timeZone ? viewDays(viewStart, timeZone) : [];
   const members = settings?.members ?? [];
-  const from = days[0]?.toISOString();
-  const to =
-    timeZone && days.length
-      ? addDays(days[days.length - 1], 1, timeZone).toISOString()
-      : undefined;
+  const bounds = timeZone ? visibleFetchBounds(viewStart, timeZone) : null;
+  const from = bounds?.from;
+  const to = bounds?.to;
 
   async function load() {
     const sRes = await fetch("/api/settings");
@@ -132,15 +136,9 @@ export function CalendarScreen() {
       setEvents([]);
       return;
     }
-    const range = weekDays(today, s.timeZone);
-    const rangeFrom = range[0].toISOString();
-    const rangeTo = addDays(
-      range[range.length - 1],
-      1,
-      s.timeZone,
-    ).toISOString();
+    const range = visibleFetchBounds(viewStart, s.timeZone);
     const eRes = await fetch(
-      `/api/events?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`,
+      `/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
     );
     if (await redirectIfPairingRequired(eRes)) return;
     if (eRes.status === 401) {
@@ -161,12 +159,12 @@ export function CalendarScreen() {
     if (!timeZone) return;
     const t = setInterval(() => {
       const n = new Date();
-      setToday((p) => (isSameDay(p, n, timeZone) ? p : n));
+      setNow((p) => (isSameDay(p, n, timeZone) ? p : n));
     }, 60_000);
     return () => clearInterval(t);
   }, [timeZone]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible week bounds change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible range bounds change
   useEffect(() => {
     load().catch(() => setError("Could not load calendar."));
   }, [from, to]);
@@ -190,7 +188,7 @@ export function CalendarScreen() {
 
   const visible = (ev: CalEvent) => visibleUnderMemberFilter(ev, members, off);
 
-  const status = timeZone ? statusEvent(events, today, timeZone) : null;
+  const status = timeZone ? statusEvent(events, now, timeZone) : null;
 
   async function save(draft: EventDraft) {
     if (!timeZone) return;
@@ -308,6 +306,23 @@ export function CalendarScreen() {
             <Button icon="eye-off" onClick={() => setShowChips((v) => !v)}>
               Filter
             </Button>
+            <IconButton
+              icon="chevron-left"
+              label="Previous five days"
+              onClick={() => {
+                if (timeZone) setAnchor(pageFiveDays(viewStart, -1, timeZone));
+              }}
+            />
+            <Button size="sm" onClick={() => setAnchor(null)}>
+              Today
+            </Button>
+            <IconButton
+              icon="chevron-right"
+              label="Next five days"
+              onClick={() => {
+                if (timeZone) setAnchor(pageFiveDays(viewStart, 1, timeZone));
+              }}
+            />
           </>
         }
       />
@@ -329,7 +344,7 @@ export function CalendarScreen() {
               {status.title}{" "}
               {timeZone ? (
                 <span style={{ color: "var(--text-muted)" }}>
-                  {remainingDays(status, today, timeZone)} days
+                  {remainingDays(status, now, timeZone)} days
                 </span>
               ) : null}
             </span>
@@ -391,12 +406,15 @@ export function CalendarScreen() {
                   borderLeft: "1px solid var(--surface-grid-line)",
                   display: "flex",
                   flexDirection: "column",
+                  background: isWeekend(d, timeZone)
+                    ? "var(--surface-weekend)"
+                    : undefined,
                 }}
               >
                 <DayHeader
                   weekday={weekdayLabel(d, timeZone)}
                   date={zonedDayOfMonth(d, timeZone)}
-                  today={isSameDay(d, today, timeZone)}
+                  today={isSameDay(d, now, timeZone)}
                 />
                 <div
                   style={{
@@ -447,7 +465,7 @@ export function CalendarScreen() {
               const timed = layoutColumns(
                 events.filter((e) => timedOnDay(e, d, timeZone) && visible(e)),
               );
-              const isToday = isSameDay(d, today, timeZone);
+              const isToday = isSameDay(d, now, timeZone);
               return (
                 <div
                   key={`g-${d.toISOString()}`}
@@ -456,6 +474,9 @@ export function CalendarScreen() {
                     borderLeft: "1px solid var(--surface-grid-line)",
                     position: "relative",
                     height: gh,
+                    backgroundColor: isWeekend(d, timeZone)
+                      ? "var(--surface-weekend)"
+                      : undefined,
                     backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX}px)`,
                   }}
                 >
