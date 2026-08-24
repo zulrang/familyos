@@ -182,12 +182,18 @@ export function CalendarScreen() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible range bounds change
   useEffect(() => {
     const ac = new AbortController();
-    load(ac.signal).catch((err: unknown) => {
-      if (ac.signal.aborted) return;
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setError("Could not load calendar.");
-    });
-    return () => ac.abort();
+    const run = () =>
+      load(ac.signal).catch((err: unknown) => {
+        if (ac.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError("Could not load calendar.");
+      });
+    run();
+    const poll = setInterval(run, 60_000);
+    return () => {
+      ac.abort();
+      clearInterval(poll);
+    };
   }, [from, to]);
 
   useEffect(() => {

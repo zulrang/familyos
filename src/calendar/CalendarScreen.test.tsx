@@ -275,4 +275,39 @@ describe("CalendarScreen outage cache", () => {
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
+
+  test("stale Calendar becomes writable again after Google recovers", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    let stale = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = urlOf(input);
+        if (url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (url.includes("/api/events")) {
+          return json({ events: [practice], stale });
+        }
+        return json({ error: "unhandled" }, 500);
+      }),
+    );
+    render(<CalendarScreen />);
+
+    expect(
+      await screen.findByText("Google is unavailable. Calendar is read-only."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+
+    stale = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(await screen.findByRole("button", { name: "Add" })).toBeVisible();
+    expect(
+      screen.queryByText("Google is unavailable. Calendar is read-only."),
+    ).toBeNull();
+  });
 });
