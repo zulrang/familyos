@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { splitLeadingEmoji } from "@/lists/list-text";
-import type { TaskItem, TaskList } from "@/lists/types";
+import type { HouseholdList, ListItem } from "@/lists/types";
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
-import type { MemberTone } from "@/shared/member-tone";
 import { formatClock } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
@@ -14,14 +13,7 @@ import { IconButton } from "@/shared/ui/IconButton";
 import { ListPanel } from "./ListPanel";
 import { ListRow } from "./ListRow";
 
-const LIST_TONES: MemberTone[] = [
-  "sand",
-  "blush",
-  "lilac",
-  "teal",
-  "sage",
-  "coral",
-];
+const LIST_TONES = ["sand", "blush", "lilac", "teal", "sage", "coral"] as const;
 
 function headerDate(d: Date, timeZone: string): string {
   return d.toLocaleDateString("en-US", {
@@ -56,7 +48,7 @@ type Sheet =
 export function ListsScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
-  const [lists, setLists] = useState<TaskList[]>([]);
+  const [lists, setLists] = useState<HouseholdList[]>([]);
   const [configVersion, setConfigVersion] = useState(1);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -98,13 +90,13 @@ export function ListsScreen() {
       setError("Could not load lists.");
       return;
     }
-    const data = (await res.json()) as { lists: TaskList[] };
+    const data = (await res.json()) as { lists: HouseholdList[] };
     setLists(data.lists);
     setNeedsReauth(false);
     setError(null);
   }
 
-  function patchItem(listId: string, itemId: string, next: Partial<TaskItem>) {
+  function patchItem(listId: string, itemId: string, next: Partial<ListItem>) {
     setLists((ls) =>
       ls.map((l) =>
         l.id !== listId
@@ -119,7 +111,7 @@ export function ListsScreen() {
     );
   }
 
-  async function toggle(listId: string, item: TaskItem) {
+  async function toggle(listId: string, item: ListItem) {
     const done = !item.done;
     patchItem(listId, item.id, { done });
     try {
@@ -160,7 +152,7 @@ export function ListsScreen() {
       setError("Could not add item.");
       return;
     }
-    const data = (await res.json()) as { item: TaskItem };
+    const data = (await res.json()) as { item: ListItem };
     setDrafts((d) => ({ ...d, [listId]: "" }));
     setLists((ls) =>
       ls.map((l) =>

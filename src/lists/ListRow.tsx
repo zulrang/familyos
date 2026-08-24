@@ -1,5 +1,5 @@
 import { type CSSProperties, type PointerEvent, useRef } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 import { Checkbox } from "@/shared/ui/Checkbox";
 
 const HOLD_MS = 500;
@@ -17,7 +17,7 @@ export function ListRow({
   label: string;
   emoji?: string;
   checked?: boolean;
-  tone?: MemberTone;
+  tone?: MemberPastel;
   onToggle?: (next: boolean) => void;
   onEdit?: () => void;
   style?: CSSProperties;

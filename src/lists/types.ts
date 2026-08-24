@@ -9,15 +9,15 @@ export type GoogleTasklist = {
 };
 
 /** List Item on the wire. */
-export type TaskItem = {
+export type ListItem = {
   id: string;
   title: string;
   done: boolean;
 };
 
 /** Household List panel payload (selected tasklist + its List Items). */
-export type TaskList = {
+export type HouseholdList = {
   id: HouseholdListId;
   title: string;
-  items: TaskItem[];
+  items: ListItem[];
 };

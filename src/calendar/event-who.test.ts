@@ -7,9 +7,9 @@ import { describe, test } from "vitest";
 import type { Member } from "@/members/members";
 import {
   applyWhoSelection,
+  eventWhoFromIds,
   historicalParticipantIds,
   showSeveralOption,
-  whoFromIds,
 } from "./event-who";
 
 const roster: Member[] = [
@@ -20,9 +20,12 @@ const roster: Member[] = [
 
 describe("Event Participant selection", () => {
   test("derives selection mode from participant IDs", () => {
-    assert.equal(whoFromIds([]), "none");
-    assert.equal(whoFromIds(["dad"]), "dad");
-    assert.equal(whoFromIds(["dad", "ex"]), "several");
+    assert.deepEqual(eventWhoFromIds([]), { kind: "none" });
+    assert.deepEqual(eventWhoFromIds(["dad"]), {
+      kind: "one",
+      memberId: "dad",
+    });
+    assert.deepEqual(eventWhoFromIds(["dad", "ex"]), { kind: "several" });
   });
 
   test("identifies Retired Members still on the event", () => {
@@ -31,46 +34,67 @@ describe("Event Participant selection", () => {
   });
 
   test("picking one Active Member keeps Retired IDs and switches to several", () => {
-    assert.deepEqual(applyWhoSelection("dad", roster, ["ex"]), {
-      who: "several",
-      memberIds: ["dad", "ex"],
-    });
+    assert.deepEqual(
+      applyWhoSelection({ kind: "one", memberId: "dad" }, roster, ["ex"]),
+      {
+        who: { kind: "several" },
+        memberIds: ["dad", "ex"],
+      },
+    );
   });
 
   test("clearing participants yields a Household Event", () => {
-    assert.deepEqual(applyWhoSelection("none", roster, ["dad", "ex"]), {
-      who: "none",
-      memberIds: [],
-    });
+    assert.deepEqual(
+      applyWhoSelection({ kind: "none" }, roster, ["dad", "ex"]),
+      {
+        who: { kind: "none" },
+        memberIds: [],
+      },
+    );
   });
 
   test("multi-select keeps the current participant list", () => {
-    assert.deepEqual(applyWhoSelection("several", roster, ["ex"]), {
-      who: "several",
+    assert.deepEqual(applyWhoSelection({ kind: "several" }, roster, ["ex"]), {
+      who: { kind: "several" },
       memberIds: ["ex"],
     });
   });
 
   test("without historical IDs, a single Active pick replaces the list", () => {
-    assert.deepEqual(applyWhoSelection("mom", roster, ["dad"]), {
-      who: "mom",
-      memberIds: ["mom"],
-    });
+    assert.deepEqual(
+      applyWhoSelection({ kind: "one", memberId: "mom" }, roster, ["dad"]),
+      {
+        who: { kind: "one", memberId: "mom" },
+        memberIds: ["mom"],
+      },
+    );
   });
 
   test("offers multi-select when several participants or historical IDs require it", () => {
     assert.equal(
-      showSeveralOption(1, 1, { who: "several", memberIds: ["dad", "ex"] }),
+      showSeveralOption(1, 1, {
+        who: { kind: "several" },
+        memberIds: ["dad", "ex"],
+      }),
       true,
     );
     assert.equal(
-      showSeveralOption(1, 1, { who: "dad", memberIds: ["dad", "ex"] }),
+      showSeveralOption(1, 1, {
+        who: { kind: "one", memberId: "dad" },
+        memberIds: ["dad", "ex"],
+      }),
       true,
     );
     assert.equal(
-      showSeveralOption(1, 0, { who: "dad", memberIds: ["dad"] }),
+      showSeveralOption(1, 0, {
+        who: { kind: "one", memberId: "dad" },
+        memberIds: ["dad"],
+      }),
       false,
     );
-    assert.equal(showSeveralOption(2, 0, { who: "none", memberIds: [] }), true);
+    assert.equal(
+      showSeveralOption(2, 0, { who: { kind: "none" }, memberIds: [] }),
+      true,
+    );
   });
 });

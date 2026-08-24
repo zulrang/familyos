@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 import { AvatarStack } from "@/shared/ui/AvatarStack";
 
 export function EventCard({
@@ -16,7 +16,7 @@ export function EventCard({
 }: {
   title: string;
   time?: string;
-  tone?: MemberTone;
+  tone?: MemberPastel;
   fill?: string;
   ink?: string;
   multi?: boolean;

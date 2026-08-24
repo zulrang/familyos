@@ -40,3 +40,17 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Design contracts: `.cursor/skills/familyos-design/readme.md`
 - Wall Pi / OSK: `docs/kiosk.md` · machine-local: `docs/kiosk.local.md` (gitignored)
 - Decision records: `docs/adr/`
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `zulrang/familyos` (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical roles, same strings: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

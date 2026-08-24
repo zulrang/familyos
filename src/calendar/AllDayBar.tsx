@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 
 export function AllDayBar({
   label,
@@ -10,7 +10,7 @@ export function AllDayBar({
   style,
 }: {
   label: string;
-  tone?: MemberTone;
+  tone?: MemberPastel;
   soft?: string;
   multi?: boolean;
   onClick?: () => void;
