@@ -201,12 +201,10 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
-- Current implementation gaps are not product decisions: Calendar still
-  renders seven days (target is Five-Day View with five-day paging),
-  and the account-bound last-known provider cache (outage read-only)
-  plus Google ETag rejection for stale event / List Item writes are
-  absent. Bring these into line with this SSD; do not document the
-  current behavior as canonical.
+- Current implementation gaps are not product decisions: Google ETag
+  rejection for stale event / List Item writes is still absent. Bring
+  that into line with this SSD; do not document the current behavior
+  as canonical.
 
 ## 8. Future Direction
 

@@ -2,10 +2,17 @@ import { legacyTonesForParticipants } from "@/calendar/calendar";
 import type { EventWrite } from "@/calendar/google-events";
 import { normalizeParticipantIds } from "@/calendar/participants";
 import { parseScope } from "@/calendar/recurrence";
-import type { SeriesScope } from "@/calendar/types";
+import type { CalendarRead, SeriesScope } from "@/calendar/types";
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { AuthError } from "@/shared/google";
+import { readProvider } from "@/shared/provider";
+import {
+  getCalendarEventsCache,
+  listCalendarCacheRanges,
+  putCalendarEventsCache,
+} from "./calendar-cache";
+import { calendarError, ProviderUnavailableError } from "./calendar-error";
 import type { CalendarGateway } from "./calendar-gateway";
 
 export type { CalendarGateway };
@@ -79,9 +86,71 @@ async function requireHouseholdCalendar(
   return { calendarId: s.calendarId, timeZone: s.timeZone };
 }
 
-function catchAuth(e: unknown): Response {
-  if (e instanceof AuthError) return jsonError("unauthorized", 401);
-  return jsonError("failed", 500);
+async function rejectIfReadOnly(calendarId: string): Promise<Response | null> {
+  const provider = await readProvider();
+  if (provider.tokens?.access_token) return null;
+  const ranges = provider.providerConnectionId
+    ? await listCalendarCacheRanges(provider.providerConnectionId, calendarId)
+    : [];
+  if (ranges.length) return calendarError(new ProviderUnavailableError());
+  return calendarError(new AuthError());
+}
+
+async function cachedEvents(
+  connectionId: string | null,
+  calendarId: string,
+  from: string,
+  to: string,
+): Promise<CalendarRead["events"] | null> {
+  if (!connectionId) return null;
+  return getCalendarEventsCache(connectionId, calendarId, from, to);
+}
+
+async function bestEffortRefreshNamespaceCache(
+  gw: CalendarGateway,
+  calendarId: string,
+  timeZone: string,
+): Promise<void> {
+  const { providerConnectionId } = await readProvider();
+  if (!providerConnectionId) return;
+  try {
+    const ranges = await listCalendarCacheRanges(
+      providerConnectionId,
+      calendarId,
+    );
+    for (const range of ranges) {
+      const events = await gw.listEvents(
+        calendarId,
+        range.from,
+        range.to,
+        timeZone,
+      );
+      await putCalendarEventsCache(
+        providerConnectionId,
+        calendarId,
+        range.from,
+        range.to,
+        events,
+      );
+    }
+  } catch {
+    /* live write already succeeded */
+  }
+}
+
+async function bestEffortRefreshEventsCache(
+  connectionId: string | null,
+  calendarId: string,
+  from: string,
+  to: string,
+  events: CalendarRead["events"],
+): Promise<void> {
+  if (!connectionId) return;
+  try {
+    await putCalendarEventsCache(connectionId, calendarId, from, to, events);
+  } catch {
+    /* live events already in hand */
+  }
 }
 
 export async function handleListEvents(
@@ -94,18 +163,35 @@ export async function handleListEvents(
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
   if (!from || !to) return jsonError("from and to required", 400);
+  const provider = await readProvider();
+  let events: CalendarRead["events"];
   try {
+    if (!provider.tokens?.access_token) throw new AuthError();
     const gw = await resolveGateway(gateway);
-    const events = await gw.listEvents(
+    events = await gw.listEvents(gate.calendarId, from, to, gate.timeZone);
+  } catch (e) {
+    const cached = await cachedEvents(
+      provider.providerConnectionId,
       gate.calendarId,
       from,
       to,
-      gate.timeZone,
     );
-    return Response.json({ events });
-  } catch (e) {
-    return catchAuth(e);
+    if (cached) {
+      return Response.json({
+        events: cached,
+        stale: true,
+      } satisfies CalendarRead);
+    }
+    return calendarError(e);
   }
+  await bestEffortRefreshEventsCache(
+    provider.providerConnectionId,
+    gate.calendarId,
+    from,
+    to,
+    events,
+  );
+  return Response.json({ events, stale: false } satisfies CalendarRead);
 }
 
 export async function handleCreateEvent(
@@ -114,6 +200,8 @@ export async function handleCreateEvent(
 ): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
+  const deniedWrite = await rejectIfReadOnly(gate.calendarId);
+  if (deniedWrite) return deniedWrite;
   const body = parseEventWrite(await readJson(request));
   if (!body) return jsonError("invalid body", 400);
   const s = await readHousehold();
@@ -132,9 +220,10 @@ export async function handleCreateEvent(
       },
       gate.timeZone,
     );
+    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
     return Response.json({ event });
   } catch (e) {
-    return catchAuth(e);
+    return calendarError(e);
   }
 }
 
@@ -145,6 +234,8 @@ export async function handleUpdateEvent(
 ): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
+  const deniedWrite = await rejectIfReadOnly(gate.calendarId);
+  if (deniedWrite) return deniedWrite;
   const body = parseEventUpdate(await readJson(request));
   if (!body) return jsonError("invalid body", 400);
   const s = await readHousehold();
@@ -165,11 +256,10 @@ export async function handleUpdateEvent(
       body.scope,
       gate.timeZone,
     );
+    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
     return Response.json({ event });
   } catch (e) {
-    if (e instanceof AuthError) return jsonError("unauthorized", 401);
-    console.error(e);
-    return jsonError("failed", 500);
+    return calendarError(e);
   }
 }
 
@@ -180,6 +270,8 @@ export async function handleDeleteEvent(
 ): Promise<Response> {
   const gate = await requireHouseholdCalendar(request);
   if (gate instanceof Response) return gate;
+  const deniedWrite = await rejectIfReadOnly(gate.calendarId);
+  if (deniedWrite) return deniedWrite;
   const url = new URL(request.url);
   try {
     const gw = await resolveGateway(gateway);
@@ -189,8 +281,9 @@ export async function handleDeleteEvent(
       parseScope(url.searchParams.get("scope")),
       gate.timeZone,
     );
+    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
     return Response.json({ ok: true });
   } catch (e) {
-    return catchAuth(e);
+    return calendarError(e);
   }
 }

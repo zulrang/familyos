@@ -196,11 +196,83 @@ describe("CalendarScreen Five-Day View", () => {
 
   test("creating an event from a column uses that column's Household date", async () => {
     const { user } = await renderCalendar();
-    await user.click(screen.getByRole("button", { name: "Add event Fri" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Add event Fri" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "New Event" }),
     ).toBeInTheDocument();
     const date = screen.getByDisplayValue("2026-08-21");
     expect(date).toHaveAttribute("type", "date");
+  });
+});
+
+describe("CalendarScreen outage cache", () => {
+  const practice: CalEvent = {
+    id: "ev-1",
+    title: "Practice",
+    allDay: true,
+    startMs: fromDateOnly("2026-08-19", "America/New_York"),
+    endMs: fromDateOnly("2026-08-20", "America/New_York"),
+    participantIds: [],
+  };
+
+  test("stale Calendar events stay visible and cannot be mutated", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          return json({ events: [practice], stale: true });
+        }
+        return json({ error: "read-only" }, 503);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CalendarScreen />);
+
+    expect(
+      await screen.findByRole("button", { name: "Practice" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Google is unavailable. Calendar is read-only."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add event Fri" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Practice" }));
+    expect(screen.queryByRole("heading", { name: "Event" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "New Event" })).toBeNull();
+  });
+
+  test("disconnected Displays still show matching cached Calendar events", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json({ ...settings, signedIn: false });
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          return json({ events: [practice], stale: true });
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CalendarScreen />);
+
+    expect(
+      await screen.findByRole("button", { name: "Practice" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
 });
