@@ -33,7 +33,7 @@ import {
   weekdayLabel,
 } from "@/calendar/calendar";
 import { eventWhoFromIds } from "@/calendar/event-who";
-import type { CalEvent } from "@/calendar/types";
+import type { CalEvent, CalendarRead } from "@/calendar/types";
 import {
   LEGACY_TONE_COLORS,
   type Member,
@@ -110,7 +110,10 @@ export function CalendarScreen() {
   const [now, setNow] = useState(() => new Date());
   const [anchor, setAnchor] = useState<Date | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
-  const [events, setEvents] = useState<CalEvent[]>([]);
+  const [calendarRead, setCalendarRead] = useState<CalendarRead>({
+    events: [],
+    stale: false,
+  });
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [showChips, setShowChips] = useState(true);
   const [sheet, setSheet] = useState<EventDraft | null>(null);
@@ -123,6 +126,8 @@ export function CalendarScreen() {
   const viewStart = anchor ?? now;
   const days = timeZone ? viewDays(viewStart, timeZone) : [];
   const members = settings?.members ?? [];
+  const events = calendarRead.events;
+  const stale = calendarRead.stale;
   const bounds = timeZone ? visibleFetchBounds(viewStart, timeZone) : null;
   const from = bounds?.from;
   const to = bounds?.to;
@@ -135,8 +140,8 @@ export function CalendarScreen() {
     const s = (await sRes.json()) as PublicSettings;
     if (signal?.aborted) return;
     setSettings(s);
-    if (!s.signedIn || !s.calendarId) {
-      setEvents([]);
+    if (!s.calendarId) {
+      setCalendarRead({ events: [], stale: false });
       return;
     }
     const range = visibleFetchBounds(viewStart, s.timeZone);
@@ -147,17 +152,21 @@ export function CalendarScreen() {
     if (signal?.aborted) return;
     if (await redirectIfPairingRequired(eRes)) return;
     if (eRes.status === 401) {
-      setEvents([]);
+      setCalendarRead({ events: [], stale: false });
       setSettings({ ...s, signedIn: false });
       return;
     }
     if (!eRes.ok) {
+      setCalendarRead((cur) => ({ ...cur, stale: true }));
       setError("Could not load events.");
       return;
     }
-    const data = (await eRes.json()) as { events: CalEvent[] };
+    const data = (await eRes.json()) as CalendarRead;
     if (signal?.aborted) return;
-    setEvents(data.events);
+    setCalendarRead({
+      events: Array.isArray(data.events) ? data.events : [],
+      stale: data.stale === true,
+    });
     setError(null);
   }
 
@@ -172,13 +181,23 @@ export function CalendarScreen() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible range bounds change
   useEffect(() => {
-    const ac = new AbortController();
-    load(ac.signal).catch((err: unknown) => {
-      if (ac.signal.aborted) return;
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setError("Could not load calendar.");
-    });
-    return () => ac.abort();
+    let inFlight: AbortController | null = null;
+    const run = () => {
+      inFlight?.abort();
+      const ac = new AbortController();
+      inFlight = ac;
+      return load(ac.signal).catch((err: unknown) => {
+        if (ac.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setError("Could not load calendar.");
+      });
+    };
+    run();
+    const poll = setInterval(run, 60_000);
+    return () => {
+      inFlight?.abort();
+      clearInterval(poll);
+    };
   }, [from, to]);
 
   useEffect(() => {
@@ -273,15 +292,20 @@ export function CalendarScreen() {
 
   const hours = hoursInView();
   const gh = gridHeight();
+  const canMutate = Boolean(
+    settings?.signedIn && settings.calendarId && !stale,
+  );
   const banner = !settings
     ? null
-    : !settings.googleConfigured
-      ? "Add Google credentials in .env.local, then sign in under Settings."
-      : !settings.signedIn
-        ? "Sign in with Google under Settings to load the family calendar."
-        : !settings.calendarId
-          ? "Pick a family calendar under Settings."
-          : error;
+    : stale
+      ? "Google is unavailable. Calendar is read-only."
+      : !settings.googleConfigured
+        ? "Add Google credentials in .env.local, then sign in under Settings."
+        : !settings.signedIn
+          ? "Sign in with Google under Settings to load the family calendar."
+          : !settings.calendarId
+            ? "Pick a family calendar under Settings."
+            : error;
 
   return (
     <div
@@ -451,8 +475,15 @@ export function CalendarScreen() {
                           label={e.title}
                           soft={paint.soft}
                           multi={paint.multi}
-                          style={{ height: 30, cursor: "pointer" }}
-                          onClick={() => setSheet(toDraft(e, timeZone))}
+                          style={{
+                            height: 30,
+                            cursor: canMutate ? "pointer" : "default",
+                          }}
+                          onClick={
+                            canMutate
+                              ? () => setSheet(toDraft(e, timeZone))
+                              : undefined
+                          }
                         />
                       );
                     })}
@@ -492,34 +523,37 @@ export function CalendarScreen() {
                     backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX - 1}px, var(--surface-grid-line) ${HOUR_PX}px)`,
                   }}
                 >
-                  <button
-                    type="button"
-                    className="fos-hit"
-                    aria-label={`Add event ${weekdayLabel(d, timeZone)}`}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                    }}
-                    onClick={(e) => {
-                      const start = slotStart(
-                        d,
-                        e.clientY - e.currentTarget.getBoundingClientRect().top,
-                        timeZone,
-                      );
-                      if (!start) return;
-                      const end = new Date(start.getTime() + 3600000);
-                      setSheet({
-                        ...createDraft(start, timeZone),
-                        date: msToDateInput(start.getTime(), timeZone),
-                        endDate: msToDateInput(start.getTime(), timeZone),
-                        startTime: msToTimeInput(start.getTime(), timeZone),
-                        endTime: msToTimeInput(end.getTime(), timeZone),
-                      });
-                    }}
-                  />
+                  {canMutate ? (
+                    <button
+                      type="button"
+                      className="fos-hit"
+                      aria-label={`Add event ${weekdayLabel(d, timeZone)}`}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                      }}
+                      onClick={(e) => {
+                        const start = slotStart(
+                          d,
+                          e.clientY -
+                            e.currentTarget.getBoundingClientRect().top,
+                          timeZone,
+                        );
+                        if (!start) return;
+                        const end = new Date(start.getTime() + 3600000);
+                        setSheet({
+                          ...createDraft(start, timeZone),
+                          date: msToDateInput(start.getTime(), timeZone),
+                          endDate: msToDateInput(start.getTime(), timeZone),
+                          startTime: msToTimeInput(start.getTime(), timeZone),
+                          endTime: msToTimeInput(end.getTime(), timeZone),
+                        });
+                      }}
+                    />
+                  ) : null}
                   {timed.map((e) => {
                     const people = peopleOf(members, e);
                     const paint = eventPaint(people);
@@ -548,7 +582,11 @@ export function CalendarScreen() {
                             name: p.name,
                             surface: chipSurface(p),
                           }))}
-                          onClick={() => setSheet(toDraft(e, timeZone))}
+                          onClick={
+                            canMutate
+                              ? () => setSheet(toDraft(e, timeZone))
+                              : undefined
+                          }
                           style={{ height: "100%", minHeight: 0 }}
                         />
                       </div>
@@ -561,7 +599,7 @@ export function CalendarScreen() {
           </div>
         </div>
       ) : null}
-      {settings?.signedIn && settings.calendarId && timeZone ? (
+      {canMutate && timeZone ? (
         <Fab onClick={() => setSheet(createDraft(new Date(), timeZone))} />
       ) : null}
       {sheet ? (

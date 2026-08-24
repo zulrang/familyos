@@ -1,10 +1,12 @@
 import type { EventWrite } from "@/calendar/google-events";
 import { normalizeParticipantIds } from "@/calendar/participants";
 import type { CalEvent } from "@/calendar/types";
+import { ProviderUnavailableError } from "./calendar-error";
 import type { CalendarGateway } from "./calendar-gateway";
 
 export type FakeCalendarGateway = CalendarGateway & {
   readonly store: Map<string, CalEvent>;
+  offline: boolean;
 };
 
 function overlaps(
@@ -45,13 +47,25 @@ export function createFakeCalendarGateway(
   }
 
   let seq = 0;
+  let offline = false;
+
+  function requireLive(): void {
+    if (offline) throw new ProviderUnavailableError();
+  }
 
   const gateway: FakeCalendarGateway = {
     get store() {
       return store;
     },
+    get offline() {
+      return offline;
+    },
+    set offline(value: boolean) {
+      offline = value;
+    },
 
     async listEvents(_calendarId, timeMin, timeMax) {
+      requireLive();
       const timeMinMs = Date.parse(timeMin);
       const timeMaxMs = Date.parse(timeMax);
       return [...store.values()]
@@ -61,6 +75,7 @@ export function createFakeCalendarGateway(
     },
 
     async insertEvent(_calendarId, w) {
+      requireLive();
       seq += 1;
       const ev = fromWrite(`ev-${seq}`, w);
       store.set(ev.id, ev);
@@ -68,6 +83,7 @@ export function createFakeCalendarGateway(
     },
 
     async updateEvent(_calendarId, eventId, w) {
+      requireLive();
       if (!store.has(eventId)) throw new Error("missing");
       const ev = fromWrite(eventId, w);
       store.set(eventId, ev);
@@ -75,6 +91,7 @@ export function createFakeCalendarGateway(
     },
 
     async deleteEvent(_calendarId, eventId) {
+      requireLive();
       if (!store.has(eventId)) throw new Error("missing");
       store.delete(eventId);
     },

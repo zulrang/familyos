@@ -1,9 +1,10 @@
 /**
- * HTTP acceptance seam for Calendar events. Uses shared Calendar Fake — no live Google.
+ * HTTP acceptance seam for Calendar events and account-bound outage cache
+ * (#12). Uses shared Calendar Fake — no live Google.
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
@@ -20,6 +21,7 @@ describe("Calendar HTTP", () => {
   let handleUpdateEvent: typeof import("./calendar-http.ts").handleUpdateEvent;
   let handleDeleteEvent: typeof import("./calendar-http.ts").handleDeleteEvent;
   let writeHousehold: typeof import("@/settings/settings").writeHousehold;
+  let writeProvider: typeof import("@/shared/provider").writeProvider;
   let emitStartupPairingCode: typeof import("@/shared/pairing").emitStartupPairingCode;
   let DISPLAY_COOKIE: typeof import("@/shared/pairing").DISPLAY_COOKIE;
   let handlePair: typeof import("@/displays/pairing-http").handlePair;
@@ -42,6 +44,7 @@ describe("Calendar HTTP", () => {
       handleDeleteEvent,
     } = await import("./calendar-http.ts"));
     ({ writeHousehold } = await import("@/settings/settings"));
+    ({ writeProvider } = await import("@/shared/provider"));
     ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import(
       "@/shared/pairing"
     ));
@@ -56,6 +59,15 @@ describe("Calendar HTTP", () => {
       listIds: [],
       timeZone: TZ,
       configVersion: 1,
+    });
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "conn",
     });
 
     gateway = createFakeCalendarGateway([
@@ -210,6 +222,414 @@ describe("Calendar HTTP", () => {
     assert.equal(
       afterBody.events.some((e) => e.id === created.event.id),
       false,
+    );
+  });
+});
+
+describe("Household Calendar outage cache", () => {
+  let dataRoot: string;
+  let handleListEvents: typeof import("./calendar-http.ts").handleListEvents;
+  let handleCreateEvent: typeof import("./calendar-http.ts").handleCreateEvent;
+  let handleUpdateEvent: typeof import("./calendar-http.ts").handleUpdateEvent;
+  let handleDeleteEvent: typeof import("./calendar-http.ts").handleDeleteEvent;
+  let writeHousehold: typeof import("@/settings/settings").writeHousehold;
+  let readHousehold: typeof import("@/settings/settings").readHousehold;
+  let writeProvider: typeof import("@/shared/provider").writeProvider;
+  let emitStartupPairingCode: typeof import("@/shared/pairing").emitStartupPairingCode;
+  let DISPLAY_COOKIE: typeof import("@/shared/pairing").DISPLAY_COOKIE;
+  let handlePair: typeof import("@/displays/pairing-http").handlePair;
+  let cookieHeader: string;
+  let gateway: ReturnType<typeof createFakeCalendarGateway>;
+
+  const pianoStart = fromDateAndTime("2026-08-19", "10:00", TZ);
+  const pianoEnd = fromDateAndTime("2026-08-19", "11:00", TZ);
+  const from = new Date(fromDateOnly("2026-08-19", TZ)).toISOString();
+  const to = new Date(fromDateOnly("2026-08-22", TZ)).toISOString();
+
+  beforeAll(async () => {
+    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-cal-cache-"));
+    process.env.FAMILYOS_DATA_DIR = dataRoot;
+
+    ({
+      handleListEvents,
+      handleCreateEvent,
+      handleUpdateEvent,
+      handleDeleteEvent,
+    } = await import("./calendar-http.ts"));
+    ({ writeHousehold, readHousehold } = await import("@/settings/settings"));
+    ({ writeProvider } = await import("@/shared/provider"));
+    ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import(
+      "@/shared/pairing"
+    ));
+    ({ handlePair } = await import("@/displays/pairing-http"));
+
+    await mkdir(dataRoot, { recursive: true });
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [{ id: "dad", name: "Dad", status: "active", color: "#a9d8d2" }],
+      calendarId: "cal-household",
+      calendarTimeZone: TZ,
+      listIds: [],
+      timeZone: TZ,
+      configVersion: 1,
+    });
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+
+    gateway = createFakeCalendarGateway([
+      {
+        id: "ev-seed",
+        title: "Practice",
+        allDay: false,
+        startMs: pianoStart,
+        endMs: pianoEnd,
+        participantIds: ["dad"],
+      },
+    ]);
+
+    function cookieFrom(res: Response): string | null {
+      const raw = res.headers.getSetCookie?.() ?? [];
+      if (raw.length) {
+        const line = raw.find((c) => c.startsWith(`${DISPLAY_COOKIE}=`));
+        return line?.split(";")[0] ?? null;
+      }
+      const single = res.headers.get("set-cookie");
+      if (!single) return null;
+      return single.split(";")[0] ?? null;
+    }
+
+    const startupCode = await emitStartupPairingCode();
+    assert.ok(startupCode);
+    const pairRes = await handlePair(
+      new Request("http://familyos.test/api/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: startupCode }),
+      }),
+    );
+    assert.equal(pairRes.status, 200);
+    const cookie = cookieFrom(pairRes);
+    assert.ok(cookie);
+    cookieHeader = cookie;
+  });
+
+  afterAll(async () => {
+    await rm(dataRoot, { recursive: true, force: true });
+  });
+
+  function req(url: string, init?: RequestInit): Request {
+    return new Request(url, {
+      ...init,
+      headers: {
+        cookie: cookieHeader,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  }
+
+  function eventsUrl(range = { from, to }): string {
+    return `http://familyos.test/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
+  }
+
+  test("an outage returns cached Household Calendar events as stale", async () => {
+    const live = await handleListEvents(req(eventsUrl()), gateway);
+    assert.equal(live.status, 200);
+    const liveBody = (await live.json()) as {
+      events: CalEvent[];
+      stale: boolean;
+    };
+    assert.equal(liveBody.stale, false);
+    assert.equal(liveBody.events[0]?.title, "Practice");
+
+    gateway.offline = true;
+    const stale = await handleListEvents(req(eventsUrl()), gateway);
+    assert.equal(stale.status, 200);
+    const staleBody = (await stale.json()) as {
+      events: CalEvent[];
+      stale: boolean;
+    };
+    assert.equal(staleBody.stale, true);
+    assert.deepEqual(
+      staleBody.events.map((e) => [e.id, e.title, e.participantIds]),
+      [["ev-seed", "Practice", ["dad"]]],
+    );
+  });
+
+  test("Calendar writes are unavailable while read-only", async () => {
+    gateway.offline = false;
+    assert.equal(
+      (await handleListEvents(req(eventsUrl()), gateway)).status,
+      200,
+    );
+    gateway.offline = true;
+    const before = gateway.store.get("ev-seed");
+    assert.ok(before);
+
+    for (const res of [
+      await handleCreateEvent(
+        req("http://familyos.test/api/events", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Outage",
+            allDay: true,
+            startMs: fromDateOnly("2026-08-20", TZ),
+            endMs: fromDateOnly("2026-08-21", TZ),
+            participantIds: ["dad"],
+          }),
+        }),
+        gateway,
+      ),
+      await handleUpdateEvent(
+        req("http://familyos.test/api/events/ev-seed", {
+          method: "PATCH",
+          body: JSON.stringify({
+            title: "Hijack",
+            allDay: false,
+            startMs: before.startMs,
+            endMs: before.endMs,
+            participantIds: [],
+          }),
+        }),
+        "ev-seed",
+        gateway,
+      ),
+      await handleDeleteEvent(
+        req("http://familyos.test/api/events/ev-seed"),
+        "ev-seed",
+        gateway,
+      ),
+    ]) {
+      assert.equal(res.status, 503);
+      const body = (await res.json()) as { error: string };
+      assert.equal(body.error, "read-only");
+    }
+
+    assert.equal(gateway.store.get("ev-seed")?.title, "Practice");
+    assert.equal(gateway.store.has("ev-seed"), true);
+  });
+
+  test("disconnect returns matching cache as stale without live provider data", async () => {
+    gateway.offline = false;
+    assert.equal(
+      (await handleListEvents(req(eventsUrl()), gateway)).status,
+      200,
+    );
+    await writeProvider({
+      tokens: null,
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    const stale = await handleListEvents(req(eventsUrl()), gateway);
+    assert.equal(stale.status, 200);
+    const body = (await stale.json()) as {
+      events: CalEvent[];
+      stale: boolean;
+    };
+    assert.equal(body.stale, true);
+    assert.equal(body.events[0]?.title, "Practice");
+    const create = await handleCreateEvent(
+      req("http://familyos.test/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Outage",
+          allDay: true,
+          startMs: fromDateOnly("2026-08-20", TZ),
+          endMs: fromDateOnly("2026-08-21", TZ),
+          participantIds: [],
+        }),
+      }),
+      gateway,
+    );
+    assert.equal(create.status, 503);
+  });
+
+  async function restoreLive() {
+    gateway.offline = false;
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [{ id: "dad", name: "Dad", status: "active", color: "#a9d8d2" }],
+      calendarId: "cal-household",
+      calendarTimeZone: TZ,
+      listIds: [],
+      timeZone: TZ,
+      configVersion: (await readHousehold()).configVersion,
+    });
+  }
+
+  test("a different Provider Connection never inherits the previous cache", async () => {
+    await restoreLive();
+    assert.equal(
+      (await handleListEvents(req(eventsUrl()), gateway)).status,
+      200,
+    );
+    await writeProvider({
+      tokens: {
+        access_token: "access-b",
+        refresh_token: "refresh-b",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-b",
+    });
+    gateway.offline = true;
+    const res = await handleListEvents(req(eventsUrl()), gateway);
+    if (res.status === 200) {
+      const body = (await res.json()) as {
+        events: CalEvent[];
+        stale: boolean;
+      };
+      assert.equal(
+        body.events.some((e) => e.id === "ev-seed"),
+        false,
+      );
+    } else {
+      assert.ok(res.status >= 400);
+    }
+  });
+
+  test("changing Household Calendar never reveals another namespace", async () => {
+    await restoreLive();
+    assert.equal(
+      (await handleListEvents(req(eventsUrl()), gateway)).status,
+      200,
+    );
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [{ id: "dad", name: "Dad", status: "active", color: "#a9d8d2" }],
+      calendarId: "cal-other",
+      calendarTimeZone: TZ,
+      listIds: [],
+      timeZone: TZ,
+      configVersion: (await readHousehold()).configVersion,
+    });
+    gateway.offline = true;
+    const res = await handleListEvents(req(eventsUrl()), gateway);
+    if (res.status === 200) {
+      const body = (await res.json()) as { events: CalEvent[] };
+      assert.equal(
+        body.events.some((e) => e.id === "ev-seed"),
+        false,
+      );
+    } else {
+      assert.ok(res.status >= 400);
+    }
+  });
+
+  test("live writable behavior resumes after Google recovers", async () => {
+    await restoreLive();
+    const live = await handleListEvents(req(eventsUrl()), gateway);
+    assert.equal(live.status, 200);
+    assert.equal(((await live.json()) as { stale: boolean }).stale, false);
+    const create = await handleCreateEvent(
+      req("http://familyos.test/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Recovered",
+          allDay: true,
+          startMs: fromDateOnly("2026-08-20", TZ),
+          endMs: fromDateOnly("2026-08-21", TZ),
+          participantIds: [],
+        }),
+      }),
+      gateway,
+    );
+    assert.equal(create.status, 200);
+    assert.equal(
+      ((await create.json()) as { event: { title: string } }).event.title,
+      "Recovered",
+    );
+  });
+
+  test("a cache write failure still returns live writable events", async () => {
+    await restoreLive();
+    assert.equal(
+      (await handleListEvents(req(eventsUrl()), gateway)).status,
+      200,
+    );
+    const seed = gateway.store.get("ev-seed");
+    assert.ok(seed);
+    seed.title = "Recital";
+    const cacheDir = path.join(
+      dataRoot,
+      "cache",
+      "calendar",
+      "acct-a",
+      encodeURIComponent("cal-household"),
+    );
+    const cached = await readdir(cacheDir);
+    for (const name of cached) {
+      await chmod(path.join(cacheDir, name), 0o444);
+    }
+    try {
+      const live = await handleListEvents(req(eventsUrl()), gateway);
+      assert.equal(live.status, 200);
+      const body = (await live.json()) as {
+        events: CalEvent[];
+        stale: boolean;
+      };
+      assert.equal(body.stale, false);
+      assert.equal(
+        body.events.find((e) => e.id === "ev-seed")?.title,
+        "Recital",
+      );
+    } finally {
+      const cached = await readdir(cacheDir);
+      for (const name of cached) {
+        await chmod(path.join(cacheDir, name), 0o644);
+      }
+      seed.title = "Practice";
+    }
+  });
+
+  test("a successful event write is what an outage returns", async () => {
+    await restoreLive();
+    assert.equal(
+      (await handleListEvents(req(eventsUrl()), gateway)).status,
+      200,
+    );
+    const create = await handleCreateEvent(
+      req("http://familyos.test/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "After write",
+          allDay: true,
+          startMs: fromDateOnly("2026-08-20", TZ),
+          endMs: fromDateOnly("2026-08-21", TZ),
+          participantIds: [],
+        }),
+      }),
+      gateway,
+    );
+    assert.equal(create.status, 200);
+    const created = (await create.json()) as { event: CalEvent };
+    gateway.offline = true;
+    const stale = await handleListEvents(req(eventsUrl()), gateway);
+    assert.equal(stale.status, 200);
+    const body = (await stale.json()) as {
+      events: CalEvent[];
+      stale: boolean;
+    };
+    assert.equal(body.stale, true);
+    assert.equal(
+      body.events.some((e) => e.id === created.event.id),
+      true,
     );
   });
 });

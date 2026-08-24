@@ -20,3 +20,12 @@ export type GoogleCalendar = {
   primary?: boolean;
   timeZone?: string;
 };
+
+/**
+ * GET /api/events payload. `stale` means last-known cache; Display mutations
+ * are unavailable until a live read succeeds.
+ */
+export type CalendarRead = {
+  events: CalEvent[];
+  stale: boolean;
+};
