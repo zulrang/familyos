@@ -116,7 +116,12 @@ export async function establishProviderConnection(
 }
 
 export async function clearProviderConnection(): Promise<ProviderConnection> {
-  const next: ProviderConnection = { ...EMPTY };
+  const cur = await readProvider();
+  const next: ProviderConnection = {
+    tokens: null,
+    oauthState: null,
+    providerConnectionId: cur.providerConnectionId,
+  };
   await writeProvider(next);
   await scrubLegacyCredentials();
   return next;

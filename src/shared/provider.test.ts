@@ -71,7 +71,7 @@ describe("Provider Connection", () => {
 
   test("reconnecting the same account restores the same identity", async () => {
     await clearProviderConnection();
-    assert.equal((await readProvider()).providerConnectionId, null);
+    assert.equal((await readProvider()).providerConnectionId, "google-sub-b");
     assert.equal((await readProvider()).tokens, null);
 
     const again = await establishProviderConnection("google-sub-a", tokensA);

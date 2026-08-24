@@ -56,7 +56,7 @@ function installFetch(lists: HouseholdList[]) {
         return json(settings);
       }
       if (method === "GET" && url.endsWith("/api/lists")) {
-        return json({ lists: store });
+        return json({ lists: store, stale: false });
       }
 
       const itemMatch = url.match(/\/api\/lists\/([^/]+)\/items\/([^/?]+)$/);
@@ -307,5 +307,69 @@ describe("ListsScreen List Item lifecycle", () => {
       await screen.findByText("Could not delete List Item."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Milk" })).toBeInTheDocument();
+  });
+});
+
+describe("ListsScreen outage cache", () => {
+  test("stale Household Lists stay visible and cannot be mutated", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/lists")) {
+          return json({ lists: [grocery], stale: true });
+        }
+        return json({ error: "read-only" }, 503);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ListsScreen />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Grocery" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Google is unavailable. Lists are read-only."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add list" })).toBeNull();
+    expect(screen.queryByPlaceholderText("Add item")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear checked" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Milk" }));
+    expect(screen.getByText("Milk")).toHaveStyle({ textDecoration: "none" });
+
+    await user.pointer({
+      keys: "[MouseRight]",
+      target: screen.getByRole("button", { name: "Milk" }),
+    });
+    expect(screen.queryByRole("heading", { name: "List Item" })).toBeNull();
+  });
+
+  test("disconnected Displays still show matching cached Household Lists", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json({ ...settings, signedIn: false });
+        }
+        if (method === "GET" && url.endsWith("/api/lists")) {
+          return json({ lists: [grocery], stale: true });
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ListsScreen />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Grocery" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Milk" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add list" })).toBeNull();
   });
 });

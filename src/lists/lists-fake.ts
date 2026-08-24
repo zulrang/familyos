@@ -1,9 +1,11 @@
 import type { HouseholdList, ListItem } from "@/lists/types";
+import { ProviderUnavailableError } from "./lists-error";
 import type { ListsGateway } from "./lists-gateway";
 
 export type FakeListsGateway = ListsGateway & {
   readonly store: Map<string, HouseholdList>;
   readonly createCount: number;
+  offline: boolean;
 };
 
 /**
@@ -22,6 +24,11 @@ export function createFakeListsGateway(
   }
 
   let createCount = 0;
+  let offline = false;
+
+  function requireLive(): void {
+    if (offline) throw new ProviderUnavailableError();
+  }
 
   const gateway: FakeListsGateway = {
     get store() {
@@ -30,8 +37,15 @@ export function createFakeListsGateway(
     get createCount() {
       return createCount;
     },
+    get offline() {
+      return offline;
+    },
+    set offline(value: boolean) {
+      offline = value;
+    },
 
     async listSelected(listIds) {
+      requireLive();
       return listIds
         .map((id) => store.get(id))
         .filter((l): l is HouseholdList => l !== undefined)
@@ -43,6 +57,7 @@ export function createFakeListsGateway(
     },
 
     async createList(title) {
+      requireLive();
       createCount += 1;
       const id = `tl-new-${createCount}`;
       const list: HouseholdList = { id, title, items: [] };
@@ -51,6 +66,7 @@ export function createFakeListsGateway(
     },
 
     async renameList(listId, title) {
+      requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
       store.set(listId, { ...cur, title });
@@ -58,6 +74,7 @@ export function createFakeListsGateway(
     },
 
     async addItem(listId, title) {
+      requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
       const item: ListItem = {
@@ -70,6 +87,7 @@ export function createFakeListsGateway(
     },
 
     async patchItem(listId, itemId, patch) {
+      requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
       const items = cur.items.map((i) =>
@@ -88,6 +106,7 @@ export function createFakeListsGateway(
     },
 
     async clearCompleted(listId) {
+      requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
       store.set(listId, {
@@ -97,6 +116,7 @@ export function createFakeListsGateway(
     },
 
     async deleteItem(listId, itemId) {
+      requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
       store.set(listId, {
