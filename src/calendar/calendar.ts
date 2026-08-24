@@ -1,13 +1,13 @@
 import type { CalEvent } from "@/calendar/types";
-import type { Member } from "@/members/members";
 import {
   LEGACY_TONE_COLORS,
+  type LegacyTone,
   legacyToneForColor,
+  type Member,
   memberSurface,
   onFillInk,
   resolveMembers,
 } from "@/members/members";
-import type { MemberTone } from "@/shared/member-tone";
 import {
   addZonedDays,
   msToZonedDate,
@@ -21,7 +21,7 @@ import {
 import { isHouseholdEvent } from "./participants";
 
 /** Google Calendar event colorIds closest to our member pastels. Graphite (8) is multi. Presentation only. */
-export const TONE_COLOR_ID: Record<MemberTone, string> = {
+export const LEGACY_TONE_COLOR_ID: Record<LegacyTone, string> = {
   teal: "7",
   blush: "4",
   lilac: "3",
@@ -33,41 +33,21 @@ export const TONE_COLOR_ID: Record<MemberTone, string> = {
 export const MULTI_COLOR_ID = "8";
 
 /** @deprecated Legacy private prop; identity is PARTICIPANTS_PROP. Cleared on write. */
-export const TONES_PROP = "familyosTones";
-
-export const TONE_GOOGLE_NAME: Record<MemberTone, string> = {
-  teal: "peacock",
-  blush: "flamingo",
-  lilac: "grape",
-  sage: "sage",
-  coral: "tangerine",
-  sand: "banana",
-};
-
-export function isMemberTone(s: string): s is MemberTone {
-  return Object.hasOwn(TONE_COLOR_ID, s);
-}
-
-export function toneFromColorId(id: string): MemberTone | null {
-  for (const tone of Object.keys(TONE_COLOR_ID) as MemberTone[]) {
-    if (TONE_COLOR_ID[tone] === id) return tone;
-  }
-  return null;
-}
+export const LEGACY_TONES_PROP = "familyosTones";
 
 /** Presentation colorId for Google Calendar UI — never Event Participant identity. */
-export function colorIdForTones(tones: MemberTone[]): string | null {
-  if (tones.length === 1) return TONE_COLOR_ID[tones[0]];
+export function colorIdForLegacyTones(tones: LegacyTone[]): string | null {
+  if (tones.length === 1) return LEGACY_TONE_COLOR_ID[tones[0]];
   if (tones.length > 1) return MULTI_COLOR_ID;
   return null;
 }
 
-/** Legacy tones for Google colorId from Active Member colors. */
-export function presentationTonesFor(
+/** Legacy pastel names for Google colorId from Active Member colors. */
+export function legacyTonesForParticipants(
   members: Member[],
   participantIds: string[],
-): MemberTone[] {
-  const tones: MemberTone[] = [];
+): LegacyTone[] {
+  const tones: LegacyTone[] = [];
   for (const m of resolveMembers(members, participantIds)) {
     if (m.status !== "active") continue;
     const tone = legacyToneForColor(m.color);
@@ -272,19 +252,6 @@ export function visibleUnderMemberFilter(
   if (isHouseholdEvent(event.participantIds)) return true;
   const people = peopleOf(members, event);
   return people.some((p) => !off[p.id]);
-}
-
-export function eventTone(people: Member[]): {
-  tone: MemberTone;
-  multi: boolean;
-} {
-  const multi = people.length > 1;
-  for (const p of people) {
-    if (p.status !== "active") continue;
-    const tone = legacyToneForColor(p.color);
-    if (tone) return { tone, multi };
-  }
-  return { tone: "sand", multi };
 }
 
 export function eventPaint(people: Member[]): {

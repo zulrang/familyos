@@ -1,6 +1,12 @@
 "use client";
 
-import { applyWhoSelection, showSeveralOption } from "@/calendar/event-who";
+import {
+  applyWhoSelection,
+  type EventWho,
+  parseWhoSelect,
+  showSeveralOption,
+  whoSelectValue,
+} from "@/calendar/event-who";
 import type { SeriesScope } from "@/calendar/types";
 import {
   LEGACY_TONE_COLORS,
@@ -19,7 +25,7 @@ export type EventDraft = {
   endDate: string;
   startTime: string;
   endTime: string;
-  who: string;
+  who: EventWho;
   memberIds: string[];
   recurringEventId?: string;
   scope: SeriesScope;
@@ -49,7 +55,7 @@ export function EventSheet({
   onDelete?: () => void;
 }) {
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
-  const setWho = (who: string) =>
+  const setWho = (who: EventWho) =>
     set(applyWhoSelection(who, members, draft.memberIds));
   const assignable = members.filter((m) => m.status === "active");
   // Historical Event Participants (Retired) stay visible but not newly choosable.
@@ -173,8 +179,8 @@ export function EventSheet({
           </div>
           <select
             className="fos-input"
-            value={draft.who}
-            onChange={(e) => setWho(e.target.value)}
+            value={whoSelectValue(draft.who)}
+            onChange={(e) => setWho(parseWhoSelect(e.target.value))}
           >
             <option value="none">Nobody</option>
             {assignable.map((m) => (
@@ -192,7 +198,7 @@ export function EventSheet({
             ) : null}
           </select>
         </label>
-        {draft.who === "several" ? (
+        {draft.who.kind === "several" ? (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {assignable.map((m) => (
               <MemberChip

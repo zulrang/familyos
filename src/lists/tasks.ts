@@ -1,4 +1,4 @@
-import type { TaskItem, TaskList } from "@/lists/types";
+import type { HouseholdList, ListItem } from "@/lists/types";
 import { gfetch } from "@/shared/google";
 import { sortByPosition } from "./list-text";
 
@@ -42,7 +42,7 @@ async function pages<T>(
   return out;
 }
 
-function toItem(t: GTask): TaskItem | null {
+function toItem(t: GTask): ListItem | null {
   if (!t.id || t.deleted || t.parent) return null;
   return {
     id: t.id,
@@ -60,7 +60,7 @@ export async function listTaskLists(): Promise<
     .map((l) => ({ id: l.id, title: l.title || "List" }));
 }
 
-export async function listTasks(listId: string): Promise<TaskItem[]> {
+export async function listTasks(listId: string): Promise<ListItem[]> {
   const raw = await pages<GTask>(
     `${TASKS}/lists/${encodeURIComponent(listId)}/tasks`,
     { showCompleted: "true", showHidden: "true" },
@@ -70,7 +70,7 @@ export async function listTasks(listId: string): Promise<TaskItem[]> {
       .filter((t) => t.id && !t.deleted && !t.parent)
       .map((t) => ({ ...t, position: t.position ?? "" })),
   );
-  return ordered.map(toItem).filter((t): t is TaskItem => t !== null);
+  return ordered.map(toItem).filter((t): t is ListItem => t !== null);
 }
 
 async function getTaskListMeta(
@@ -92,9 +92,9 @@ async function getTaskListMeta(
  */
 export async function listSelectedListsWithItems(
   listIds: string[],
-): Promise<TaskList[]> {
+): Promise<HouseholdList[]> {
   // ponytail: N+1 fan-out, fine at household scale
-  const lists: TaskList[] = [];
+  const lists: HouseholdList[] = [];
   for (const id of listIds) {
     const meta = await getTaskListMeta(id);
     if (!meta) continue;
@@ -103,7 +103,7 @@ export async function listSelectedListsWithItems(
   return lists;
 }
 
-export async function insertTaskList(title: string): Promise<TaskList> {
+export async function insertTaskList(title: string): Promise<HouseholdList> {
   const res = await gfetch(`${TASKS}/users/@me/lists`, {
     method: "POST",
     body: JSON.stringify({ title }),
@@ -131,7 +131,7 @@ export async function patchTaskList(
 export async function insertTask(
   listId: string,
   title: string,
-): Promise<TaskItem> {
+): Promise<ListItem> {
   const res = await gfetch(
     `${TASKS}/lists/${encodeURIComponent(listId)}/tasks`,
     { method: "POST", body: JSON.stringify({ title }) },
@@ -146,7 +146,7 @@ export async function patchTask(
   listId: string,
   itemId: string,
   patch: { title?: string; done?: boolean },
-): Promise<TaskItem> {
+): Promise<ListItem> {
   const body: Record<string, unknown> = {};
   if (patch.title !== undefined) body.title = patch.title;
   if (patch.done !== undefined) {

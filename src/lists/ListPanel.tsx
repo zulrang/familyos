@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 import { Badge } from "@/shared/ui/Badge";
 
-function badgeTone(tone: MemberTone): "amber" | "teal" | "lilac" | "coral" {
+function badgeTone(tone: MemberPastel): "amber" | "teal" | "lilac" | "coral" {
   if (tone === "sand") return "amber";
   if (tone === "teal" || tone === "sage") return "teal";
   if (tone === "lilac") return "lilac";
@@ -20,7 +20,7 @@ export function ListPanel({
 }: {
   title: string;
   count?: ReactNode;
-  tone?: MemberTone;
+  tone?: MemberPastel;
   children?: ReactNode;
   footer?: ReactNode;
   onTitleClick?: () => void;

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 import { Icon } from "./Icon";
 
 export function Checkbox({
@@ -12,7 +12,7 @@ export function Checkbox({
   style,
 }: {
   checked?: boolean;
-  tone?: MemberTone;
+  tone?: MemberPastel;
   size?: number;
   shape?: "rounded" | "circle";
   onChange?: (next: boolean) => void;

@@ -1,4 +1,4 @@
-import { presentationTonesFor } from "@/calendar/calendar";
+import { legacyTonesForParticipants } from "@/calendar/calendar";
 import type { EventWrite } from "@/calendar/google-events";
 import { normalizeParticipantIds } from "@/calendar/participants";
 import { parseScope } from "@/calendar/recurrence";
@@ -128,7 +128,7 @@ export async function handleCreateEvent(
         startMs: body.startMs,
         endMs: body.endMs,
         participantIds,
-        presentationTones: presentationTonesFor(s.members, participantIds),
+        legacyTones: legacyTonesForParticipants(s.members, participantIds),
       },
       gate.timeZone,
     );
@@ -160,7 +160,7 @@ export async function handleUpdateEvent(
         startMs: body.startMs,
         endMs: body.endMs,
         participantIds,
-        presentationTones: presentationTonesFor(s.members, participantIds),
+        legacyTones: legacyTonesForParticipants(s.members, participantIds),
       },
       body.scope,
       gate.timeZone,

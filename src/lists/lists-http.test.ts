@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
-import type { TaskItem, TaskList } from "@/lists/types";
+import type { HouseholdList, ListItem } from "@/lists/types";
 import { createFakeListsGateway } from "./lists-fake";
 
 describe("Household Lists HTTP", () => {
@@ -139,7 +139,7 @@ describe("Household Lists HTTP", () => {
       gateway,
     );
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { lists: TaskList[] };
+    const body = (await res.json()) as { lists: HouseholdList[] };
     assert.deepEqual(
       body.lists.map((l) => l.id),
       ["tl-selected", "tl-also"],
@@ -225,7 +225,7 @@ describe("Household Lists HTTP", () => {
       gateway,
     );
     assert.equal(add.status, 200);
-    const added = (await add.json()) as { item: TaskItem };
+    const added = (await add.json()) as { item: ListItem };
     assert.equal(added.item.title, "Bread");
 
     const check = await handlePatchItem(
@@ -238,7 +238,7 @@ describe("Household Lists HTTP", () => {
       gateway,
     );
     assert.equal(check.status, 200);
-    assert.equal(((await check.json()) as { item: TaskItem }).item.done, true);
+    assert.equal(((await check.json()) as { item: ListItem }).item.done, true);
 
     const uncheck = await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
@@ -251,7 +251,7 @@ describe("Household Lists HTTP", () => {
     );
     assert.equal(uncheck.status, 200);
     assert.equal(
-      ((await uncheck.json()) as { item: TaskItem }).item.done,
+      ((await uncheck.json()) as { item: ListItem }).item.done,
       false,
     );
 
@@ -289,7 +289,7 @@ describe("Household Lists HTTP", () => {
       gateway,
     );
     assert.equal(add.status, 200);
-    const added = (await add.json()) as { item: TaskItem };
+    const added = (await add.json()) as { item: ListItem };
 
     const rename = await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-also/items/${added.item.id}`, {
@@ -302,7 +302,7 @@ describe("Household Lists HTTP", () => {
     );
     assert.equal(rename.status, 200);
     assert.equal(
-      ((await rename.json()) as { item: TaskItem }).item.title,
+      ((await rename.json()) as { item: ListItem }).item.title,
       "Cheddar",
     );
     assert.equal(
@@ -339,7 +339,7 @@ describe("Household Lists HTTP", () => {
     );
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
-      list: TaskList;
+      list: HouseholdList;
       listIds: string[];
       configVersion: number;
     };
@@ -400,7 +400,7 @@ describe("Household Lists HTTP", () => {
     );
     const wall = (await (
       await handleGetLists(req("http://familyos.test/api/lists"), gateway)
-    ).json()) as { lists: TaskList[] };
+    ).json()) as { lists: HouseholdList[] };
     assert.equal(
       wall.lists.some((l) => l.id === target),
       false,

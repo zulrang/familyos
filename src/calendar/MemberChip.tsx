@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { MemberTone } from "@/shared/member-tone";
+import type { MemberPastel } from "@/shared/member-pastel";
 import { Avatar } from "@/shared/ui/Avatar";
 
 export function MemberChip({
@@ -14,7 +14,7 @@ export function MemberChip({
 }: {
   name: string;
   src?: string;
-  tone?: MemberTone;
+  tone?: MemberPastel;
   surface?: { soft: string; ink: string };
   count?: string;
   active?: boolean;

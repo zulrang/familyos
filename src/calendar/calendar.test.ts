@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import type { CalEvent } from "@/calendar/types";
-import type { Member } from "@/members/members";
-import { MEMBER_TONES } from "@/shared/member-tone";
+import { LEGACY_TONE_COLORS, type Member } from "@/members/members";
 import {
   addDays,
-  colorIdForTones,
+  colorIdForLegacyTones,
   coversDay,
   DAY_COUNT,
   eventPaint,
-  eventTone,
   formatTimeRange,
   fromDateAndTime,
   fromDateOnly,
@@ -17,7 +15,9 @@ import {
   gridHeight,
   HOUR_PX,
   isWeekend,
+  LEGACY_TONE_COLOR_ID,
   layoutColumns,
+  legacyTonesForParticipants,
   MULTI_COLOR_ID,
   mountGridScrollTop,
   msToDateInput,
@@ -27,13 +27,10 @@ import {
   nowLineY,
   pageFiveDays,
   peopleOf,
-  presentationTonesFor,
   remainingDays,
   slotStart,
   startOfDay,
   statusEvent,
-  TONE_COLOR_ID,
-  toneFromColorId,
   viewDays,
   visibleFetchBounds,
   visibleUnderMemberFilter,
@@ -188,22 +185,16 @@ describe("Household Calendar", () => {
       peopleOf(members, { ...bath, participantIds: ["ex"] }).map((m) => m.id),
       ["ex"],
     );
-    assert.deepEqual(
-      eventTone(peopleOf(members, { ...bath, participantIds: ["ex", "dad"] })),
-      { tone: "teal", multi: true },
+    assert.equal(
+      eventPaint(peopleOf(members, { ...bath, participantIds: ["ex", "dad"] }))
+        .multi,
+      true,
     );
-  });
-
-  test("derives presentation color from Event Participants", () => {
-    assert.deepEqual(eventTone(peopleOf(members, bath)), {
-      tone: "teal",
-      multi: true,
-    });
-    assert.deepEqual(
-      eventTone(peopleOf(members, { ...bath, participantIds: ["dad"] })),
-      { tone: "teal", multi: false },
+    assert.equal(
+      eventPaint(peopleOf(members, { ...bath, participantIds: ["ex", "dad"] }))
+        .fill,
+      LEGACY_TONE_COLORS.teal,
     );
-    assert.deepEqual(eventTone([]), { tone: "sand", multi: false });
   });
 
   test("paints custom Member Color fill and soft for a single Active participant", () => {
@@ -253,21 +244,16 @@ describe("Household Calendar", () => {
   });
 
   test("maps Member Colors to Google colorIds for write-back", () => {
-    assert.equal(
-      new Set(Object.values(TONE_COLOR_ID)).size,
-      MEMBER_TONES.length,
-    );
-    for (const t of MEMBER_TONES) {
-      assert.equal(toneFromColorId(TONE_COLOR_ID[t]), t);
-    }
-    assert.equal(colorIdForTones(["blush"]), TONE_COLOR_ID.blush);
-    assert.equal(colorIdForTones(["blush", "lilac"]), MULTI_COLOR_ID);
-    assert.equal(colorIdForTones([]), null);
-    assert.deepEqual(presentationTonesFor(members, ["dad", "mom"]), [
+    const ids = Object.values(LEGACY_TONE_COLOR_ID);
+    assert.equal(new Set(ids).size, ids.length);
+    assert.equal(colorIdForLegacyTones(["blush"]), LEGACY_TONE_COLOR_ID.blush);
+    assert.equal(colorIdForLegacyTones(["blush", "lilac"]), MULTI_COLOR_ID);
+    assert.equal(colorIdForLegacyTones([]), null);
+    assert.deepEqual(legacyTonesForParticipants(members, ["dad", "mom"]), [
       "teal",
       "coral",
     ]);
-    assert.deepEqual(presentationTonesFor(members, ["ex"]), []);
+    assert.deepEqual(legacyTonesForParticipants(members, ["ex"]), []);
   });
 
   test("all-day spans cover days and drive the status Event", () => {

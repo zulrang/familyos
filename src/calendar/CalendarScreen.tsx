@@ -32,7 +32,7 @@ import {
   visibleUnderMemberFilter,
   weekdayLabel,
 } from "@/calendar/calendar";
-import { whoFromIds } from "@/calendar/event-who";
+import { eventWhoFromIds } from "@/calendar/event-who";
 import type { CalEvent } from "@/calendar/types";
 import {
   LEGACY_TONE_COLORS,
@@ -73,7 +73,7 @@ function toDraft(ev: CalEvent, timeZone: string): EventDraft {
     endTime: msToTimeInput(ev.endMs, timeZone),
     // Round-trip stored IDs even if some no longer resolve on the roster.
     memberIds: [...ev.participantIds],
-    who: whoFromIds(ev.participantIds),
+    who: eventWhoFromIds(ev.participantIds),
     recurringEventId: ev.recurringEventId,
     scope: "this",
   };
@@ -89,7 +89,7 @@ function createDraft(now: Date, timeZone: string): EventDraft {
     startTime: msToTimeInput(n.startMs, timeZone),
     endTime: msToTimeInput(n.endMs, timeZone),
     memberIds: [],
-    who: "none",
+    who: { kind: "none" },
     scope: "this",
   };
 }
