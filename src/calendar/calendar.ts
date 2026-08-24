@@ -16,6 +16,7 @@ import {
   zonedDateTimeToMs,
   zonedHourMinute,
   zonedWeekday,
+  zonedWeekdayIndex,
 } from "@/shared/time";
 import { isHouseholdEvent } from "./participants";
 
@@ -55,7 +56,7 @@ export function legacyTonesForParticipants(
   return tones;
 }
 
-export const DAY_COUNT = 7;
+export const DAY_COUNT = 5;
 export const DAY_START_HOUR = 7;
 export const DAY_END_HOUR = 21;
 export const HOUR_PX = 120;
@@ -68,13 +69,37 @@ export function addDays(d: Date, n: number, timeZone: string): Date {
   return addZonedDays(d, n, timeZone);
 }
 
-export function weekDays(
+export function viewDays(
   from: Date,
   timeZone: string,
   count = DAY_COUNT,
 ): Date[] {
   const start = startOfDay(from, timeZone);
   return Array.from({ length: count }, (_, i) => addDays(start, i, timeZone));
+}
+
+export function pageFiveDays(
+  from: Date,
+  pages: number,
+  timeZone: string,
+): Date {
+  return addDays(startOfDay(from, timeZone), pages * DAY_COUNT, timeZone);
+}
+
+export function visibleFetchBounds(
+  from: Date,
+  timeZone: string,
+): { from: string; to: string } {
+  const days = viewDays(from, timeZone);
+  return {
+    from: days[0].toISOString(),
+    to: addDays(days[days.length - 1], 1, timeZone).toISOString(),
+  };
+}
+
+export function isWeekend(d: Date, timeZone: string): boolean {
+  const i = zonedWeekdayIndex(d.getTime(), timeZone);
+  return i === 0 || i === 6;
 }
 
 export function weekdayLabel(d: Date, timeZone: string): string {
