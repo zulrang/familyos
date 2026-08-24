@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { fromDateOnly } from "@/calendar/calendar";
+import type { CalEvent } from "@/calendar/types";
 import type { PublicSettings } from "@/settings/types";
 import { CalendarScreen } from "./CalendarScreen";
 
@@ -114,6 +116,82 @@ describe("CalendarScreen Five-Day View", () => {
     await user.click(screen.getByRole("button", { name: "Today" }));
     expect(await screen.findByText("Wed")).toBeInTheDocument();
     expect(screen.getByText("Sun 23")).toBeInTheDocument();
+  });
+
+  test("a slower fetch for an earlier page does not replace the current events", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const tz = "America/New_York";
+    let releaseFirst: (body: { events: CalEvent[] }) => void = () => {};
+    const firstEvents = new Promise<{ events: CalEvent[] }>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          const u = new URL(url, "http://localhost");
+          if (u.searchParams.get("from") === "2026-08-19T04:00:00.000Z") {
+            const body = await firstEvents;
+            if (init?.signal?.aborted) {
+              throw new DOMException("Aborted", "AbortError");
+            }
+            return json(body);
+          }
+          return json({
+            events: [
+              {
+                id: "later",
+                title: "Later",
+                allDay: true,
+                startMs: fromDateOnly("2026-08-24", tz),
+                endMs: fromDateOnly("2026-08-25", tz),
+                participantIds: [],
+              },
+            ],
+          });
+        }
+        return json({ error: `unhandled ${method} ${url}` }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<CalendarScreen />);
+    await screen.findByRole("button", { name: "Today" });
+    await waitFor(() => {
+      expect(eventsUrl(fetchMock.mock.calls)?.searchParams.get("from")).toBe(
+        "2026-08-19T04:00:00.000Z",
+      );
+    });
+    await user.click(screen.getByRole("button", { name: "Next five days" }));
+    expect(
+      await screen.findByRole("button", { name: "Later" }),
+    ).toBeInTheDocument();
+
+    releaseFirst({
+      events: [
+        {
+          id: "earlier",
+          title: "Earlier",
+          allDay: true,
+          startMs: fromDateOnly("2026-08-19", tz),
+          endMs: fromDateOnly("2026-08-20", tz),
+          participantIds: [],
+        },
+      ],
+    });
+    await act(async () => {
+      await firstEvents;
+    });
+
+    expect(screen.getByRole("button", { name: "Later" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Earlier" })).toBeNull();
   });
 
   test("creating an event from a column uses that column's Household date", async () => {

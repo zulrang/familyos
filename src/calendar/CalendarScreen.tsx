@@ -127,10 +127,13 @@ export function CalendarScreen() {
   const from = bounds?.from;
   const to = bounds?.to;
 
-  async function load() {
-    const sRes = await fetch("/api/settings");
+  async function load(signal?: AbortSignal) {
+    const req = signal ? { signal } : undefined;
+    const sRes = await fetch("/api/settings", req);
+    if (signal?.aborted) return;
     if (await redirectIfPairingRequired(sRes)) return;
     const s = (await sRes.json()) as PublicSettings;
+    if (signal?.aborted) return;
     setSettings(s);
     if (!s.signedIn || !s.calendarId) {
       setEvents([]);
@@ -139,7 +142,9 @@ export function CalendarScreen() {
     const range = visibleFetchBounds(viewStart, s.timeZone);
     const eRes = await fetch(
       `/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+      req,
     );
+    if (signal?.aborted) return;
     if (await redirectIfPairingRequired(eRes)) return;
     if (eRes.status === 401) {
       setEvents([]);
@@ -151,6 +156,7 @@ export function CalendarScreen() {
       return;
     }
     const data = (await eRes.json()) as { events: CalEvent[] };
+    if (signal?.aborted) return;
     setEvents(data.events);
     setError(null);
   }
@@ -166,7 +172,13 @@ export function CalendarScreen() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible range bounds change
   useEffect(() => {
-    load().catch(() => setError("Could not load calendar."));
+    const ac = new AbortController();
+    load(ac.signal).catch((err: unknown) => {
+      if (ac.signal.aborted) return;
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      setError("Could not load calendar.");
+    });
+    return () => ac.abort();
   }, [from, to]);
 
   useEffect(() => {
