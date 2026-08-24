@@ -100,7 +100,7 @@ If the kiosk URL in `fullpageos.txt` changes, restart Chromium so the flag picks
 
 DPMS stays off so the panel never blanks. After 5 minutes with no X input, `familyos-idle-dim` sets backlight VCP 10 via DDC (`ddcutil --bus "$DDC_BUS" setvcp 10`) and restores the previous value on tap.
 
-Needs `xprintidle`, `ddcutil`, `i2c-dev` at boot (`/etc/modules`), and `pi` in group `i2c`. The I2C bus number is **port- and panel-specific** (`DDC_BUS`; record it in `docs/kiosk.local.md`). The reference CF15T on Pi 5 HDMI-1 was bus 11.
+Needs `xprintidle`, `ddcutil`, `i2c-dev` at boot (`/etc/modules`), and `pi` in group `i2c`. The reference Pi 5 ports are tried automatically: HDMI-1 on bus 11 and HDMI-2 on bus 12. `DDC_BUS` can pin a different port- and panel-specific bus; record overrides in `docs/kiosk.local.md`.
 
 Repo copy: `kiosk/idle-dim`. After changing it:
 

@@ -1,12 +1,12 @@
 #!/bin/bash
 # Dim the panel backlight after idle. DPMS stays off (start_gui).
 # Needs: xprintidle, ddcutil, i2c-dev, pi in group i2c.
-# DDC_BUS is the HDMI DDC adapter — panel/port specific; record it in docs/kiosk.local.md.
-# ponytail: default 11 is the reference CF15T on Pi 5 HDMI-1; set DDC_BUS if yours differs.
+# DDC buses are HDMI-port specific; DDC_BUS may pin one for non-reference hardware.
+# ponytail: try both Pi 5 HDMI ports; add discovery only if another display needs it.
 
 IDLE_MS="${IDLE_MS:-300000}"
 DIM="${DIM:-10}"
-BUS="${DDC_BUS:-11}"
+BUSES="${DDC_BUS:-11 12}"
 POLL_BRIGHT=5
 POLL_DIM=1
 
@@ -15,11 +15,22 @@ RUNTIME="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 STATE="$RUNTIME/familyos-idle-dim.saved"
 
 brightness() {
-  ddcutil --bus "$BUS" getvcp 10 -t 2>/dev/null | awk '{print $4}'
+  for bus in $BUSES; do
+    cur=$(ddcutil --bus "$bus" getvcp 10 -t 2>/dev/null |
+      awk '$1 == "VCP" && $2 == "10" && $3 == "C" && $4 ~ /^[0-9]+$/ { print $4; exit }')
+    numeric "$cur" && {
+      echo "$cur"
+      return 0
+    }
+  done
+  return 1
 }
 
 set_brightness() {
-  ddcutil --bus "$BUS" setvcp 10 "$1" >/dev/null
+  for bus in $BUSES; do
+    ddcutil --bus "$bus" setvcp 10 "$1" >/dev/null 2>&1 && return 0
+  done
+  return 1
 }
 
 numeric() {
@@ -45,7 +56,11 @@ flock -n 9 || exit 0
 
 sudo -n modprobe i2c-dev 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  [ -e "/dev/i2c-$BUS" ] && break
+  ready=0
+  for bus in $BUSES; do
+    [ -e "/dev/i2c-$bus" ] && ready=1
+  done
+  [ "$ready" -eq 1 ] && break
   sleep 1
 done
 
