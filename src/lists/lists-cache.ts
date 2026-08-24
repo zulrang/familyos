@@ -24,7 +24,15 @@ function parseItem(raw: unknown): ListItem | null {
   const o = raw as Record<string, unknown>;
   if (typeof o.id !== "string" || typeof o.title !== "string") return null;
   if (typeof o.done !== "boolean") return null;
-  return { id: o.id, title: o.title, done: o.done };
+  return {
+    id: o.id,
+    title: o.title,
+    done: o.done,
+    // DESIGN-DEVIATION: pre-version cache rows still display; empty token
+    // cannot mutate because HTTP requires a non-empty expectedVersion.
+    expectedVersion:
+      typeof o.expectedVersion === "string" ? o.expectedVersion : "",
+  };
 }
 
 function parseList(raw: unknown): HouseholdList | null {

@@ -1,6 +1,6 @@
 import type { HouseholdList, ListItem } from "@/lists/types";
 import { AuthError } from "@/shared/auth-error";
-import { ProviderUnavailableError } from "./lists-error";
+import { ListItemConflictError, ProviderUnavailableError } from "./lists-error";
 import * as tasks from "./tasks";
 
 /** Port for Household Lists provider operations (Google Tasks adapter / Fake). */
@@ -16,9 +16,14 @@ export type ListsGateway = {
     listId: string,
     itemId: string,
     patch: { title?: string; done?: boolean },
+    expectedVersion: string,
   ) => Promise<ListItem>;
   clearCompleted: (listId: string) => Promise<void>;
-  deleteItem: (listId: string, itemId: string) => Promise<void>;
+  deleteItem: (
+    listId: string,
+    itemId: string,
+    expectedVersion: string,
+  ) => Promise<void>;
 };
 
 function live<Args extends unknown[], Result>(
@@ -29,8 +34,7 @@ function live<Args extends unknown[], Result>(
       return await fn(...args);
     } catch (e) {
       if (e instanceof AuthError) throw e;
-      // ponytail: non-auth Tasks failures are unavailable; 4xx looks like
-      // an outage until List Item conflict handling (#15) splits them.
+      if (e instanceof ListItemConflictError) throw e;
       throw new ProviderUnavailableError();
     }
   };

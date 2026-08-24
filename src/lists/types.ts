@@ -8,11 +8,12 @@ export type GoogleTasklist = {
   title: string;
 };
 
-/** List Item on the wire. */
+/** List Item on the wire. `expectedVersion` is an opaque provider token. */
 export type ListItem = {
   id: string;
   title: string;
   done: boolean;
+  expectedVersion: string;
 };
 
 /** Household List panel payload (selected tasklist + its List Items). */

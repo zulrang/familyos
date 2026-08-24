@@ -202,9 +202,8 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Do not launch Onboard or add a React-only keyboard in `src/` for kiosk typing. The OSK is `kiosk/osk/`, loaded as a Chromium extension.
 - Date/time inputs are not text fields; the extension leaves those to the native picker.
 - Current implementation gaps are not product decisions: Google ETag
-  rejection for stale event / List Item writes is still absent. Bring
-  that into line with this SSD; do not document the current behavior
-  as canonical.
+  rejection for stale event writes is still absent. Bring that into
+  line with this SSD; do not document the current behavior as canonical.
 
 ## 8. Future Direction
 

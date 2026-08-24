@@ -13,6 +13,7 @@ type GTask = {
   title: string;
   status: "needsAction" | "completed";
   position: string;
+  etag: string;
   deleted?: boolean;
   parent?: string;
 };
@@ -37,6 +38,26 @@ export function createRecordedTasksGfetch(): (
   const lists = new Map<string, GList>();
   let listSeq = 0;
   let taskSeq = 0;
+  let etagSeq = 0;
+
+  function nextEtag(): string {
+    etagSeq += 1;
+    return `etag-${etagSeq}`;
+  }
+
+  function header(
+    init: RequestInit | undefined,
+    name: string,
+  ): string | undefined {
+    const h = init?.headers;
+    if (!h) return undefined;
+    if (h instanceof Headers) return h.get(name) ?? undefined;
+    const rec = h as Record<string, string>;
+    const key = Object.keys(rec).find(
+      (k) => k.toLowerCase() === name.toLowerCase(),
+    );
+    return key ? rec[key] : undefined;
+  }
 
   return async (url, init) => {
     const u = new URL(url);
@@ -100,24 +121,34 @@ export function createRecordedTasksGfetch(): (
           title: String(body.title ?? ""),
           status: "needsAction",
           position,
+          etag: nextEtag(),
         };
         list.tasks.set(id, task);
+        return json(task);
+      }
+
+      if (taskId && method === "GET") {
+        const task = list.tasks.get(taskId);
+        if (!task || task.deleted) return empty(404);
         return json(task);
       }
 
       if (taskId && method === "PATCH") {
         const task = list.tasks.get(taskId);
         if (!task || task.deleted) return empty(404);
+        if (header(init, "If-Match") !== task.etag) return empty(412);
         if (body.title !== undefined) task.title = String(body.title);
         if (body.status === "completed" || body.status === "needsAction") {
           task.status = body.status;
         }
+        task.etag = nextEtag();
         return json(task);
       }
 
       if (taskId && method === "DELETE") {
         const task = list.tasks.get(taskId);
         if (!task) return empty(404);
+        if (header(init, "If-Match") !== task.etag) return empty(412);
         list.tasks.delete(taskId);
         return empty(204);
       }

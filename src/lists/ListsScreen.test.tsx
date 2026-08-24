@@ -70,11 +70,28 @@ function installFetch(lists: HouseholdList[]) {
             String(init?.body ?? "{}"),
           ) as Partial<ListItem>;
           if (!item) return json({ error: "missing" }, 404);
-          Object.assign(item, body);
+          if (
+            body.expectedVersion !== undefined &&
+            body.expectedVersion !== item.expectedVersion
+          ) {
+            return json({ error: "version", item: { ...item } }, 409);
+          }
+          const { expectedVersion: _ignored, ...fields } = body;
+          Object.assign(item, fields);
+          item.expectedVersion = `${item.expectedVersion}+`;
           return json({ item: { ...item } });
         }
         if (method === "DELETE") {
           if (!list || !item) return json({ error: "missing" }, 404);
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            expectedVersion?: string;
+          };
+          if (
+            body.expectedVersion !== undefined &&
+            body.expectedVersion !== item.expectedVersion
+          ) {
+            return json({ error: "version", item: { ...item } }, 409);
+          }
           list.items = list.items.filter((i) => i.id !== itemId);
           return json({ ok: true });
         }
@@ -91,6 +108,7 @@ function installFetch(lists: HouseholdList[]) {
           id: `new-${body.title}`,
           title: body.title,
           done: false,
+          expectedVersion: "v-new",
         };
         list?.items.unshift(item);
         return json({ item });
@@ -114,7 +132,7 @@ function installFetch(lists: HouseholdList[]) {
 const grocery: HouseholdList = {
   id: "tl-1",
   title: "Grocery",
-  items: [{ id: "i1", title: "Milk", done: false }],
+  items: [{ id: "i1", title: "Milk", done: false, expectedVersion: "v1" }],
 };
 
 async function renderGrocery(lists: HouseholdList[] = [grocery]) {
@@ -307,6 +325,204 @@ describe("ListsScreen List Item lifecycle", () => {
       await screen.findByText("Could not delete List Item."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Milk" })).toBeInTheDocument();
+  });
+
+  test("a stale check reloads the current List Item instead of keeping the write", async () => {
+    const user = userEvent.setup();
+    const current: ListItem = {
+      id: "i1",
+      title: "Oat milk",
+      done: false,
+      expectedVersion: "v2",
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/lists")) {
+          return json({ lists: [grocery], stale: false });
+        }
+        if (method === "PATCH") {
+          return json({ error: "version", item: current }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ListsScreen />);
+    await user.click(await screen.findByRole("button", { name: "Milk" }));
+    expect(
+      await screen.findByRole("button", { name: "Oat milk" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Milk" })).toBeNull();
+    expect(screen.getByText("Oat milk")).toHaveStyle({
+      textDecoration: "none",
+    });
+    expect(
+      screen.getByText(
+        "This List Item changed on another Display. Reloaded — try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("a stale rename reloads the current List Item title", async () => {
+    const user = userEvent.setup();
+    const current: ListItem = {
+      id: "i1",
+      title: "Oat milk",
+      done: false,
+      expectedVersion: "v2",
+    };
+    const { fetchMock } = installFetch([grocery]);
+    render(<ListsScreen />);
+    await screen.findByRole("button", { name: "Milk" });
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = urlOf(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.endsWith("/api/settings")) {
+        return json(settings);
+      }
+      if (method === "GET" && url.endsWith("/api/lists")) {
+        return json({ lists: [grocery], stale: false });
+      }
+      if (method === "PATCH") {
+        return json({ error: "version", item: current }, 409);
+      }
+      return json({ error: "unhandled" }, 500);
+    });
+
+    await user.pointer({
+      keys: "[MouseRight]",
+      target: screen.getByRole("button", { name: "Milk" }),
+    });
+    const input = await screen.findByPlaceholderText("Name");
+    await user.clear(input);
+    await user.type(input, "Almond");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Oat milk" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Almond" })).toBeNull();
+    expect(screen.getByPlaceholderText("Name")).toHaveValue("Oat milk");
+    expect(
+      screen.getByText(
+        "This List Item changed on another Display. Reloaded — try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("a stale uncheck reloads the current checked List Item", async () => {
+    const user = userEvent.setup();
+    const checkedGrocery: HouseholdList = {
+      id: "tl-1",
+      title: "Grocery",
+      items: [{ id: "i1", title: "Milk", done: true, expectedVersion: "v1" }],
+    };
+    const current: ListItem = {
+      id: "i1",
+      title: "Oat milk",
+      done: true,
+      expectedVersion: "v2",
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/lists")) {
+          return json({ lists: [checkedGrocery], stale: false });
+        }
+        if (method === "PATCH") {
+          return json({ error: "version", item: current }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ListsScreen />);
+    await user.click(await screen.findByRole("button", { name: "Milk" }));
+    expect(
+      await screen.findByRole("button", { name: "Oat milk" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Oat milk")).toHaveStyle({
+      textDecoration: "line-through",
+    });
+  });
+
+  test("a conflict without a current item does not remove the List Item", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/lists")) {
+          return json({ lists: [grocery], stale: false });
+        }
+        if (method === "PATCH") {
+          return json({ error: "version" }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ListsScreen />);
+    await user.click(await screen.findByRole("button", { name: "Milk" }));
+    expect(
+      await screen.findByRole("button", { name: "Milk" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Milk")).toHaveStyle({ textDecoration: "none" });
+  });
+
+  test("a stale delete leaves the current List Item on the wall", async () => {
+    const user = userEvent.setup();
+    const current: ListItem = {
+      id: "i1",
+      title: "Oat milk",
+      done: false,
+      expectedVersion: "v2",
+    };
+    const { fetchMock } = installFetch([grocery]);
+    render(<ListsScreen />);
+    await screen.findByRole("button", { name: "Milk" });
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = urlOf(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.endsWith("/api/settings")) {
+        return json(settings);
+      }
+      if (method === "GET" && url.endsWith("/api/lists")) {
+        return json({ lists: [grocery], stale: false });
+      }
+      if (method === "DELETE") {
+        return json({ error: "version", item: current }, 409);
+      }
+      return json({ error: "unhandled" }, 500);
+    });
+
+    await user.pointer({
+      keys: "[MouseRight]",
+      target: screen.getByRole("button", { name: "Milk" }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete List Item?" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Oat milk" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This List Item changed on another Display. Reloaded — try again.",
+      ),
+    ).toBeInTheDocument();
   });
 });
 

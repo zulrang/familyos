@@ -78,17 +78,21 @@ describe("Household Lists HTTP", () => {
       {
         id: "tl-selected",
         title: "Selected",
-        items: [{ id: "i1", title: "Milk", done: false }],
+        items: [
+          { id: "i1", title: "Milk", done: false, expectedVersion: "v1" },
+        ],
       },
       {
         id: "tl-also",
         title: "Also",
-        items: [{ id: "i2", title: "Done", done: true }],
+        items: [{ id: "i2", title: "Done", done: true, expectedVersion: "v1" }],
       },
       {
         id: "tl-personal",
         title: "Personal",
-        items: [{ id: "i3", title: "Secret", done: false }],
+        items: [
+          { id: "i3", title: "Secret", done: false, expectedVersion: "v1" },
+        ],
       },
     ]);
     store = gateway.store;
@@ -228,39 +232,49 @@ describe("Household Lists HTTP", () => {
     assert.equal(add.status, 200);
     const added = (await add.json()) as { item: ListItem };
     assert.equal(added.item.title, "Bread");
+    assert.ok(added.item.expectedVersion);
 
     const check = await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ done: true }),
+        body: JSON.stringify({
+          done: true,
+          expectedVersion: added.item.expectedVersion,
+        }),
       }),
       "tl-selected",
       added.item.id,
       gateway,
     );
     assert.equal(check.status, 200);
-    assert.equal(((await check.json()) as { item: ListItem }).item.done, true);
+    const checkedItem = ((await check.json()) as { item: ListItem }).item;
+    assert.equal(checkedItem.done, true);
+    assert.notEqual(checkedItem.expectedVersion, added.item.expectedVersion);
 
     const uncheck = await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ done: false }),
+        body: JSON.stringify({
+          done: false,
+          expectedVersion: checkedItem.expectedVersion,
+        }),
       }),
       "tl-selected",
       added.item.id,
       gateway,
     );
     assert.equal(uncheck.status, 200);
-    assert.equal(
-      ((await uncheck.json()) as { item: ListItem }).item.done,
-      false,
-    );
+    const uncheckedItem = ((await uncheck.json()) as { item: ListItem }).item;
+    assert.equal(uncheckedItem.done, false);
 
     // mark done again then clear
     await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ done: true }),
+        body: JSON.stringify({
+          done: true,
+          expectedVersion: uncheckedItem.expectedVersion,
+        }),
       }),
       "tl-selected",
       added.item.id,
@@ -295,17 +309,18 @@ describe("Household Lists HTTP", () => {
     const rename = await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-also/items/${added.item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ title: "Cheddar" }),
+        body: JSON.stringify({
+          title: "Cheddar",
+          expectedVersion: added.item.expectedVersion,
+        }),
       }),
       "tl-also",
       added.item.id,
       gateway,
     );
     assert.equal(rename.status, 200);
-    assert.equal(
-      ((await rename.json()) as { item: ListItem }).item.title,
-      "Cheddar",
-    );
+    const renamedItem = ((await rename.json()) as { item: ListItem }).item;
+    assert.equal(renamedItem.title, "Cheddar");
     assert.equal(
       store.get("tl-also")?.items.find((i) => i.id === added.item.id)?.title,
       "Cheddar",
@@ -314,6 +329,7 @@ describe("Household Lists HTTP", () => {
     const del = await handleDeleteItem(
       req(`http://familyos.test/api/lists/tl-also/items/${added.item.id}`, {
         method: "DELETE",
+        body: JSON.stringify({ expectedVersion: renamedItem.expectedVersion }),
       }),
       "tl-also",
       added.item.id,
@@ -324,6 +340,108 @@ describe("Household Lists HTTP", () => {
       store.get("tl-also")?.items.some((i) => i.id === added.item.id),
       false,
     );
+  });
+
+  test("stale List Item writes conflict and return the current item", async () => {
+    const add = await handleAddItem(
+      req("http://familyos.test/api/lists/tl-selected/items", {
+        method: "POST",
+        body: JSON.stringify({ title: "Eggs" }),
+      }),
+      "tl-selected",
+      gateway,
+    );
+    const added = (await add.json()) as { item: ListItem };
+    const stale = added.item.expectedVersion;
+
+    const check = await handlePatchItem(
+      req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ done: true, expectedVersion: stale }),
+      }),
+      "tl-selected",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(check.status, 200);
+    const checked = ((await check.json()) as { item: ListItem }).item;
+
+    const stolen = await handlePatchItem(
+      req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title: "stolen", expectedVersion: stale }),
+      }),
+      "tl-selected",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(stolen.status, 409);
+    const stolenBody = (await stolen.json()) as {
+      error: string;
+      item: ListItem;
+    };
+    assert.equal(stolenBody.error, "version");
+    assert.equal(stolenBody.item.title, "Eggs");
+    assert.equal(stolenBody.item.done, true);
+    assert.equal(
+      store.get("tl-selected")?.items.find((i) => i.id === added.item.id)
+        ?.title,
+      "Eggs",
+    );
+
+    const staleUncheck = await handlePatchItem(
+      req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ done: false, expectedVersion: stale }),
+      }),
+      "tl-selected",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(staleUncheck.status, 409);
+    assert.equal(
+      store.get("tl-selected")?.items.find((i) => i.id === added.item.id)?.done,
+      true,
+    );
+
+    const staleDelete = await handleDeleteItem(
+      req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: stale }),
+      }),
+      "tl-selected",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(staleDelete.status, 409);
+    assert.equal(
+      store.get("tl-selected")?.items.some((i) => i.id === added.item.id),
+      true,
+    );
+
+    const gone = await handleDeleteItem(
+      req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: checked.expectedVersion }),
+      }),
+      "tl-selected",
+      added.item.id,
+      gateway,
+    );
+    assert.equal(gone.status, 200);
+  });
+
+  test("GET List Items expose an opaque expectedVersion", async () => {
+    const res = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    const body = (await res.json()) as { lists: HouseholdList[] };
+    const milk = body.lists
+      .find((l) => l.id === "tl-selected")
+      ?.items.find((i) => i.id === "i1");
+    assert.equal(typeof milk?.expectedVersion, "string");
+    assert.ok(milk?.expectedVersion);
   });
 
   test("create selects the new Google tasklist under versioning", async () => {
@@ -490,17 +608,23 @@ describe("Household Lists outage cache", () => {
       {
         id: "tl-groceries",
         title: "Groceries",
-        items: [{ id: "g1", title: "Milk", done: false }],
+        items: [
+          { id: "g1", title: "Milk", done: false, expectedVersion: "v1" },
+        ],
       },
       {
         id: "tl-chores",
         title: "Chores",
-        items: [{ id: "c1", title: "Trash", done: true }],
+        items: [
+          { id: "c1", title: "Trash", done: true, expectedVersion: "v1" },
+        ],
       },
       {
         id: "tl-personal",
         title: "Personal",
-        items: [{ id: "p1", title: "Secret", done: false }],
+        items: [
+          { id: "p1", title: "Secret", done: false, expectedVersion: "v1" },
+        ],
       },
     ]);
 
@@ -608,7 +732,7 @@ describe("Household Lists outage cache", () => {
       await handlePatchItem(
         req("http://familyos.test/api/lists/tl-groceries/items/g1", {
           method: "PATCH",
-          body: JSON.stringify({ done: true }),
+          body: JSON.stringify({ done: true, expectedVersion: "v1" }),
         }),
         "tl-groceries",
         "g1",
@@ -624,6 +748,7 @@ describe("Household Lists outage cache", () => {
       await handleDeleteItem(
         req("http://familyos.test/api/lists/tl-groceries/items/g1", {
           method: "DELETE",
+          body: JSON.stringify({ expectedVersion: "v1" }),
         }),
         "tl-groceries",
         "g1",
