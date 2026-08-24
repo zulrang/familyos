@@ -310,4 +310,60 @@ describe("CalendarScreen outage cache", () => {
       screen.queryByText("Google is unavailable. Calendar is read-only."),
     ).toBeNull();
   });
+
+  test("a slower stale poll does not overwrite a live recovery", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    let mode: "stale" | "hang" | "live" = "stale";
+    const hung: ((res: Response) => void)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = urlOf(input);
+        if (url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (url.includes("/api/events")) {
+          if (mode === "stale") {
+            return json({ events: [practice], stale: true });
+          }
+          if (mode === "live") {
+            return json({ events: [practice], stale: false });
+          }
+          return new Promise<Response>((resolve) => {
+            hung.push(resolve);
+          });
+        }
+        return json({ error: "unhandled" }, 500);
+      }),
+    );
+    render(<CalendarScreen />);
+
+    expect(
+      await screen.findByText("Google is unavailable. Calendar is read-only."),
+    ).toBeInTheDocument();
+
+    mode = "hang";
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(hung.length).toBeGreaterThan(0);
+
+    mode = "live";
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(await screen.findByRole("button", { name: "Add" })).toBeVisible();
+
+    await act(async () => {
+      for (const resolve of hung) {
+        resolve(json({ events: [practice], stale: true }));
+      }
+    });
+
+    expect(screen.getByRole("button", { name: "Add" })).toBeVisible();
+    expect(
+      screen.queryByText("Google is unavailable. Calendar is read-only."),
+    ).toBeNull();
+  });
 });
