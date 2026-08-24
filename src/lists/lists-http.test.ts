@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
@@ -849,6 +849,116 @@ describe("Household Lists outage cache", () => {
     assert.equal(
       ((await add.json()) as { item: { title: string } }).item.title,
       "Vacuum",
+    );
+  });
+
+  test("a cache write failure still returns live writable Household Lists", async () => {
+    gateway.offline = false;
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: ["tl-groceries", "tl-chores"],
+      timeZone: "America/New_York",
+      configVersion: (await readHousehold()).configVersion,
+    });
+    assert.equal(
+      (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
+        .status,
+      200,
+    );
+    const chores = gateway.store.get("tl-chores");
+    assert.ok(chores);
+    chores.title = "Errands";
+    const cacheDir = path.join(dataRoot, "cache", "lists", "acct-a");
+    const cached = await readdir(cacheDir);
+    for (const name of cached) {
+      await chmod(path.join(cacheDir, name), 0o444);
+    }
+    try {
+      const live = await handleGetLists(
+        req("http://familyos.test/api/lists"),
+        gateway,
+      );
+      assert.equal(live.status, 200);
+      const body = (await live.json()) as {
+        lists: HouseholdList[];
+        stale: boolean;
+      };
+      assert.equal(body.stale, false);
+      assert.equal(
+        body.lists.find((l) => l.id === "tl-chores")?.title,
+        "Errands",
+      );
+    } finally {
+      const cached = await readdir(cacheDir);
+      for (const name of cached) {
+        await chmod(path.join(cacheDir, name), 0o644);
+      }
+      chores.title = "Chores";
+    }
+  });
+
+  test("a successful List Item write is what an outage returns", async () => {
+    gateway.offline = false;
+    await writeProvider({
+      tokens: {
+        access_token: "access",
+        refresh_token: "refresh",
+        expiry: Date.now() + 60_000,
+      },
+      oauthState: null,
+      providerConnectionId: "acct-a",
+    });
+    await writeHousehold({
+      familyName: "CacheHousehold",
+      members: [],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: ["tl-groceries", "tl-chores"],
+      timeZone: "America/New_York",
+      configVersion: (await readHousehold()).configVersion,
+    });
+    assert.equal(
+      (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
+        .status,
+      200,
+    );
+    const add = await handleAddItem(
+      req("http://familyos.test/api/lists/tl-groceries/items", {
+        method: "POST",
+        body: JSON.stringify({ title: "Eggs" }),
+      }),
+      "tl-groceries",
+      gateway,
+    );
+    assert.equal(add.status, 200);
+    gateway.offline = true;
+    const stale = await handleGetLists(
+      req("http://familyos.test/api/lists"),
+      gateway,
+    );
+    assert.equal(stale.status, 200);
+    const body = (await stale.json()) as {
+      lists: HouseholdList[];
+      stale: boolean;
+    };
+    assert.equal(body.stale, true);
+    assert.equal(
+      body.lists
+        .find((l) => l.id === "tl-groceries")
+        ?.items.some((i) => i.title === "Eggs"),
+      true,
     );
   });
 });

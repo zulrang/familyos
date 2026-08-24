@@ -151,6 +151,34 @@ async function requireListsWrite(request: Request): Promise<Response | null> {
   return rejectIfReadOnly();
 }
 
+async function bestEffortRefreshSelectedCache(
+  connectionId: string | null,
+  listIds: string[],
+  lists: ListsRead["lists"],
+): Promise<void> {
+  if (!connectionId) return;
+  try {
+    await refreshSelectedListsCache(connectionId, listIds, lists);
+  } catch {
+    /* live lists already in hand */
+  }
+}
+
+async function bestEffortRefreshListCache(
+  gw: ListsGateway,
+  listId: string,
+): Promise<void> {
+  const { providerConnectionId } = await readProvider();
+  if (!providerConnectionId) return;
+  try {
+    const lists = await gw.listSelected([listId]);
+    const list = lists[0];
+    if (list) await putHouseholdListCache(providerConnectionId, list);
+  } catch {
+    /* live write already succeeded */
+  }
+}
+
 export async function handleGetLists(
   request: Request,
   gateway?: ListsGateway,
@@ -159,28 +187,27 @@ export async function handleGetLists(
   if (isUnauthorized(display)) return display;
   const { listIds } = await readHousehold();
   const provider = await readProvider();
+  let lists: ListsRead["lists"];
   try {
     if (!provider.tokens?.access_token) throw new AuthError();
     const gw = await resolveGateway(gateway);
-    const lists = await gw.listSelected(listIds);
-    if (provider.providerConnectionId) {
-      await refreshSelectedListsCache(
-        provider.providerConnectionId,
-        listIds,
-        lists,
-      );
-    }
-    return Response.json({ lists, stale: false } satisfies ListsRead);
+    lists = await gw.listSelected(listIds);
   } catch (e) {
-    const lists = await cachedSelectedLists(
+    const cached = await cachedSelectedLists(
       provider.providerConnectionId,
       listIds,
     );
-    if (lists.length) {
-      return Response.json({ lists, stale: true } satisfies ListsRead);
+    if (cached.length) {
+      return Response.json({ lists: cached, stale: true } satisfies ListsRead);
     }
     return listsError(e);
   }
+  await bestEffortRefreshSelectedCache(
+    provider.providerConnectionId,
+    listIds,
+    lists,
+  );
+  return Response.json({ lists, stale: false } satisfies ListsRead);
 }
 
 export async function handleCreateList(
@@ -210,6 +237,7 @@ export async function handleCreateList(
       // Race after pre-check: provider list may exist; do not return it (unselected).
       return versionConflict(result.config);
     }
+    await bestEffortRefreshListCache(gw, list.id);
     return Response.json({
       list,
       listIds: result.config.listIds,
@@ -234,6 +262,7 @@ export async function handleRenameList(
   try {
     const gw = await resolveGateway(gateway);
     const list = await gw.renameList(listId, title);
+    await bestEffortRefreshListCache(gw, listId);
     return Response.json({ list });
   } catch (e) {
     return listsError(e);
@@ -295,6 +324,7 @@ export async function handleAddItem(
   try {
     const gw = await resolveGateway(gateway);
     const item = await gw.addItem(listId, title);
+    await bestEffortRefreshListCache(gw, listId);
     return Response.json({ item });
   } catch (e) {
     return listsError(e);
@@ -316,6 +346,7 @@ export async function handlePatchItem(
   try {
     const gw = await resolveGateway(gateway);
     const item = await gw.patchItem(listId, itemId, parsed.value);
+    await bestEffortRefreshListCache(gw, listId);
     return Response.json({ item });
   } catch (e) {
     return listsError(e);
@@ -334,6 +365,7 @@ export async function handleClearCompleted(
   try {
     const gw = await resolveGateway(gateway);
     await gw.clearCompleted(listId);
+    await bestEffortRefreshListCache(gw, listId);
     return Response.json({ ok: true });
   } catch (e) {
     return listsError(e);
@@ -353,6 +385,7 @@ export async function handleDeleteItem(
   try {
     const gw = await resolveGateway(gateway);
     await gw.deleteItem(listId, itemId);
+    await bestEffortRefreshListCache(gw, listId);
     return Response.json({ ok: true });
   } catch (e) {
     return listsError(e);
