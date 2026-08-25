@@ -12,6 +12,14 @@ describe("slice import boundaries", () => {
     assert.equal(hits.length, 1);
   });
 
+  test("a Lists module cannot import the Calendar slice root", () => {
+    const hits = scanFile(
+      "src/lists/ListsScreen.tsx",
+      `import * as calendar from "@/calendar";`,
+    );
+    assert.equal(hits.length, 1);
+  });
+
   test("shared cannot import a slice", () => {
     const hits = scanFile(
       "src/shared/display-auth.ts",

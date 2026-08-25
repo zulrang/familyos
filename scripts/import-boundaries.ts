@@ -20,7 +20,9 @@ function posix(p: string): string {
 }
 
 function srcDirOf(repoPath: string): string | null {
-  const m = posix(repoPath).match(/^src\/([^/]+)\//);
+  const m = stripExt(repoPath).match(
+    /^src\/(calendar|lists|displays|members|settings|shared)(?:\/|$)/,
+  );
   return m ? m[1] : null;
 }
 
