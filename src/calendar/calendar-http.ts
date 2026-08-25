@@ -76,6 +76,12 @@ function parseEventUpdate(
   return { ...body, scope: parseScope(o.scope) };
 }
 
+function parseExpectedVersion(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = (raw as Record<string, unknown>).expectedVersion;
+  return typeof v === "string" && v ? v : null;
+}
+
 async function requireHouseholdCalendar(
   request: Request,
 ): Promise<{ calendarId: string; timeZone: string } | Response> {
@@ -236,8 +242,11 @@ export async function handleUpdateEvent(
   if (gate instanceof Response) return gate;
   const deniedWrite = await rejectIfReadOnly(gate.calendarId);
   if (deniedWrite) return deniedWrite;
-  const body = parseEventUpdate(await readJson(request));
+  const raw = await readJson(request);
+  const body = parseEventUpdate(raw);
   if (!body) return jsonError("invalid body", 400);
+  const expectedVersion = parseExpectedVersion(raw);
+  if (!expectedVersion) return jsonError("expectedVersion required", 400);
   const s = await readHousehold();
   const participantIds = normalizeParticipantIds(body.participantIds);
   try {
@@ -255,6 +264,7 @@ export async function handleUpdateEvent(
       },
       body.scope,
       gate.timeZone,
+      expectedVersion,
     );
     await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
     return Response.json({ event });
@@ -273,6 +283,8 @@ export async function handleDeleteEvent(
   const deniedWrite = await rejectIfReadOnly(gate.calendarId);
   if (deniedWrite) return deniedWrite;
   const url = new URL(request.url);
+  const expectedVersion = parseExpectedVersion(await readJson(request));
+  if (!expectedVersion) return jsonError("expectedVersion required", 400);
   try {
     const gw = await resolveGateway(gateway);
     await gw.deleteEvent(
@@ -280,6 +292,7 @@ export async function handleDeleteEvent(
       id,
       parseScope(url.searchParams.get("scope")),
       gate.timeZone,
+      expectedVersion,
     );
     await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
     return Response.json({ ok: true });

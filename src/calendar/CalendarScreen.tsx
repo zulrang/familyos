@@ -75,6 +75,7 @@ function toDraft(ev: CalEvent, timeZone: string): EventDraft {
     memberIds: [...ev.participantIds],
     who: eventWhoFromIds(ev.participantIds),
     recurringEventId: ev.recurringEventId,
+    expectedVersion: ev.expectedVersion,
     scope: "this",
   };
 }
@@ -221,6 +222,31 @@ export function CalendarScreen() {
 
   const status = timeZone ? statusEvent(events, now, timeZone) : null;
 
+  function applyCurrentEvent(eventId: string, current: CalEvent | null) {
+    setCalendarRead((cur) => ({
+      ...cur,
+      events: current
+        ? cur.events.map((e) => (e.id === eventId ? current : e))
+        : cur.events.filter((e) => e.id !== eventId),
+    }));
+  }
+
+  /** Keep the open editor when a 409 includes `event`; a missing key is not a delete. */
+  async function reloadConflictingEvent(res: Response, eventId: string) {
+    const body = (await res.json()) as { event?: CalEvent | null };
+    if ("event" in body) {
+      applyCurrentEvent(eventId, body.event ?? null);
+      if (timeZone) {
+        setSheet((s) => {
+          if (!s?.id || s.id !== eventId) return s;
+          if (!body.event) return null;
+          return toDraft(body.event, timeZone);
+        });
+      }
+    }
+    setError("This event changed on another Display. Reloaded — try again.");
+  }
+
   async function save(draft: EventDraft) {
     if (!timeZone) return;
     setBusy(true);
@@ -235,7 +261,7 @@ export function CalendarScreen() {
             timeZone,
           ).getTime()
         : fromDateAndTime(draft.date, draft.endTime, timeZone);
-      const body = {
+      const body: Record<string, unknown> = {
         title: draft.title.trim() || "Busy",
         allDay: draft.allDay,
         startMs,
@@ -243,6 +269,7 @@ export function CalendarScreen() {
         participantIds: draft.memberIds,
         scope: draft.recurringEventId ? draft.scope : "this",
       };
+      if (draft.id) body.expectedVersion = draft.expectedVersion ?? "";
       const res = await fetch(
         draft.id
           ? `/api/events/${encodeURIComponent(draft.id)}`
@@ -253,6 +280,10 @@ export function CalendarScreen() {
           body: JSON.stringify(body),
         },
       );
+      if (res.status === 409 && draft.id) {
+        await reloadConflictingEvent(res, draft.id);
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
       setSheet(null);
       await load();
@@ -278,8 +309,18 @@ export function CalendarScreen() {
       const q = scope === "this" ? "" : `?scope=${scope}`;
       const res = await fetch(
         `/api/events/${encodeURIComponent(draft.id)}${q}`,
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedVersion: draft.expectedVersion ?? "",
+          }),
+        },
       );
+      if (res.status === 409) {
+        await reloadConflictingEvent(res, draft.id);
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
       setSheet(null);
       await load();

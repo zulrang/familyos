@@ -44,6 +44,10 @@ function parseEvent(raw: unknown): CalEvent | null {
     startMs: o.startMs,
     endMs: o.endMs,
     participantIds: o.participantIds,
+    // DESIGN-DEVIATION: pre-version cache rows still display; empty token
+    // cannot mutate because HTTP requires a non-empty expectedVersion.
+    expectedVersion:
+      typeof o.expectedVersion === "string" ? o.expectedVersion : "",
   };
   if (typeof o.recurringEventId === "string") {
     event.recurringEventId = o.recurringEventId;

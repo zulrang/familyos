@@ -22,6 +22,7 @@ import {
 import type { CalEvent, GoogleCalendar, SeriesScope } from "@/calendar/types";
 import type { LegacyTone } from "@/members/members";
 import { gfetch } from "@/shared/google";
+import { EventConflictError } from "./calendar-error";
 
 export async function listCalendars(): Promise<GoogleCalendar[]> {
   const res = await gfetch(
@@ -47,6 +48,7 @@ export async function listCalendars(): Promise<GoogleCalendar[]> {
 type GDate = { dateTime?: string; date?: string; timeZone?: string };
 type GEvent = {
   id?: string;
+  etag?: string;
   summary?: string;
   description?: string;
   location?: string;
@@ -89,6 +91,7 @@ function toCalEvent(g: GEvent, timeZone: string): CalEvent | null {
     participantIds: parseParticipantIds(
       stored === undefined || stored === null ? undefined : stored,
     ),
+    expectedVersion: g.etag ?? "", // DESIGN-DEVIATION: live Google may omit etag; empty cannot mutate (HTTP requires a token)
     recurringEventId: g.recurringEventId,
     originalStartMs: original?.ms,
   };
@@ -202,18 +205,46 @@ async function getGEvent(calendarId: string, eventId: string): Promise<GEvent> {
   return res.json() as Promise<GEvent>;
 }
 
+async function currentEvent(
+  calendarId: string,
+  eventId: string,
+  timeZone: string,
+): Promise<CalEvent | null> {
+  const res = await gfetch(eventsUrl(calendarId, eventId));
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new Error(`get ${res.status}`);
+  return toCalEvent((await res.json()) as GEvent, timeZone);
+}
+
+async function rejectIfStale(
+  res: Response,
+  calendarId: string,
+  eventId: string,
+  timeZone: string,
+): Promise<void> {
+  if (res.status !== 412) return;
+  throw new EventConflictError(
+    await currentEvent(calendarId, eventId, timeZone),
+  );
+}
+
 async function patchGEvent(
   calendarId: string,
   eventId: string,
   body: Record<string, unknown>,
+  expectedVersion: string,
+  requestedEventId: string,
+  timeZone: string,
 ): Promise<GEvent> {
   const res = await gfetch(
     `${eventsUrl(calendarId, eventId)}?sendUpdates=none`,
     {
       method: "PATCH",
+      headers: { "If-Match": expectedVersion },
       body: JSON.stringify(body),
     },
   );
+  await rejectIfStale(res, calendarId, requestedEventId, timeZone);
   if (!res.ok) throw new Error(`update ${res.status} ${await res.text()}`);
   return res.json() as Promise<GEvent>;
 }
@@ -223,8 +254,20 @@ async function calFromPatch(
   eventId: string,
   body: Record<string, unknown>,
   timeZone: string,
+  expectedVersion: string,
+  requestedEventId: string,
 ): Promise<CalEvent> {
-  const ev = toCalEvent(await patchGEvent(calendarId, eventId, body), timeZone);
+  const ev = toCalEvent(
+    await patchGEvent(
+      calendarId,
+      eventId,
+      body,
+      expectedVersion,
+      requestedEventId,
+      timeZone,
+    ),
+    timeZone,
+  );
   if (!ev) throw new Error("update returned no event");
   return ev;
 }
@@ -286,6 +329,8 @@ async function updateFollowing(
   orig: { ms: number; allDay: boolean },
   w: EventWrite,
   timeZone: string,
+  masterVersion: string,
+  requestedEventId: string,
 ): Promise<CalEvent> {
   const masterId = master.id;
   if (!masterId) throw new Error("master has no id");
@@ -322,7 +367,14 @@ async function updateFollowing(
   if (master.description) insertBody.description = master.description;
   if (master.location) insertBody.location = master.location;
   if (master.reminders) insertBody.reminders = master.reminders;
-  await patchGEvent(calendarId, masterId, { recurrence: oldRec });
+  const truncated = await patchGEvent(
+    calendarId,
+    masterId,
+    { recurrence: oldRec },
+    masterVersion,
+    requestedEventId,
+    timeZone,
+  );
   try {
     const res = await gfetch(`${eventsUrl(calendarId)}?sendUpdates=none`, {
       method: "POST",
@@ -333,7 +385,14 @@ async function updateFollowing(
     if (!ev) throw new Error("insert returned no event");
     return ev;
   } catch (e) {
-    await patchGEvent(calendarId, masterId, { recurrence });
+    await patchGEvent(
+      calendarId,
+      masterId,
+      { recurrence },
+      truncated.etag ?? "",
+      requestedEventId,
+      timeZone,
+    );
     throw e;
   }
 }
@@ -344,6 +403,7 @@ export async function updateEvent(
   w: EventWrite,
   scope: SeriesScope = "this",
   timeZone: string,
+  expectedVersion: string,
 ): Promise<CalEvent> {
   if (scope === "this") {
     return calFromPatch(
@@ -351,9 +411,14 @@ export async function updateEvent(
       eventId,
       gBody(w, "update", timeZone),
       timeZone,
+      expectedVersion,
+      eventId,
     );
   }
   const instance = await getGEvent(calendarId, eventId);
+  if ((instance.etag ?? "") !== expectedVersion) {
+    throw new EventConflictError(toCalEvent(instance, timeZone));
+  }
   const masterId = instance.recurringEventId;
   if (!masterId) {
     return calFromPatch(
@@ -361,6 +426,8 @@ export async function updateEvent(
       eventId,
       gBody(w, "update", timeZone),
       timeZone,
+      expectedVersion,
+      eventId,
     );
   }
   const master = await getGEvent(calendarId, masterId);
@@ -369,12 +436,19 @@ export async function updateEvent(
     timeZone,
   );
   const mStart = parseGDate(master.start, timeZone);
+  // ponytail: series writes If-Match the master's current etag (an instance
+  // token cannot If-Match a different resource). The instance token is checked
+  // above so a stale Display still 409s; concurrent master writes 412 on this
+  // GET-then-PATCH. Upgrade: persist series etag on listed instances.
+  const masterVersion = master.etag ?? "";
   if (!orig || !mStart) {
     return calFromPatch(
       calendarId,
       eventId,
       gBody(w, "update", timeZone),
       timeZone,
+      expectedVersion,
+      eventId,
     );
   }
   const head = isSeriesHead(orig.ms, mStart.ms);
@@ -388,7 +462,14 @@ export async function updateEvent(
         timeZone,
       );
     }
-    return calFromPatch(calendarId, masterId, body, timeZone);
+    return calFromPatch(
+      calendarId,
+      masterId,
+      body,
+      timeZone,
+      masterVersion,
+      eventId,
+    );
   }
   // ponytail: no RRULE to split; later exceptions are not copied onto the new series.
   if (!master.recurrence?.length) {
@@ -397,9 +478,19 @@ export async function updateEvent(
       eventId,
       gBody(w, "update", timeZone),
       timeZone,
+      expectedVersion,
+      eventId,
     );
   }
-  return updateFollowing(calendarId, master, orig, w, timeZone);
+  return updateFollowing(
+    calendarId,
+    master,
+    orig,
+    w,
+    timeZone,
+    masterVersion,
+    eventId,
+  );
 }
 
 export async function deleteEvent(
@@ -407,20 +498,28 @@ export async function deleteEvent(
   eventId: string,
   scope: SeriesScope = "this",
   timeZone: string,
+  expectedVersion: string,
 ): Promise<void> {
-  const del = async (id: string) => {
-    const res = await gfetch(eventsUrl(calendarId, id), { method: "DELETE" });
+  const del = async (id: string, version: string) => {
+    const res = await gfetch(eventsUrl(calendarId, id), {
+      method: "DELETE",
+      headers: { "If-Match": version },
+    });
+    await rejectIfStale(res, calendarId, eventId, timeZone);
     if (!res.ok && res.status !== 204 && res.status !== 410)
       throw new Error(`delete ${res.status}`);
   };
   if (scope === "this") {
-    await del(eventId);
+    await del(eventId, expectedVersion);
     return;
   }
   const instance = await getGEvent(calendarId, eventId);
+  if ((instance.etag ?? "") !== expectedVersion) {
+    throw new EventConflictError(toCalEvent(instance, timeZone));
+  }
   const masterId = instance.recurringEventId;
   if (!masterId) {
-    await del(eventId);
+    await del(eventId, expectedVersion);
     return;
   }
   const master = await getGEvent(calendarId, masterId);
@@ -430,8 +529,9 @@ export async function deleteEvent(
   );
   const mStart = parseGDate(master.start, timeZone);
   const head = orig && mStart ? isSeriesHead(orig.ms, mStart.ms) : false;
+  const masterVersion = master.etag ?? "";
   if (scope === "all" || head || !orig || !master.recurrence?.length) {
-    await del(masterId);
+    await del(masterId, masterVersion);
     return;
   }
   const until = untilStamp({
@@ -439,7 +539,19 @@ export async function deleteEvent(
     allDay: orig.allDay,
     timeZone,
   });
-  await patchGEvent(calendarId, masterId, {
-    recurrence: truncateRecurrence(master.recurrence, until, orig.ms, timeZone),
-  });
+  await patchGEvent(
+    calendarId,
+    masterId,
+    {
+      recurrence: truncateRecurrence(
+        master.recurrence,
+        until,
+        orig.ms,
+        timeZone,
+      ),
+    },
+    masterVersion,
+    eventId,
+    timeZone,
+  );
 }
