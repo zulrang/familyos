@@ -52,6 +52,7 @@ const bath: CalEvent = {
   startMs: 0,
   endMs: 1,
   participantIds: ["dad", "mom"],
+  expectedVersion: "v1",
 };
 
 describe("Household Calendar", () => {
@@ -265,6 +266,7 @@ describe("Household Calendar", () => {
       startMs: fromDateOnly("2026-08-01", HOST),
       endMs: fromDateOnly("2026-09-18", HOST),
       participantIds: [],
+      expectedVersion: "v1",
     };
     assert.equal(coversDay(trip, new Date(2026, 7, 19), HOST), true);
     assert.equal(coversDay(trip, new Date(2026, 8, 18), HOST), false);
@@ -324,6 +326,7 @@ describe("Household Calendar", () => {
       startMs: fromDateOnly("2026-03-08", tz),
       endMs: fromDateOnly("2026-03-09", tz),
       participantIds: [],
+      expectedVersion: "v1",
     };
     assert.equal(coversDay(march8, days[0], tz), true);
     assert.equal(coversDay(march8, days[1], tz), false);

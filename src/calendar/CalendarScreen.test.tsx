@@ -152,6 +152,7 @@ describe("CalendarScreen Five-Day View", () => {
                 startMs: fromDateOnly("2026-08-24", tz),
                 endMs: fromDateOnly("2026-08-25", tz),
                 participantIds: [],
+                expectedVersion: "v1",
               },
             ],
           });
@@ -183,6 +184,7 @@ describe("CalendarScreen Five-Day View", () => {
           startMs: fromDateOnly("2026-08-19", tz),
           endMs: fromDateOnly("2026-08-20", tz),
           participantIds: [],
+          expectedVersion: "v1",
         },
       ],
     });
@@ -215,6 +217,7 @@ describe("CalendarScreen outage cache", () => {
     startMs: fromDateOnly("2026-08-19", "America/New_York"),
     endMs: fromDateOnly("2026-08-20", "America/New_York"),
     participantIds: [],
+    expectedVersion: "v1",
   };
 
   test("stale Calendar events stay visible and cannot be mutated", async () => {
@@ -365,5 +368,134 @@ describe("CalendarScreen outage cache", () => {
     expect(
       screen.queryByText("Google is unavailable. Calendar is read-only."),
     ).toBeNull();
+  });
+});
+
+describe("CalendarScreen stale writes", () => {
+  const practice: CalEvent = {
+    id: "ev-1",
+    title: "Practice",
+    allDay: true,
+    startMs: fromDateOnly("2026-08-19", "America/New_York"),
+    endMs: fromDateOnly("2026-08-20", "America/New_York"),
+    participantIds: [],
+    expectedVersion: "v1",
+  };
+  const current: CalEvent = {
+    ...practice,
+    title: "Recital",
+    expectedVersion: "v2",
+  };
+
+  test("a stale save reloads the current event instead of keeping the write", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          return json({ events: [practice], stale: false });
+        }
+        if (method === "PATCH") {
+          return json({ error: "version", event: current }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CalendarScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Practice" }));
+    const title = await screen.findByPlaceholderText("Title");
+    await user.clear(title);
+    await user.type(title, "Stolen");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Recital" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stolen" })).toBeNull();
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("Recital");
+    expect(
+      screen.getByText(
+        "This event changed on another Display. Reloaded — try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("a stale delete leaves the current event on the wall", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          return json({ events: [practice], stale: false });
+        }
+        if (method === "DELETE") {
+          return json({ error: "version", event: current }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CalendarScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Practice" }));
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Recital" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Event" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("Recital");
+    expect(
+      screen.getByText(
+        "This event changed on another Display. Reloaded — try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  test("a conflict without a current event does not remove the event", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          return json({ events: [practice], stale: false });
+        }
+        if (method === "PATCH") {
+          return json({ error: "version" }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      }),
+    );
+    render(<CalendarScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Practice" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByRole("button", { name: "Practice" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Event" })).toBeInTheDocument();
   });
 });

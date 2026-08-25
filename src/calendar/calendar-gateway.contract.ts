@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { fromDateAndTime, fromDateOnly } from "@/calendar/calendar";
+import { EventConflictError } from "./calendar-error";
 import type { CalendarGateway } from "./calendar-gateway";
 
 const TZ = "America/New_York";
@@ -33,6 +34,7 @@ export async function assertCalendarGatewayContract(
   assert.equal(piano.allDay, false);
   assert.deepEqual(piano.participantIds, []);
   assert.ok(piano.id);
+  assert.ok(piano.expectedVersion);
   assert.equal(piano.startMs, pianoStart);
   assert.equal(piano.endMs, pianoEnd);
 
@@ -80,6 +82,10 @@ export async function assertCalendarGatewayContract(
     listed.map((e) => e.id),
     [piano.id, dupes.id, picnic.id],
   );
+  assert.equal(
+    listed.find((e) => e.id === piano.id)?.expectedVersion,
+    piano.expectedVersion,
+  );
 
   const day19 = await gateway.listEvents(
     CAL,
@@ -96,6 +102,7 @@ export async function assertCalendarGatewayContract(
     true,
   );
 
+  const stalePiano = piano.expectedVersion;
   const updated = await gateway.updateEvent(
     CAL,
     piano.id,
@@ -108,9 +115,11 @@ export async function assertCalendarGatewayContract(
     },
     "this",
     TZ,
+    stalePiano,
   );
   assert.equal(updated.title, "Piano recital");
   assert.deepEqual(updated.participantIds, ["ellie"]);
+  assert.notEqual(updated.expectedVersion, stalePiano);
 
   const afterUpdate = await gateway.listEvents(
     CAL,
@@ -121,8 +130,74 @@ export async function assertCalendarGatewayContract(
   const found = afterUpdate.find((e) => e.id === piano.id);
   assert.equal(found?.title, "Piano recital");
   assert.deepEqual(found?.participantIds, ["ellie"]);
+  assert.equal(found?.expectedVersion, updated.expectedVersion);
 
-  await gateway.deleteEvent(CAL, picnic.id, "this", TZ);
+  await assert.rejects(
+    () =>
+      gateway.updateEvent(
+        CAL,
+        piano.id,
+        {
+          title: "stolen",
+          allDay: false,
+          startMs: pianoStart,
+          endMs: pianoEnd,
+          participantIds: [],
+        },
+        "this",
+        TZ,
+        stalePiano,
+      ),
+    (e: unknown) => {
+      assert.equal(e instanceof EventConflictError, true);
+      const conflict = e as EventConflictError;
+      assert.equal(conflict.event?.id, piano.id);
+      assert.equal(conflict.event?.title, "Piano recital");
+      assert.deepEqual(conflict.event?.participantIds, ["ellie"]);
+      return true;
+    },
+  );
+  assert.equal(
+    (await gateway.listEvents(CAL, iso(windowStart), iso(windowEnd), TZ)).find(
+      (e) => e.id === piano.id,
+    )?.title,
+    "Piano recital",
+  );
+
+  await assert.rejects(
+    () =>
+      gateway.updateEvent(
+        CAL,
+        piano.id,
+        {
+          title: "stolen following",
+          allDay: false,
+          startMs: pianoStart,
+          endMs: pianoEnd,
+          participantIds: ["ellie"],
+        },
+        "following",
+        TZ,
+        stalePiano,
+      ),
+    EventConflictError,
+  );
+  await assert.rejects(
+    () => gateway.deleteEvent(CAL, piano.id, "all", TZ, stalePiano),
+    (e: unknown) => {
+      assert.equal(e instanceof EventConflictError, true);
+      assert.equal((e as EventConflictError).event?.id, piano.id);
+      return true;
+    },
+  );
+  assert.equal(
+    (await gateway.listEvents(CAL, iso(windowStart), iso(windowEnd), TZ)).some(
+      (e) => e.id === piano.id,
+    ),
+    true,
+  );
+
+  await gateway.deleteEvent(CAL, picnic.id, "this", TZ, picnic.expectedVersion);
   const afterDelete = await gateway.listEvents(
     CAL,
     iso(windowStart),

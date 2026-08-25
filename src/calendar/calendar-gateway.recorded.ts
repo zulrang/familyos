@@ -18,6 +18,7 @@ type GDate = { dateTime?: string; date?: string; timeZone?: string };
 
 type Stored = {
   id: string;
+  etag: string;
   summary: string;
   start: GDate;
   end: GDate;
@@ -72,6 +73,7 @@ function parseIncoming(
 function toGEvent(ev: Stored): Record<string, unknown> {
   const out: Record<string, unknown> = {
     id: ev.id,
+    etag: ev.etag,
     summary: ev.summary,
     start: ev.start,
     end: ev.end,
@@ -82,13 +84,31 @@ function toGEvent(ev: Stored): Record<string, unknown> {
   return out;
 }
 
+function ifMatch(init?: RequestInit): string | null {
+  const h = init?.headers;
+  if (!h) return null;
+  if (h instanceof Headers) return h.get("If-Match");
+  if (Array.isArray(h)) {
+    const hit = h.find(([k]) => k.toLowerCase() === "if-match");
+    return hit?.[1] ?? null;
+  }
+  const rec = h as Record<string, string>;
+  return rec["If-Match"] ?? rec["if-match"] ?? null;
+}
+
 export function createRecordedCalendarGfetch(): (
   url: string,
   init?: RequestInit,
 ) => Promise<Response> {
   const events = new Map<string, Stored>();
   let seq = 0;
+  let versionSeq = 0;
   let calendarTz = "America/New_York";
+
+  function nextEtag(): string {
+    versionSeq += 1;
+    return `"etag-${versionSeq}"`;
+  }
 
   return async (url, init) => {
     const u = new URL(url);
@@ -135,6 +155,7 @@ export function createRecordedCalendarGfetch(): (
       }
       const ev: Stored = {
         id,
+        etag: nextEtag(),
         summary: String(body.summary ?? ""),
         start: start.g,
         end: end.g,
@@ -156,9 +177,17 @@ export function createRecordedCalendarGfetch(): (
       return json({ items });
     }
 
+    if (eventId && method === "GET") {
+      const cur = events.get(eventId);
+      if (!cur) return empty(404);
+      return json(toGEvent(cur));
+    }
+
     if (eventId && method === "PATCH") {
       const cur = events.get(eventId);
       if (!cur) return empty(404);
+      const match = ifMatch(init);
+      if (match != null && match !== cur.etag) return empty(412);
       const start = parseIncoming(body.start, calendarTz);
       const end = parseIncoming(body.end, calendarTz);
       if (start) {
@@ -177,11 +206,15 @@ export function createRecordedCalendarGfetch(): (
         if (v == null || v === "") delete cur.private[k];
         else cur.private[k] = v;
       }
+      cur.etag = nextEtag();
       return json(toGEvent(cur));
     }
 
     if (eventId && method === "DELETE") {
-      if (!events.has(eventId)) return empty(404);
+      const cur = events.get(eventId);
+      if (!cur) return empty(404);
+      const match = ifMatch(init);
+      if (match != null && match !== cur.etag) return empty(412);
       events.delete(eventId);
       return empty(204);
     }

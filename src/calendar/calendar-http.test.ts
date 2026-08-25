@@ -78,6 +78,7 @@ describe("Calendar HTTP", () => {
         startMs: pianoStart,
         endMs: pianoEnd,
         participantIds: ["dad"],
+        expectedVersion: "",
       },
     ]);
 
@@ -153,6 +154,8 @@ describe("Calendar HTTP", () => {
     assert.equal(body.events[0]?.id, "ev-seed");
     assert.equal(body.events[0]?.title, "Practice");
     assert.deepEqual(body.events[0]?.participantIds, ["dad"]);
+    assert.equal(typeof body.events[0]?.expectedVersion, "string");
+    assert.ok(body.events[0]?.expectedVersion);
   });
 
   test("create, update, and delete round-trip through the Fake", async () => {
@@ -196,6 +199,7 @@ describe("Calendar HTTP", () => {
           startMs: created.event.startMs,
           endMs: created.event.endMs,
           participantIds: [],
+          expectedVersion: created.event.expectedVersion,
         }),
       }),
       created.event.id,
@@ -205,9 +209,18 @@ describe("Calendar HTTP", () => {
     const patchedBody = (await patched.json()) as { event: CalEvent };
     assert.equal(patchedBody.event.title, "Park picnic");
     assert.deepEqual(patchedBody.event.participantIds, []);
+    assert.notEqual(
+      patchedBody.event.expectedVersion,
+      created.event.expectedVersion,
+    );
 
     const deleted = await handleDeleteEvent(
-      req(`http://familyos.test/api/events/${created.event.id}`),
+      req(`http://familyos.test/api/events/${created.event.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          expectedVersion: patchedBody.event.expectedVersion,
+        }),
+      }),
       created.event.id,
       gateway,
     );
@@ -223,6 +236,148 @@ describe("Calendar HTTP", () => {
       afterBody.events.some((e) => e.id === created.event.id),
       false,
     );
+  });
+
+  test("stale Calendar writes conflict and return the current event", async () => {
+    const createdRes = await handleCreateEvent(
+      req("http://familyos.test/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Eggs",
+          allDay: true,
+          startMs: fromDateOnly("2026-08-20", TZ),
+          endMs: fromDateOnly("2026-08-21", TZ),
+          participantIds: [],
+        }),
+      }),
+      gateway,
+    );
+    const created = (await createdRes.json()) as { event: CalEvent };
+    const stale = created.event.expectedVersion;
+
+    const renamed = await handleUpdateEvent(
+      req(`http://familyos.test/api/events/${created.event.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "Omelette",
+          allDay: true,
+          startMs: created.event.startMs,
+          endMs: created.event.endMs,
+          participantIds: [],
+          expectedVersion: stale,
+        }),
+      }),
+      created.event.id,
+      gateway,
+    );
+    assert.equal(renamed.status, 200);
+    const current = ((await renamed.json()) as { event: CalEvent }).event;
+
+    const stolen = await handleUpdateEvent(
+      req(`http://familyos.test/api/events/${created.event.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "stolen",
+          allDay: true,
+          startMs: created.event.startMs,
+          endMs: created.event.endMs,
+          participantIds: ["dad"],
+          expectedVersion: stale,
+        }),
+      }),
+      created.event.id,
+      gateway,
+    );
+    assert.equal(stolen.status, 409);
+    const stolenBody = (await stolen.json()) as {
+      error: string;
+      event: CalEvent;
+    };
+    assert.equal(stolenBody.error, "version");
+    assert.equal(stolenBody.event.title, "Omelette");
+    assert.deepEqual(stolenBody.event.participantIds, []);
+    assert.equal(gateway.store.get(created.event.id)?.title, "Omelette");
+
+    const staleFollowing = await handleUpdateEvent(
+      req(`http://familyos.test/api/events/${created.event.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "stolen following",
+          allDay: true,
+          startMs: created.event.startMs,
+          endMs: created.event.endMs,
+          participantIds: [],
+          scope: "following",
+          expectedVersion: stale,
+        }),
+      }),
+      created.event.id,
+      gateway,
+    );
+    assert.equal(staleFollowing.status, 409);
+
+    const staleDelete = await handleDeleteEvent(
+      req(`http://familyos.test/api/events/${created.event.id}?scope=all`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: stale }),
+      }),
+      created.event.id,
+      gateway,
+    );
+    assert.equal(staleDelete.status, 409);
+    assert.equal(gateway.store.has(created.event.id), true);
+
+    const gone = await handleDeleteEvent(
+      req(`http://familyos.test/api/events/${created.event.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: current.expectedVersion }),
+      }),
+      created.event.id,
+      gateway,
+    );
+    assert.equal(gone.status, 200);
+  });
+
+  test("edit and delete require an expectedVersion", async () => {
+    const listed = await handleListEvents(
+      req(
+        `http://familyos.test/api/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      ),
+      gateway,
+    );
+    const seed = ((await listed.json()) as { events: CalEvent[] }).events.find(
+      (e) => e.id === "ev-seed",
+    );
+    assert.ok(seed);
+
+    const patch = await handleUpdateEvent(
+      req("http://familyos.test/api/events/ev-seed", {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "Hijack",
+          allDay: false,
+          startMs: seed.startMs,
+          endMs: seed.endMs,
+          participantIds: [],
+        }),
+      }),
+      "ev-seed",
+      gateway,
+    );
+    assert.equal(patch.status, 400);
+    assert.equal(
+      ((await patch.json()) as { error: string }).error,
+      "expectedVersion required",
+    );
+    assert.equal(gateway.store.get("ev-seed")?.title, "Practice");
+
+    const del = await handleDeleteEvent(
+      req("http://familyos.test/api/events/ev-seed", { method: "DELETE" }),
+      "ev-seed",
+      gateway,
+    );
+    assert.equal(del.status, 400);
+    assert.equal(gateway.store.has("ev-seed"), true);
   });
 });
 
@@ -291,6 +446,7 @@ describe("Household Calendar outage cache", () => {
         startMs: pianoStart,
         endMs: pianoEnd,
         participantIds: ["dad"],
+        expectedVersion: "",
       },
     ]);
 
@@ -396,13 +552,17 @@ describe("Household Calendar outage cache", () => {
             startMs: before.startMs,
             endMs: before.endMs,
             participantIds: [],
+            expectedVersion: before.expectedVersion,
           }),
         }),
         "ev-seed",
         gateway,
       ),
       await handleDeleteEvent(
-        req("http://familyos.test/api/events/ev-seed"),
+        req("http://familyos.test/api/events/ev-seed", {
+          method: "DELETE",
+          body: JSON.stringify({ expectedVersion: before.expectedVersion }),
+        }),
         "ev-seed",
         gateway,
       ),

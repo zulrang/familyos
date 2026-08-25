@@ -1,7 +1,7 @@
 import type { EventWrite } from "@/calendar/google-events";
 import type { CalEvent, SeriesScope } from "@/calendar/types";
 import { AuthError } from "@/shared/auth-error";
-import { ProviderUnavailableError } from "./calendar-error";
+import { EventConflictError, ProviderUnavailableError } from "./calendar-error";
 import * as events from "./google-events";
 
 /** Port for Household Calendar event operations (Google adapter / Fake). */
@@ -23,12 +23,14 @@ export type CalendarGateway = {
     w: EventWrite,
     scope: SeriesScope,
     timeZone: string,
+    expectedVersion: string,
   ) => Promise<CalEvent>;
   deleteEvent: (
     calendarId: string,
     eventId: string,
     scope: SeriesScope,
     timeZone: string,
+    expectedVersion: string,
   ) => Promise<void>;
 };
 
@@ -40,8 +42,7 @@ function live<Args extends unknown[], Result>(
       return await fn(...args);
     } catch (e) {
       if (e instanceof AuthError) throw e;
-      // ponytail: non-auth Calendar failures are unavailable; 4xx looks like
-      // an outage until event conflict handling splits them.
+      if (e instanceof EventConflictError) throw e;
       throw new ProviderUnavailableError();
     }
   };
