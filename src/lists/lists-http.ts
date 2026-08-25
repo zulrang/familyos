@@ -77,6 +77,12 @@ function parseItemPatch(
   return { ok: true, value };
 }
 
+function parseExpectedVersion(raw: unknown): string | null {
+  const o = asObject(raw);
+  if (!o || typeof o.expectedVersion !== "string") return null;
+  return o.expectedVersion || null;
+}
+
 function notSelected(): Response {
   return Response.json({ error: "not a Household List" }, { status: 404 });
 }
@@ -341,11 +347,19 @@ export async function handlePatchItem(
   if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
-  const parsed = parseItemPatch(await readJson(request));
+  const raw = await readJson(request);
+  const parsed = parseItemPatch(raw);
   if (!parsed.ok) return jsonError(parsed.error, 400);
+  const expectedVersion = parseExpectedVersion(raw);
+  if (!expectedVersion) return jsonError("expectedVersion required", 400);
   try {
     const gw = await resolveGateway(gateway);
-    const item = await gw.patchItem(listId, itemId, parsed.value);
+    const item = await gw.patchItem(
+      listId,
+      itemId,
+      parsed.value,
+      expectedVersion,
+    );
     await bestEffortRefreshListCache(gw, listId);
     return Response.json({ item });
   } catch (e) {
@@ -382,9 +396,11 @@ export async function handleDeleteItem(
   if (deniedWrite) return deniedWrite;
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
+  const expectedVersion = parseExpectedVersion(await readJson(request));
+  if (!expectedVersion) return jsonError("expectedVersion required", 400);
   try {
     const gw = await resolveGateway(gateway);
-    await gw.deleteItem(listId, itemId);
+    await gw.deleteItem(listId, itemId, expectedVersion);
     await bestEffortRefreshListCache(gw, listId);
     return Response.json({ ok: true });
   } catch (e) {

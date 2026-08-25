@@ -118,6 +118,60 @@ export function ListsScreen() {
     }));
   }
 
+  function itemExpectedVersion(listId: string, itemId: string): string {
+    return (
+      listsRead.lists
+        .find((l) => l.id === listId)
+        ?.items.find((i) => i.id === itemId)?.expectedVersion ?? ""
+    );
+  }
+
+  function applyCurrentItem(
+    listId: string,
+    itemId: string,
+    current: ListItem | null,
+  ) {
+    setListsRead((cur) => ({
+      ...cur,
+      lists: cur.lists.map((l) => {
+        if (l.id !== listId) return l;
+        if (!current) {
+          return { ...l, items: l.items.filter((i) => i.id !== itemId) };
+        }
+        return {
+          ...l,
+          items: l.items.map((i) => (i.id === itemId ? current : i)),
+        };
+      }),
+    }));
+  }
+
+  /** `undefined` means the 409 body had no `item` — do not treat that as deleted. */
+  async function reloadConflictingItem(
+    res: Response,
+    listId: string,
+    itemId: string,
+  ): Promise<ListItem | null | undefined> {
+    const body = (await res.json()) as { item?: ListItem | null };
+    if (!("item" in body)) return undefined;
+    applyCurrentItem(listId, itemId, body.item ?? null);
+    setSheet((s) => {
+      if (
+        s?.kind !== "edit-item" ||
+        s.listId !== listId ||
+        s.itemId !== itemId
+      ) {
+        return s;
+      }
+      if (!body.item) return null;
+      return { ...s, title: body.item.title, confirmDelete: false };
+    });
+    setError(
+      "This List Item changed on another Display. Reloaded — try again.",
+    );
+    return body.item ?? null;
+  }
+
   async function toggle(listId: string, item: ListItem) {
     const done = !item.done;
     patchItem(listId, item.id, { done });
@@ -127,7 +181,7 @@ export function ListsScreen() {
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ done }),
+          body: JSON.stringify({ done, expectedVersion: item.expectedVersion }),
         },
       );
       if (await redirectIfPairingRequired(res)) return;
@@ -136,7 +190,19 @@ export function ListsScreen() {
         setNeedsReauth(true);
         return;
       }
-      if (!res.ok) patchItem(listId, item.id, { done: item.done });
+      if (res.status === 409) {
+        const current = await reloadConflictingItem(res, listId, item.id);
+        if (current === undefined) {
+          patchItem(listId, item.id, { done: item.done });
+        }
+        return;
+      }
+      if (!res.ok) {
+        patchItem(listId, item.id, { done: item.done });
+        return;
+      }
+      const data = (await res.json()) as { item: ListItem };
+      patchItem(listId, item.id, data.item);
     } catch {
       patchItem(listId, item.id, { done: item.done });
     }
@@ -223,12 +289,19 @@ export function ListsScreen() {
           {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title }),
+            body: JSON.stringify({
+              title,
+              expectedVersion: itemExpectedVersion(sheet.listId, sheet.itemId),
+            }),
           },
         );
         if (await redirectIfPairingRequired(res)) return;
         if (res.status === 401) {
           setNeedsReauth(true);
+          return;
+        }
+        if (res.status === 409) {
+          await reloadConflictingItem(res, sheet.listId, sheet.itemId);
           return;
         }
         if (!res.ok) {
@@ -258,11 +331,21 @@ export function ListsScreen() {
     try {
       const res = await fetch(
         `/api/lists/${encodeURIComponent(listId)}/items/${encodeURIComponent(itemId)}`,
-        { method: "DELETE" },
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedVersion: itemExpectedVersion(listId, itemId),
+          }),
+        },
       );
       if (await redirectIfPairingRequired(res)) return;
       if (res.status === 401) {
         setNeedsReauth(true);
+        return;
+      }
+      if (res.status === 409) {
+        await reloadConflictingItem(res, listId, itemId);
         return;
       }
       if (!res.ok) {

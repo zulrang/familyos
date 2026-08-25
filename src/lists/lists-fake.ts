@@ -1,5 +1,5 @@
 import type { HouseholdList, ListItem } from "@/lists/types";
-import { ProviderUnavailableError } from "./lists-error";
+import { ListItemConflictError, ProviderUnavailableError } from "./lists-error";
 import type { ListsGateway } from "./lists-gateway";
 
 export type FakeListsGateway = ListsGateway & {
@@ -14,20 +14,35 @@ export type FakeListsGateway = ListsGateway & {
 export function createFakeListsGateway(
   seed: Iterable<HouseholdList> = [],
 ): FakeListsGateway {
+  let createCount = 0;
+  let offline = false;
+  let versionSeq = 0;
+
+  function requireLive(): void {
+    if (offline) throw new ProviderUnavailableError();
+  }
+
+  function nextVersion(): string {
+    versionSeq += 1;
+    return `v${versionSeq}`;
+  }
+
   const store = new Map<string, HouseholdList>();
   for (const list of seed) {
     store.set(list.id, {
       id: list.id,
       title: list.title,
-      items: list.items.map((i) => ({ ...i })),
+      items: list.items.map((i) => ({
+        ...i,
+        expectedVersion: i.expectedVersion || nextVersion(),
+      })),
     });
   }
 
-  let createCount = 0;
-  let offline = false;
-
-  function requireLive(): void {
-    if (offline) throw new ProviderUnavailableError();
+  function requireVersion(item: ListItem, expectedVersion: string): void {
+    if (item.expectedVersion !== expectedVersion) {
+      throw new ListItemConflictError({ ...item });
+    }
   }
 
   const gateway: FakeListsGateway = {
@@ -81,27 +96,29 @@ export function createFakeListsGateway(
         id: `item-${cur.items.length + 1}`,
         title,
         done: false,
+        expectedVersion: nextVersion(),
       };
       store.set(listId, { ...cur, items: [item, ...cur.items] });
       return { ...item };
     },
 
-    async patchItem(listId, itemId, patch) {
+    async patchItem(listId, itemId, patch, expectedVersion) {
       requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
-      const items = cur.items.map((i) =>
-        i.id === itemId
-          ? {
-              ...i,
-              title: patch.title ?? i.title,
-              done: patch.done ?? i.done,
-            }
-          : i,
-      );
-      store.set(listId, { ...cur, items });
-      const item = items.find((i) => i.id === itemId);
-      if (!item) throw new Error("missing item");
+      const current = cur.items.find((i) => i.id === itemId);
+      if (!current) throw new Error("missing item");
+      requireVersion(current, expectedVersion);
+      const item: ListItem = {
+        ...current,
+        title: patch.title ?? current.title,
+        done: patch.done ?? current.done,
+        expectedVersion: nextVersion(),
+      };
+      store.set(listId, {
+        ...cur,
+        items: cur.items.map((i) => (i.id === itemId ? item : i)),
+      });
       return { ...item };
     },
 
@@ -115,10 +132,13 @@ export function createFakeListsGateway(
       });
     },
 
-    async deleteItem(listId, itemId) {
+    async deleteItem(listId, itemId, expectedVersion) {
       requireLive();
       const cur = store.get(listId);
       if (!cur) throw new Error("missing");
+      const current = cur.items.find((i) => i.id === itemId);
+      if (!current) throw new Error("missing item");
+      requireVersion(current, expectedVersion);
       store.set(listId, {
         ...cur,
         items: cur.items.filter((i) => i.id !== itemId),

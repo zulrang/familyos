@@ -1,6 +1,7 @@
 import type { HouseholdList, ListItem } from "@/lists/types";
 import { gfetch } from "@/shared/google";
 import { sortByPosition } from "./list-text";
+import { ListItemConflictError } from "./lists-error";
 
 export { listsError } from "./lists-error";
 
@@ -14,6 +15,7 @@ type GTask = {
   position?: string;
   deleted?: boolean;
   parent?: string;
+  etag?: string;
 };
 
 async function pages<T>(
@@ -48,6 +50,7 @@ function toItem(t: GTask): ListItem | null {
     id: t.id,
     title: t.title ?? "",
     done: t.status === "completed",
+    expectedVersion: t.etag ?? "",
   };
 }
 
@@ -142,10 +145,32 @@ export async function insertTask(
   return item;
 }
 
+async function currentItem(
+  listId: string,
+  itemId: string,
+): Promise<ListItem | null> {
+  const res = await gfetch(
+    `${TASKS}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(itemId)}`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`get task ${res.status}`);
+  return toItem((await res.json()) as GTask);
+}
+
+async function rejectIfStale(
+  res: Response,
+  listId: string,
+  itemId: string,
+): Promise<void> {
+  if (res.status !== 412) return;
+  throw new ListItemConflictError(await currentItem(listId, itemId));
+}
+
 export async function patchTask(
   listId: string,
   itemId: string,
   patch: { title?: string; done?: boolean },
+  expectedVersion: string,
 ): Promise<ListItem> {
   const body: Record<string, unknown> = {};
   if (patch.title !== undefined) body.title = patch.title;
@@ -154,8 +179,13 @@ export async function patchTask(
   }
   const res = await gfetch(
     `${TASKS}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(itemId)}`,
-    { method: "PATCH", body: JSON.stringify(body) },
+    {
+      method: "PATCH",
+      headers: { "If-Match": expectedVersion },
+      body: JSON.stringify(body),
+    },
   );
+  await rejectIfStale(res, listId, itemId);
   if (!res.ok) throw new Error(`patch task ${res.status} ${await res.text()}`);
   const item = toItem((await res.json()) as GTask);
   if (!item) throw new Error("patch task returned no item");
@@ -165,11 +195,13 @@ export async function patchTask(
 export async function deleteTask(
   listId: string,
   itemId: string,
+  expectedVersion: string,
 ): Promise<void> {
   const res = await gfetch(
     `${TASKS}/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(itemId)}`,
-    { method: "DELETE" },
+    { method: "DELETE", headers: { "If-Match": expectedVersion } },
   );
+  await rejectIfStale(res, listId, itemId);
   if (!res.ok && res.status !== 204)
     throw new Error(`delete task ${res.status}`);
 }
