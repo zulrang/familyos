@@ -208,7 +208,7 @@ describe("Settings pairing code", () => {
       screen.getByText(/scan|QR/i, { selector: "p, span, div" }),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Pair Display" })).toBeNull();
     expect(screen.queryByText("ABC234")).toBeNull();
   });

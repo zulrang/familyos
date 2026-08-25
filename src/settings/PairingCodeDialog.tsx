@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { pairingUrl } from "@/shared/pairing-qr";
 import { IconButton } from "@/shared/ui/IconButton";
 import { QrCode } from "@/shared/ui/QrCode";
@@ -15,16 +16,36 @@ export function PairingCodeDialog({
   origin: string;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const minutesLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 60_000));
+
+  useEffect(() => {
+    const el = dialogRef.current;
+    if (!el) return;
+    if (typeof el.showModal === "function") {
+      if (!el.open) el.showModal();
+    } else {
+      el.setAttribute("open", "");
+    }
+
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onCloseRef.current();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (typeof el.close === "function" && el.open) el.close();
+    };
+  }, []);
 
   return (
     <dialog
-      open
+      ref={dialogRef}
       aria-labelledby="pairing-code-title"
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -32,29 +53,16 @@ export function PairingCodeDialog({
         if (e.key === "Escape") onClose();
       }}
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 40,
-        width: "100%",
-        height: "100%",
-        maxWidth: "none",
-        maxHeight: "none",
-        margin: 0,
-        padding: 24,
+        width: "min(420px, calc(100% - 48px))",
+        padding: "28px 28px 32px",
         border: "none",
-        background: "rgba(31, 42, 51, 0.35)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        background: "var(--surface-screen)",
+        borderRadius: "var(--radius-panel)",
+        boxShadow: "var(--shadow-panel)",
       }}
     >
       <div
         style={{
-          width: "min(420px, 100%)",
-          background: "var(--surface-screen)",
-          borderRadius: "var(--radius-panel)",
-          boxShadow: "var(--shadow-panel)",
-          padding: "28px 28px 32px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -65,8 +73,8 @@ export function PairingCodeDialog({
         <div
           style={{
             position: "absolute",
-            top: 12,
-            right: 12,
+            top: -8,
+            right: -8,
           }}
         >
           <IconButton icon="x" label="Close" onClick={onClose} />
