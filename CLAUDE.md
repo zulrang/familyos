@@ -2,7 +2,7 @@
 
 # FamilyOS
 
-Test: `pnpm test` · Contract: `pnpm test:contract` · Lint: `pnpm lint`
+Test: `pnpm test` · Contract: `pnpm test:contract` · Lint: `pnpm lint` (Biome + slice import boundaries)
 Component tests need `// @vitest-environment jsdom` (Vitest default env is `node`).
 
 ## Entry Points
@@ -13,7 +13,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Displays / pairing UI + HTTP: `src/displays/` (session/auth in `src/shared/`)
 - Members: `src/members/`
 - Shared UI + infra: `src/shared/` (`shared/ui/` for design-system primitives)
-- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. Display session/auth lives in `shared/` so APIs need not import `displays`.
+- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. Display session/auth lives in `shared/` so APIs need not import `displays`. Enforced by `scripts/import-boundaries.ts`.
 
 ## Do Not Touch
 - The `nextjs-agent-rules` block in `AGENTS.md` (`next dev` rewrites it)

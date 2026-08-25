@@ -6,7 +6,7 @@
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
-    "lint": "biome check",
+    "lint": "biome check && vitest run src/import-boundaries.test.ts",
     "format": "biome format --write",
     "test": "vitest run",
     "test:watch": "vitest",
