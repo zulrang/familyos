@@ -1,0 +1,4 @@
+# CDP on loopback only. LAN clients use familyos-inspect (:7381), not this port.
+# Chromium 130 does not serve a DevTools UI here (no chrome://inspect on iPad).
+
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --remote-debugging-port=9222"

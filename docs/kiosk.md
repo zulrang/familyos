@@ -96,6 +96,40 @@ ssh pi@fullpageos.local 'kill $(pgrep -n -f /usr/lib/chromium/chromium)'
 
 If the kiosk URL in `fullpageos.txt` changes, restart Chromium so the flag picks up the new origin.
 
+## Remote inspect
+
+iPad Safari/Chrome have no `chrome://inspect`, and Pi Chromium 130 does not
+serve a DevTools UI on the debug port. Console and eval go through a small
+LAN page; CDP itself stays on loopback.
+
+`/etc/chromium.d/familyos-remote-debug` adds `--remote-debugging-port=9222`
+(localhost only). `familyos-inspect` listens on **7381** (all interfaces)
+and bridges to that port.
+
+On the iPad, while you use the panel, open:
+
+`http://fullpageos.local:7381/`
+
+If `.local` does not resolve, use the Pi’s LAN IP instead. Anyone on that
+LAN can read the console and run JavaScript in the wall browser (Display
+cookie included). Do not forward 7381 off the house network.
+
+Repo copies: `kiosk/chromium.d/familyos-remote-debug`, `kiosk/inspect`.
+`kiosk/inspect --check` is the formatter self-test. After changing them:
+
+```bash
+scp kiosk/chromium.d/familyos-remote-debug pi@fullpageos.local:/tmp/familyos-remote-debug
+scp kiosk/inspect pi@fullpageos.local:/tmp/familyos-inspect
+ssh pi@fullpageos.local 'sudo cp /tmp/familyos-remote-debug /etc/chromium.d/familyos-remote-debug'
+ssh pi@fullpageos.local 'sudo cp /tmp/familyos-inspect /opt/custompios/scripts/familyos-inspect && sudo chmod 755 /opt/custompios/scripts/familyos-inspect'
+# start_gui should launch it (once): /opt/custompios/scripts/familyos-inspect &
+ssh pi@fullpageos.local 'XDG_RUNTIME_DIR=/run/user/$(id -u) setsid -f /opt/custompios/scripts/familyos-inspect'
+ssh pi@fullpageos.local 'pid=$(ps -C chromium -o pid=,args= | awk "/--kiosk/{print \$1; exit}"); kill "$pid"'
+```
+
+`run_onepageos` brings Chromium back. The inspect page shows “waiting for
+Chromium…” until the debug port is up.
+
 ## Idle dim
 
 DPMS stays off so the panel never blanks. After idle with no X input,
@@ -129,6 +163,7 @@ ssh pi@fullpageos.local 'fuser -k /run/user/$(id -u)/familyos-idle-dim.lock 2>/d
 
 - power management off, orientation `normal`
 - `familyos-idle-dim` (backlight Idle Dim; loopback apply on 127.0.0.1:7380)
+- `familyos-inspect` (LAN console on :7381; CDP on 127.0.0.1:9222)
 - matchbox without cursor
 - unclutter-xfixes
 - `run_onepageos` → `start_chromium_browser` (kiosk Chromium + touch-events)

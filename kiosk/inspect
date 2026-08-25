@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""LAN console for the wall kiosk Chromium (iPad / laptop). CDP stays on loopback."""
+
+import base64
+import fcntl
+import json
+import os
+import queue
+import signal
+import socket
+import struct
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import URLError
+from urllib.parse import urlparse
+from urllib.request import urlopen
+
+PORT = 7381
+CDP = "http://127.0.0.1:9222/json/list"
+MSG_MAX = 8000
+
+PAGE = """<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>FamilyOS inspect</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 16px/1.35 -apple-system, system-ui, sans-serif;
+    background: #111; color: #ddd;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    display: flex; flex-direction: column; height: 100dvh;
+  }
+  header { padding: 10px 12px 8px; border-bottom: 1px solid #333; }
+  #status { font-size: 13px; color: #8ab; margin: 0 0 8px; }
+  .row { display: flex; gap: 8px; }
+  button {
+    min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px;
+    background: #2a2a2a; color: #eee; font-size: 16px;
+  }
+  #log {
+    flex: 1; overflow: auto; padding: 8px 12px 12px;
+    font: 13px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap;
+  }
+  #log div { margin: 0 0 6px; }
+  .warn { color: #e6b84d; }
+  .error { color: #f07178; }
+  .info { color: #8ab; }
+  .eval { color: #9cdcfe; }
+  .sys { color: #666; }
+  form {
+    display: flex; gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid #333; background: #1a1a1a;
+  }
+  input {
+    flex: 1; min-height: 44px; font-size: 16px; border-radius: 8px;
+    border: 1px solid #444; background: #222; color: #eee; padding: 0 12px;
+  }
+</style>
+<header>
+  <p id="status">connecting…</p>
+  <div class="row">
+    <button type="button" id="reload">Reload page</button>
+    <button type="button" id="clear">Clear</button>
+  </div>
+</header>
+<div id="log"></div>
+<form id="eval">
+  <input id="expr" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="expression">
+  <button type="submit">Eval</button>
+</form>
+<script>
+const log = document.getElementById("log");
+const status = document.getElementById("status");
+const expr = document.getElementById("expr");
+function line(t, msg) {
+  if (t === "clear") { log.textContent = ""; return; }
+  const el = document.createElement("div");
+  el.className = t;
+  el.textContent = msg;
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+const es = new EventSource("/events");
+es.onmessage = (e) => {
+  const d = JSON.parse(e.data);
+  if (d.t === "sys") status.textContent = d.msg;
+  else line(d.t, d.msg);
+};
+es.onerror = () => { status.textContent = "reconnecting…"; };
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  return res.json();
+}
+document.getElementById("eval").onsubmit = async (e) => {
+  e.preventDefault();
+  const expression = expr.value;
+  if (!expression) return;
+  line("eval", "› " + expression);
+  const d = await post("/eval", { expression });
+  line(d.ok ? "log" : "error", d.msg);
+};
+document.getElementById("reload").onclick = () => post("/reload");
+document.getElementById("clear").onclick = () => { log.textContent = ""; };
+</script>
+</html>
+"""
+
+
+def clamp(text):
+    text = text if isinstance(text, str) else str(text)
+    return text if len(text) <= MSG_MAX else text[: MSG_MAX - 1] + "…"
+
+
+def remote_text(obj):
+    if not isinstance(obj, dict):
+        return str(obj)
+    kind = obj.get("type")
+    if kind == "undefined":
+        return "undefined"
+    if kind == "string":
+        return str(obj.get("value", ""))
+    if kind in ("number", "boolean"):
+        return json.dumps(obj.get("value"))
+    preview = obj.get("preview") or {}
+    if preview.get("description"):
+        return preview["description"]
+    if obj.get("description"):
+        return obj["description"]
+    if "value" in obj:
+        try:
+            return json.dumps(obj["value"])
+        except TypeError:
+            return str(obj["value"])
+    return kind or "?"
+
+
+def pick_page(pages):
+    for page in pages:
+        if page.get("type") != "page" or not page.get("webSocketDebuggerUrl"):
+            continue
+        url = str(page.get("url") or "")
+        if url.startswith("devtools://"):
+            continue
+        return page
+    return None
+
+
+def format_cdp(method, params):
+    if method == "Runtime.consoleAPICalled":
+        kind = params.get("type") or "log"
+        if kind == "clear":
+            return {"t": "clear", "msg": ""}
+        msg = " ".join(remote_text(a) for a in params.get("args") or [])
+        level = {"warning": "warn", "error": "error", "info": "info"}.get(kind, "log")
+        return {"t": level, "msg": clamp(msg)}
+    if method == "Log.entryAdded":
+        entry = params.get("entry") or {}
+        level = {"warning": "warn", "error": "error"}.get(entry.get("level"), "info")
+        text = entry.get("text") or ""
+        url = entry.get("url")
+        if url:
+            text = f"{text} ({url})"
+        return {"t": level, "msg": clamp(text)}
+    if method == "Runtime.exceptionThrown":
+        detail = params.get("exceptionDetails") or {}
+        loc = ""
+        if detail.get("url"):
+            loc = f" {detail['url']}:{detail.get('lineNumber', 0)}"
+        msg = f"{detail.get('text') or 'exception'} {remote_text(detail.get('exception') or {})}{loc}"
+        return {"t": "error", "msg": clamp(msg.strip())}
+    return None
+
+
+def format_eval(reply):
+    if "error" in reply:
+        err = reply["error"]
+        return False, clamp(err.get("message") if isinstance(err, dict) else str(err))
+    result = reply.get("result") or {}
+    if result.get("exceptionDetails"):
+        detail = result["exceptionDetails"]
+        msg = f"{detail.get('text') or ''} {remote_text(detail.get('exception') or {})}"
+        return False, clamp(msg.strip())
+    return True, clamp(remote_text(result.get("result") or {}))
+
+
+def _read_exact(sock, n):
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("closed")
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+def ws_send_frame(sock, opcode, payload=b""):
+    header = bytearray([0x80 | opcode])
+    n = len(payload)
+    mask = os.urandom(4)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header.extend(struct.pack(">H", n))
+    else:
+        header.append(0x80 | 127)
+        header.extend(struct.pack(">Q", n))
+    header.extend(mask)
+    sock.sendall(bytes(header) + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+
+def ws_recv(sock):
+    while True:
+        header = _read_exact(sock, 2)
+        opcode = header[0] & 0x0F
+        masked = header[1] & 0x80
+        n = header[1] & 0x7F
+        if n == 126:
+            n = struct.unpack(">H", _read_exact(sock, 2))[0]
+        elif n == 127:
+            n = struct.unpack(">Q", _read_exact(sock, 8))[0]
+        mask = _read_exact(sock, 4) if masked else b""
+        payload = _read_exact(sock, n)
+        if masked:
+            payload = bytes(p ^ mask[i % 4] for i, p in enumerate(payload))
+        if opcode == 0x9:
+            ws_send_frame(sock, 0xA, payload)
+            continue
+        if opcode == 0xA:
+            continue
+        if opcode == 0x8:
+            raise ConnectionError("close")
+        if opcode == 0x1:
+            return payload.decode()
+
+
+def ws_connect(url):
+    parsed = urlparse(url)
+    sock = socket.create_connection((parsed.hostname, parsed.port or 80), 5)
+    key = base64.b64encode(os.urandom(16)).decode()
+    path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
+    sock.sendall(
+        (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {parsed.hostname}:{parsed.port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        ).encode()
+    )
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        chunk = sock.recv(4096)
+        if not chunk:
+            sock.close()
+            raise ConnectionError("no handshake")
+        buf += chunk
+    head, rest = buf.split(b"\r\n\r\n", 1)
+    if b" 101 " not in head.split(b"\r\n", 1)[0]:
+        sock.close()
+        raise ConnectionError(head.split(b"\r\n", 1)[0].decode(errors="replace"))
+    if rest:
+        sock.close()
+        raise ConnectionError("bytes after handshake")
+    sock.settimeout(None)
+    return sock
+
+
+class Bridge:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._sock = None
+        self._id = 0
+        self._pending = {}
+        self._subs = []
+        self._status = "waiting for Chromium…"
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def subscribe(self, q):
+        with self._lock:
+            self._subs.append(q)
+            q.put_nowait(json.dumps({"t": "sys", "msg": self._status}))
+
+    def unsubscribe(self, q):
+        with self._lock:
+            if q in self._subs:
+                self._subs.remove(q)
+
+    def _emit(self, obj):
+        line = json.dumps(obj)
+        with self._lock:
+            for q in list(self._subs):
+                try:
+                    q.put_nowait(line)
+                except queue.Full:
+                    pass
+
+    def _set_status(self, msg):
+        self._status = msg
+        self._emit({"t": "sys", "msg": msg})
+
+    def _send(self, method, params=None, wait=None):
+        with self._lock:
+            sock = self._sock
+            if sock is None:
+                raise RuntimeError("not connected")
+            self._id += 1
+            req_id = self._id
+            box = None
+            if wait is not None:
+                box = {"ev": threading.Event(), "msg": None}
+                self._pending[req_id] = box
+            payload = {"id": req_id, "method": method}
+            if params is not None:
+                payload["params"] = params
+            ws_send_frame(sock, 0x1, json.dumps(payload).encode())
+        if box is None:
+            return None
+        if not box["ev"].wait(wait):
+            with self._lock:
+                self._pending.pop(req_id, None)
+            raise TimeoutError(method)
+        return box["msg"]
+
+    def call(self, method, params=None, timeout=10):
+        return self._send(method, params, wait=timeout)
+
+    def _run(self):
+        while True:
+            try:
+                with urlopen(CDP, timeout=1) as resp:
+                    pages = json.load(resp)
+                page = pick_page(pages)
+                if page is None:
+                    raise RuntimeError("no page")
+                sock = ws_connect(page["webSocketDebuggerUrl"])
+                with self._lock:
+                    self._sock = sock
+                    self._id = 0
+                    self._pending.clear()
+                title = page.get("title") or page.get("url") or "page"
+                self._set_status(title)
+                self._send("Runtime.enable")
+                self._send("Log.enable")
+                self._send("Page.enable")
+                self._read_loop(sock)
+            except Exception:
+                with self._lock:
+                    sock = self._sock
+                    self._sock = None
+                    for box in self._pending.values():
+                        box["msg"] = {"error": {"message": "disconnected"}}
+                        box["ev"].set()
+                    self._pending.clear()
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+                self._set_status("waiting for Chromium…")
+                time.sleep(1)
+
+    def _read_loop(self, sock):
+        while True:
+            data = json.loads(ws_recv(sock))
+            if "id" in data:
+                with self._lock:
+                    box = self._pending.get(data["id"])
+                if box is not None:
+                    box["msg"] = data
+                    box["ev"].set()
+                continue
+            formatted = format_cdp(data.get("method"), data.get("params") or {})
+            if formatted:
+                self._emit(formatted)
+
+
+class Handler(BaseHTTPRequestHandler):
+    bridge = None
+
+    def log_message(self, *_args):
+        return
+
+    def _same_origin(self):
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        return urlparse(origin).netloc == (self.headers.get("Host") or "")
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if path == "/":
+            body = PAGE.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if path != "/events":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        q = queue.Queue(maxsize=200)
+        self.bridge.subscribe(q)
+        try:
+            while True:
+                try:
+                    msg = q.get(timeout=15)
+                    self.wfile.write(f"data: {msg}\n\n".encode())
+                    self.wfile.flush()
+                except queue.Empty:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            self.bridge.unsubscribe(q)
+
+    def do_POST(self):
+        if not self._same_origin():
+            self.send_response(403)
+            self.end_headers()
+            return
+        path = self.path.split("?", 1)[0]
+        n = int(self.headers.get("Content-Length") or 0)
+        try:
+            body = json.loads(self.rfile.read(n).decode() or "{}")
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_response(400)
+            self.end_headers()
+            return
+        try:
+            if path == "/eval":
+                expr = body.get("expression")
+                if type(expr) is not str or not expr:
+                    raise ValueError("expression")
+                reply = self.bridge.call("Runtime.evaluate", {
+                    "expression": expr,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                    "replMode": True,
+                })
+                ok, msg = format_eval(reply)
+                out = {"ok": ok, "msg": msg}
+            elif path == "/reload":
+                self.bridge.call("Page.reload", timeout=5)
+                out = {"ok": True, "msg": "reloaded"}
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+        except (RuntimeError, TimeoutError) as e:
+            out = {"ok": False, "msg": str(e)}
+        raw = json.dumps(out).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+class DualStackServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
+def serve():
+    Handler.bridge = Bridge()
+    try:
+        DualStackServer(("::", PORT), Handler).serve_forever()
+    except OSError:
+        ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+
+
+def check():
+    page = pick_page(
+        [
+            {"type": "service_worker", "webSocketDebuggerUrl": "ws://x"},
+            {"type": "page", "url": "devtools://x", "webSocketDebuggerUrl": "ws://d"},
+            {
+                "type": "page",
+                "url": "http://familyos.test/",
+                "title": "FamilyOS",
+                "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/1",
+            },
+        ]
+    )
+    assert page["title"] == "FamilyOS"
+    assert remote_text({"type": "string", "value": "hi"}) == "hi"
+    assert remote_text({"type": "number", "value": 3}) == "3"
+    assert remote_text({"type": "undefined"}) == "undefined"
+    assert remote_text({"type": "object", "description": "Object"}) == "Object"
+    ev = format_cdp(
+        "Runtime.consoleAPICalled",
+        {"type": "error", "args": [{"type": "string", "value": "boom"}]},
+    )
+    assert ev == {"t": "error", "msg": "boom"}
+    ok, msg = format_eval(
+        {"result": {"result": {"type": "number", "value": 2}}}
+    )
+    assert ok and msg == "2"
+    bad, _ = format_eval({"error": {"message": "not connected"}})
+    assert bad is False
+    c1, c2 = socket.socketpair()
+    try:
+        ws_send_frame(c1, 0x1, b'{"hello":1}')
+        assert json.loads(ws_recv(c2)) == {"hello": 1}
+    finally:
+        c1.close()
+        c2.close()
+    print("ok")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--check":
+        check()
+        raise SystemExit(0)
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    os.makedirs(runtime, exist_ok=True)
+    lock_path = os.path.join(runtime, "familyos-inspect.lock")
+    lockf = open(lock_path, "a", encoding="utf-8")
+    try:
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit(0)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    serve()

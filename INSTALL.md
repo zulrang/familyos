@@ -83,7 +83,7 @@ The intended appliance is a Raspberry Pi 5 running [FullPageOS](https://github.c
 After flashing FullPageOS:
 
 1. Put the production URL (the `pnpm start` host) in `fullpageos.txt`.
-2. Copy the files under `kiosk/` onto the Pi — on-screen keyboard extension, Chromium flags, idle dim. Commands and the labeled reference stack: [`docs/kiosk.md`](docs/kiosk.md). Optional private runbook for one machine: `docs/kiosk.local.md` (gitignored).
+2. Copy the files under `kiosk/` onto the Pi — on-screen keyboard extension, Chromium flags, idle dim, remote inspect. Commands and the labeled reference stack: [`docs/kiosk.md`](docs/kiosk.md). Optional private runbook for one machine: `docs/kiosk.local.md` (gitignored).
 
 SSH default on that image is `pi@fullpageos.local`.
 
