@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# Launch, health-check, and tear down an isolated FamilyOS Next server for verification.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+SKILL_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+REPO=$(cd "$SKILL_DIR/../../.." && pwd)
+HOME_DIR="${FAMILYOS_VERIFY_HOME:-/tmp/familyos-verify}"
+DEFAULT_PORT="${FAMILYOS_VERIFY_PORT:-4310}"
+CURRENT_FILE="$HOME_DIR/current"
+
+die() {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
+
+run_dir() {
+  local id=$1
+  printf '%s/%s' "$HOME_DIR" "$id"
+}
+
+state_file() {
+  printf '%s/state' "$(run_dir "$1")"
+}
+
+read_current() {
+  [[ -f "$CURRENT_FILE" ]] || die "no verification instance (run launch first)"
+  RUN_ID=$(cat "$CURRENT_FILE")
+  # shellcheck disable=SC1090
+  source "$(state_file "$RUN_ID")"
+}
+
+pid_alive() {
+  local pid=$1
+  kill -0 "$pid" 2>/dev/null
+}
+
+port_pid() {
+  local port=$1
+  lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 { print $2 }'
+}
+
+kill_tree() {
+  local pid=$1
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    kill_tree "$child"
+  done
+  kill "$pid" 2>/dev/null || true
+}
+
+cmd_launch() {
+  if [[ -f "$CURRENT_FILE" ]]; then
+    local existing
+    existing=$(cat "$CURRENT_FILE")
+    if [[ -f "$(state_file "$existing")" ]]; then
+      # shellcheck disable=SC1090
+      source "$(state_file "$existing")"
+      if pid_alive "${PID:-0}"; then
+        die "verification instance $existing is already running (pid $PID). cleanup first."
+      fi
+    fi
+  fi
+
+  [[ -d "$REPO" ]] || die "could not resolve repo root"
+  [[ -f "$REPO/package.json" ]] || die "not a FamilyOS checkout: $REPO"
+  if [[ ! -x "$REPO/node_modules/.bin/next" ]]; then
+    (cd "$REPO" && pnpm install --frozen-lockfile)
+  fi
+
+  local port=$DEFAULT_PORT
+  local owner
+  owner=$(port_pid "$port" || true)
+  if [[ -n "${owner:-}" ]]; then
+    die "port $port is already in use by pid $owner. set FAMILYOS_VERIFY_PORT to a free port."
+  fi
+
+  local run_id=${FAMILYOS_VERIFY_RUN:-$(date +%Y%m%dT%H%M%S)-$$}
+  local dir
+  dir=$(run_dir "$run_id")
+  mkdir -p "$dir/data" "$SKILL_DIR/artifacts/$run_id"
+  local log="$dir/next.log"
+  local pidfile="$dir/next.pid"
+
+  # New session so the agent shell's process-group teardown does not kill Next.
+  local launch_pid
+  launch_pid=$(python3 - "$REPO" "$dir/data" "$port" "$log" "$pidfile" <<'PY'
+import os, subprocess, sys
+repo, data, port, log, pidfile = sys.argv[1:]
+env = os.environ.copy()
+env["FAMILYOS_DATA_DIR"] = data
+env["PORT"] = port
+logf = open(log, "ab")
+proc = subprocess.Popen(
+    ["pnpm", "exec", "next", "dev", "-H", "127.0.0.1", "-p", port],
+    cwd=repo,
+    env=env,
+    stdout=logf,
+    stderr=subprocess.STDOUT,
+    start_new_session=True,
+    close_fds=True,
+)
+open(pidfile, "w").write(f"{proc.pid}\n")
+print(proc.pid)
+PY
+)
+
+  mkdir -p "$HOME_DIR"
+  echo "$run_id" >"$CURRENT_FILE"
+
+  local i=0
+  while (( i < 90 )); do
+    if curl -fsS "http://127.0.0.1:$port/api/ready" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  if ! curl -fsS "http://127.0.0.1:$port/api/ready" >/dev/null 2>&1; then
+    kill_tree "$launch_pid"
+    die "Next did not become ready on port $port. Last log lines:
+$(tail -n 40 "$log")"
+  fi
+
+  local listener
+  listener=$(port_pid "$port" || true)
+  [[ -n "$listener" ]] || die "ready succeeded but nothing listens on $port"
+
+  cat >"$(state_file "$run_id")" <<EOF
+RUN_ID=$run_id
+PORT=$port
+PID=$listener
+LAUNCH_PID=$launch_pid
+DATA_DIR=$dir/data
+ORIGIN=http://127.0.0.1:$port
+REPO=$REPO
+LOG=$log
+EVIDENCE=$SKILL_DIR/artifacts/$run_id
+EOF
+
+  source "$(state_file "$run_id")"
+  cmd_doctor
+}
+
+cmd_doctor() {
+  read_current
+  pid_alive "$PID" || die "pid $PID is not running"
+  local listener
+  listener=$(port_pid "$PORT" || true)
+  [[ -n "$listener" ]] || die "nothing listening on $PORT"
+  # Next's child often owns the socket. Require it to be the launch pid or a descendant.
+  if [[ "$listener" != "$PID" ]]; then
+    local walk=$listener
+    local ok=0
+    local depth=0
+    while [[ -n "$walk" && "$walk" != "1" && $depth -lt 8 ]]; do
+      if [[ "$walk" == "$PID" ]]; then
+        ok=1
+        break
+      fi
+      walk=$(ps -o ppid= -p "$walk" 2>/dev/null | tr -d ' ')
+      depth=$((depth + 1))
+    done
+    [[ $ok -eq 1 ]] || die "port $PORT is owned by pid $listener, not verification pid $PID. refuse to drive a foreign instance."
+  fi
+  case "$DATA_DIR" in
+    "$HOME_DIR"/*) ;;
+    *) die "data dir $DATA_DIR is not under $HOME_DIR. refuse to drive." ;;
+  esac
+  local body
+  body=$(curl -fsS "$ORIGIN/api/ready") || die "/api/ready failed"
+  printf '%s\n' "$body" | grep -q '"ready":true' || die "/api/ready was not ready: $body"
+
+  local trusted=0
+  if [[ -f "$DATA_DIR/displays.json" ]]; then
+    trusted=$(python3 - "$DATA_DIR/displays.json" <<'PY'
+import json, sys
+raw = json.load(open(sys.argv[1]))
+rows = raw.get("displays") or []
+print(sum(1 for d in rows if d.get("revokedAt") is None))
+PY
+)
+  fi
+
+  local google=no
+  if [[ -f "$REPO/.env.local" ]]; then
+    google=env-present
+  fi
+
+  cat <<EOF
+run: $RUN_ID
+origin: $ORIGIN
+pid: $PID
+listener: $listener
+data: $DATA_DIR
+evidence: $EVIDENCE
+ready: true
+trusted_displays: $trusted
+google_env: $google
+log: $LOG
+EOF
+}
+
+cmd_pairing_code() {
+  read_current
+  [[ -f "$LOG" ]] || die "no server log at $LOG"
+  local line
+  line=$(grep -E 'FamilyOS pairing code: ' "$LOG" | tail -n 1) || true
+  [[ -n "$line" ]] || die "no pairing code in log yet (empty data dir should print one at startup)"
+  printf '%s\n' "$line"
+}
+
+cmd_cleanup() {
+  if [[ ! -f "$CURRENT_FILE" ]]; then
+    echo "no verification instance"
+    return 0
+  fi
+  RUN_ID=$(cat "$CURRENT_FILE")
+  if [[ -f "$(state_file "$RUN_ID")" ]]; then
+    # shellcheck disable=SC1090
+    source "$(state_file "$RUN_ID")"
+    if pid_alive "${PID:-0}"; then
+      kill_tree "$PID"
+      local n=0
+      while pid_alive "$PID" && (( n < 10 )); do
+        sleep 0.2
+        n=$((n + 1))
+      done
+      if pid_alive "$PID"; then
+        kill -9 "$PID" 2>/dev/null || true
+        kill_tree "$PID"
+      fi
+    fi
+    if [[ -n "${LAUNCH_PID:-}" ]] && pid_alive "$LAUNCH_PID"; then
+      kill_tree "$LAUNCH_PID"
+    fi
+    # Scratch only. Evidence stays in $SKILL_DIR/artifacts.
+    rm -rf "$(run_dir "$RUN_ID")"
+  fi
+  rm -f "$CURRENT_FILE"
+  echo "cleaned $RUN_ID (evidence kept under $SKILL_DIR/artifacts)"
+}
+
+usage() {
+  cat <<'EOF'
+verify-familyos launch | doctor | pairing-code | cleanup
+
+launch         start Next on 127.0.0.1:4310 with a disposable data dir
+doctor         check the instance this run started (pid, port owner, /api/ready)
+pairing-code   print the startup pairing line from the server log
+cleanup        kill the pid we started and delete the disposable data dir
+               (does not delete artifacts/)
+EOF
+}
+
+case "${1:-}" in
+  launch) cmd_launch ;;
+  doctor) cmd_doctor ;;
+  pairing-code) cmd_pairing_code ;;
+  cleanup) cmd_cleanup ;;
+  *) usage >&2; exit 2 ;;
+esac
