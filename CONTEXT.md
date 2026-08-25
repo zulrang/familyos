@@ -27,13 +27,18 @@ _Avoid_: User, member session
 
 **Display Configuration**:
 The settings that belong to one Display rather than the Household. Display
-size and Idle Dim are Display Configuration.
+size, Idle Dim, and Wall Controls are Display Configuration.
 _Avoid_: Device preferences, kiosk settings, household settings
 
 **Idle Dim**:
 A Display's reduction of panel brightness after a period without input. Input
 restores the previous brightness.
 _Avoid_: Screen saver, sleep, DPMS, screen blank, dimming overlay
+
+**Wall Controls**:
+A Display Configuration: this Display uses FamilyOS large-target controls in
+place of the browser's date and time widgets.
+_Avoid_: Kiosk mode, touch mode, time picker setting
 
 **Household Time Zone**:
 The single time zone that defines dates, day boundaries, and calendar views on
@@ -107,7 +112,58 @@ _Avoid_: Task panel, selected tasklist
 A checkable entry in a Household List.
 _Avoid_: Task, chore
 
+## Tasks
+
+**Task**:
+An assigned household responsibility on the Tasks product surface. Every Task
+is either a Chore or a Routine.
+_Avoid_: List Item, to-do, chore (as the umbrella term)
+
 **Chore**:
-A future assigned household responsibility belonging to the Tasks product
-surface, not to Lists.
-_Avoid_: List Item
+A Task of work done for the household, such as dishes or trash.
+_Avoid_: Task (when the type matters), List Item
+
+**Routine**:
+A Task that is a recurring personal-care step, such as brushing teeth.
+Identical to a Chore in everything but the label.
+_Avoid_: habit
+
+**Task Definition**:
+The description of a Task — title, type, recurrence, and assignment. An edit
+replaces a definition with a new version rather than changing it in place.
+_Avoid_: template
+
+**Lineage**:
+The stable identity of a Task across edits of its Task Definition.
+_Avoid_: task id
+
+**Occurrence**:
+One dated instance of a Task within a single Window.
+_Avoid_: instance, entry
+
+**Window**:
+The span from an Occurrence's scheduled date until the Task's next scheduled
+date. The Occurrence stays open and due for its whole Window, then expires.
+_Avoid_: due date, deadline
+
+**Rotation**:
+An assignment that passes among Active Members in a fixed order, advancing one
+turn each time an Occurrence is completed — fairness by turns taken, not by
+dates elapsed.
+_Avoid_: schedule
+
+**Open Assignment**:
+An assignment with no designated member; the first Active Member to Claim the
+Occurrence takes it. An unclaimed Occurrence belongs to the Household, not to
+a member.
+_Avoid_: unassigned
+
+**Claim**:
+An Active Member taking an open Occurrence for themselves. A Claim is
+advisory; completion is what counts.
+_Avoid_: lock, reservation
+
+**Skip**:
+Marking an Occurrence intentionally not done for its Window. A Skip never
+advances a Rotation.
+_Avoid_: dismiss, delete

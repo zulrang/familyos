@@ -79,6 +79,17 @@ Other rail destinations are stubs.
 - Rationale: Same authority pattern as Calendar. Explicit selection prevents a
   connected account's personal tasklists from appearing on the wall.
 
+**Decision: FamilyOS owns Task data (Tasks surface)**
+- Choice: Task Definitions and Task events live in a FamilyOS-owned
+  `node:sqlite` store — the first local domain data beyond Household
+  Configuration. Occurrences are a pure projection over append-only logs.
+- Alternatives considered: Google Tasks as the chore store; JSON files like
+  Household Configuration; adding better-sqlite3.
+- Rationale: Rotation, Windows, and append-only events do not map onto
+  tasklist rows, and the invariants want real unique constraints and
+  transactions. See `docs/adr/0006-familyos-owned-task-store.md` and
+  `docs/design/tasks-design-spec.md`.
+
 **Decision: v1 is Calendar + Lists + Settings + stubs**
 - Choice: Pairing, a rolling 5-day family calendar, selected Household Lists,
   and Settings (Google login, source selection, members, Displays). Tasks,
@@ -111,6 +122,7 @@ Other rail destinations are stubs.
 | App shell (`src/app` layout + rail) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
 | Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
 | Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
+| Tasks (`src/tasks/`) | Task Definitions, Task events, the pure Occurrence projection, the Tasks screen and Task editor | Google Tasks rows, Rewards points, verification workflow, member records |
 | Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, Display Configuration (Display size, Idle Dim) | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
@@ -130,6 +142,7 @@ Display(s) (paired browser profiles)
        -> Household Configuration
        -> paired Display records + Display Configuration
        -> account-bound last-known provider cache
+       -> Task store (node:sqlite; definitions + events, server-local)
        -> Google Calendar API  (events; one selected calendar)
        -> Google Tasks API     (explicitly selected lists / items)
 
@@ -183,7 +196,11 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
   reloads the newer provider state instead of silently overwriting it.
 - Household Configuration has a server-managed version and follows the same
   reject-and-reload rule for concurrent Settings edits.
-- No offline write queue: Google remains the event/list write authority.
+- No offline write queue: Google remains the event/list write authority, and
+  Displays submit Task events directly to the server. The idempotent
+  `(task, window, kind)` event key makes plain HTTP retries safe.
+- Task data is server-authoritative (ADR 0006): Tasks stay writable whenever
+  the server is up, independent of Google availability.
 
 ## 7. Known Traps
 
@@ -196,7 +213,8 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Member Colors are presentation. They are unique only among Active Members and
   may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
-- Unimplemented rail items stay stubs. Do not invent a visual language for Tasks, Rewards, Meals, Recipes, Photos, Sleep, or Settings beyond existing chrome.
+- Unimplemented rail items stay stubs. Do not invent a visual language for Rewards, Meals, Recipes, Photos, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant.
+- Task data is FamilyOS-owned and append-only (ADR 0006). Do not store Tasks in Google Tasks, materialize occurrence rows, add a verification workflow, or bolt on Rewards points — the spec's decision log (D1–D18) rejects each of these by name.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
 - Tests are Vitest only (`pnpm test` / `pnpm test:contract`). Component tests need `// @vitest-environment jsdom` because the default env is `node`. Don’t add a second runner.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
@@ -205,5 +223,5 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 ## 8. Future Direction
 
-- Tasks (chores) should follow the design-skill kit (`ui_kits/wall-display`) after Lists is real. Keep shell/calendar/lists code from depending on those remaining feature modules.
+- Tasks is designed and ready to build: `docs/design/tasks-design-spec.md` (member columns per the design-skill kit, minus TimeOfDayTabs and the points pill). Keep shell/calendar/lists code from depending on the remaining feature modules.
 - Companion surfaces (phone/tablet) are mentioned in the design skill and are not v1. Don’t add a responsive breakpoint architecture “for later.”
