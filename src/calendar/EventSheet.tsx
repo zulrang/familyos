@@ -1,12 +1,5 @@
 "use client";
 
-import {
-  applyWhoSelection,
-  type EventWho,
-  parseWhoSelect,
-  showSeveralOption,
-  whoSelectValue,
-} from "@/calendar/event-who";
 import type { SeriesScope } from "@/calendar/types";
 import {
   LEGACY_TONE_COLORS,
@@ -25,7 +18,6 @@ export type EventDraft = {
   endDate: string;
   startTime: string;
   endTime: string;
-  who: EventWho;
   memberIds: string[];
   recurringEventId?: string;
   expectedVersion?: string;
@@ -56,8 +48,6 @@ export function EventSheet({
   onDelete?: () => void;
 }) {
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
-  const setWho = (who: EventWho) =>
-    set(applyWhoSelection(who, members, draft.memberIds));
   const assignable = members.filter((m) => m.status === "active");
   // Historical Event Participants (Retired) stay visible but not newly choosable.
   const historical = members.filter(
@@ -168,8 +158,16 @@ export function EventSheet({
             </>
           )}
         </div>
-        <label style={{ display: "block" }}>
-          <div
+        <fieldset
+          style={{
+            border: "none",
+            padding: 0,
+            minWidth: 0,
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          <legend
             style={{
               font: "var(--type-card-meta)",
               color: "var(--text-muted)",
@@ -177,29 +175,7 @@ export function EventSheet({
             }}
           >
             Who
-          </div>
-          <select
-            className="fos-input"
-            value={whoSelectValue(draft.who)}
-            onChange={(e) => setWho(parseWhoSelect(e.target.value))}
-          >
-            <option value="none">Nobody</option>
-            {assignable.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name || "Unnamed"}
-              </option>
-            ))}
-            {historical.map((m) => (
-              <option key={m.id} value={m.id} disabled>
-                {m.name || "Unnamed"} (retired)
-              </option>
-            ))}
-            {showSeveralOption(assignable.length, historical.length, draft) ? (
-              <option value="several">Several people</option>
-            ) : null}
-          </select>
-        </label>
-        {draft.who.kind === "several" ? (
+          </legend>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {assignable.map((m) => (
               <MemberChip
@@ -227,7 +203,7 @@ export function EventSheet({
               />
             ))}
           </div>
-        ) : null}
+        </fieldset>
         {draft.recurringEventId ? (
           <fieldset
             style={{

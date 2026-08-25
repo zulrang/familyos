@@ -24,6 +24,7 @@ export function MemberChip({
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       style={{
         display: "flex",
