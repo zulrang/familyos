@@ -167,3 +167,13 @@ _Avoid_: lock, reservation
 Marking an Occurrence intentionally not done for its Window. A Skip never
 advances a Rotation.
 _Avoid_: dismiss, delete
+
+**Star**:
+The unit of reward a Task carries. Completing an Occurrence earns the Task's
+star value for the completing member. Chores and Routines earn identically.
+_Avoid_: point, credit
+
+**Star Balance**:
+A member's earned Stars adjusted by any recorded redemptions or corrections.
+It is always derived, never stored.
+_Avoid_: score, wallet, points total
