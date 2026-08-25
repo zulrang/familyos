@@ -25,6 +25,16 @@ A Display that has been paired with the Household and may read or change its
 data.
 _Avoid_: User, member session
 
+**Display Configuration**:
+The settings that belong to one Display rather than the Household. Display
+size and Idle Dim are Display Configuration.
+_Avoid_: Device preferences, kiosk settings, household settings
+
+**Idle Dim**:
+A Display's reduction of panel brightness after a period without input. Input
+restores the previous brightness.
+_Avoid_: Screen saver, sleep, DPMS, screen blank, dimming overlay
+
 **Household Time Zone**:
 The single time zone that defines dates, day boundaries, and calendar views on
 every Display.

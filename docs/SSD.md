@@ -21,8 +21,8 @@ Other rail destinations are stubs.
 
 **Decision: One Household server, multiple paired Displays**
 - Choice: One Server Installation owns shared Household Configuration and
-  serves multiple Displays. A Display is a paired browser profile; only UI
-  scale varies by Display in v1.
+  serves multiple Displays. A Display is a paired browser profile; Display
+  Configuration (Display size and Idle Dim) varies by Display.
 - Alternatives considered: One independent installation per kiosk; a
   multi-household server; cloud synchronization between displays.
 - Rationale: Household data and provider connections must be consistent across
@@ -111,7 +111,7 @@ Other rail destinations are stubs.
 | App shell (`src/app` layout + rail) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
 | Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
 | Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
-| Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, per-Display UI scale | Event rendering, unimplemented product surfaces |
+| Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, Display Configuration (Display size, Idle Dim) | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
 
@@ -128,7 +128,7 @@ reuse. Member email is not a v1 field. See
 Display(s) (paired browser profiles)
   -> local Server Installation (Next.js App Router)
        -> Household Configuration
-       -> paired Display records + per-Display UI scale
+       -> paired Display records + Display Configuration
        -> account-bound last-known provider cache
        -> Google Calendar API  (events; one selected calendar)
        -> Google Tasks API     (explicitly selected lists / items)
@@ -136,6 +136,7 @@ Display(s) (paired browser profiles)
 Reference wall Display
   -> FullPageOS Chromium
   -> kiosk/osk extension (text fields only)
+  -> familyos-idle-dim (panel backlight); Trusted Display page applies Idle Dim over loopback
 ```
 
 Straightforward request/response. No event bus, multi-tenant routing, or
@@ -150,7 +151,7 @@ peer-to-peer Display synchronization.
 - Event shape: Google Calendar API events. Wrap at the adapter boundary; do not let Google’s payload leak through every component.
 
 Household Configuration, pairing credentials, provider tokens, and caches are
-server-local and gitignored. Only UI scale is Display-specific in v1. Do not
+server-local and gitignored. Display Configuration is Display-specific. Do not
 commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 ## 5. Security Model

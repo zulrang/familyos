@@ -7,15 +7,27 @@ import {
 import type { HouseholdListId } from "@/settings/types";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { googleConfigured } from "@/shared/google-env";
-import { setDisplayUiScale } from "@/shared/pairing";
+import {
+  type IdleDimAfterMs,
+  type IdleDimTo,
+  parseIdleDimAfterMs,
+  parseIdleDimTo,
+} from "@/shared/idle-dim";
+import { setDisplayIdleDim, setDisplayUiScale } from "@/shared/pairing";
 import { readProvider } from "@/shared/provider";
 import { isIanaTimeZone } from "@/shared/time";
 import { parseUiScale, type UiScale } from "@/shared/ui-scale";
 
+type DisplayConfig = {
+  uiScale: UiScale;
+  idleDimAfterMs: IdleDimAfterMs;
+  idleDimTo: IdleDimTo;
+};
+
 function publicSettings(
   s: Awaited<ReturnType<typeof readHousehold>>,
   signedIn: boolean,
-  uiScale: UiScale,
+  display: DisplayConfig,
 ) {
   return {
     familyName: s.familyName,
@@ -25,12 +37,14 @@ function publicSettings(
     timeZone: s.timeZone,
     signedIn,
     googleConfigured: googleConfigured(),
-    uiScale,
+    uiScale: display.uiScale,
+    idleDimAfterMs: display.idleDimAfterMs,
+    idleDimTo: display.idleDimTo,
     configVersion: s.configVersion,
   };
 }
 
-async function publicFromStores(uiScale: UiScale) {
+async function publicFromStores(display: DisplayConfig) {
   const [household, provider] = await Promise.all([
     readHousehold(),
     readProvider(),
@@ -38,7 +52,7 @@ async function publicFromStores(uiScale: UiScale) {
   return publicSettings(
     household,
     Boolean(provider.tokens?.access_token),
-    uiScale,
+    display,
   );
 }
 
@@ -57,12 +71,14 @@ type SettingsPatch = {
   listIds?: HouseholdListId[];
   timeZone?: string;
   uiScale?: UiScale;
+  idleDimAfterMs?: IdleDimAfterMs;
+  idleDimTo?: IdleDimTo;
   expectedVersion?: unknown;
 };
 
 function parseSettingsPatch(
   raw: unknown,
-  uiScaleFallback: UiScale,
+  fallback: DisplayConfig,
 ): { ok: true; value: SettingsPatch } | { ok: false; error: string } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, error: "invalid body" };
@@ -97,7 +113,16 @@ function parseSettingsPatch(
     value.timeZone = o.timeZone;
   }
   if (o.uiScale !== undefined) {
-    value.uiScale = parseUiScale(o.uiScale, uiScaleFallback);
+    value.uiScale = parseUiScale(o.uiScale, fallback.uiScale);
+  }
+  if (o.idleDimAfterMs !== undefined) {
+    value.idleDimAfterMs = parseIdleDimAfterMs(
+      o.idleDimAfterMs,
+      fallback.idleDimAfterMs,
+    );
+  }
+  if (o.idleDimTo !== undefined) {
+    value.idleDimTo = parseIdleDimTo(o.idleDimTo, fallback.idleDimTo);
   }
   return { ok: true, value };
 }
@@ -115,19 +140,23 @@ function touchesHousehold(body: SettingsPatch): boolean {
 export async function handleGetSettings(request: Request): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  return Response.json(await publicFromStores(display.uiScale));
+  return Response.json(await publicFromStores(display));
 }
 
 export async function handlePatchSettings(request: Request): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  const parsed = parseSettingsPatch(await readJson(request), display.uiScale);
+  const parsed = parseSettingsPatch(await readJson(request), display);
   if (!parsed.ok) {
     return Response.json({ error: parsed.error }, { status: 400 });
   }
   const body = parsed.value;
 
-  let uiScale = display.uiScale;
+  const next: DisplayConfig = {
+    uiScale: display.uiScale,
+    idleDimAfterMs: display.idleDimAfterMs,
+    idleDimTo: display.idleDimTo,
+  };
   const provider = await readProvider();
 
   if (touchesHousehold(body)) {
@@ -167,7 +196,7 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
         publicSettings(
           result.config,
           Boolean(provider.tokens?.access_token),
-          uiScale,
+          next,
         ),
         { status: 409 },
       );
@@ -175,12 +204,25 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
   }
 
   if (body.uiScale !== undefined) {
-    uiScale = body.uiScale;
-    const ok = await setDisplayUiScale(display.id, uiScale);
+    next.uiScale = body.uiScale;
+    const ok = await setDisplayUiScale(display.id, next.uiScale);
     if (!ok) {
       return Response.json({ error: "display missing" }, { status: 404 });
     }
   }
 
-  return Response.json(await publicFromStores(uiScale));
+  if (body.idleDimAfterMs !== undefined || body.idleDimTo !== undefined) {
+    next.idleDimAfterMs = body.idleDimAfterMs ?? next.idleDimAfterMs;
+    next.idleDimTo = body.idleDimTo ?? next.idleDimTo;
+    const ok = await setDisplayIdleDim(
+      display.id,
+      next.idleDimAfterMs,
+      next.idleDimTo,
+    );
+    if (!ok) {
+      return Response.json({ error: "display missing" }, { status: 404 });
+    }
+  }
+
+  return Response.json(await publicFromStores(next));
 }

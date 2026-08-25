@@ -1,4 +1,5 @@
 import type { Member } from "@/members/members";
+import type { IdleDimAfterMs, IdleDimTo } from "@/shared/idle-dim";
 import type { UiScale } from "@/shared/ui-scale";
 
 /** Provider tasklist ID selected as a Household List. */
@@ -15,5 +16,7 @@ export type PublicSettings = {
   signedIn: boolean;
   googleConfigured: boolean;
   uiScale: UiScale;
+  idleDimAfterMs: IdleDimAfterMs;
+  idleDimTo: IdleDimTo;
   configVersion: number;
 };

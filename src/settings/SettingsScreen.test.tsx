@@ -47,6 +47,8 @@ function publicSettings(members: Member[]): PublicSettings {
     signedIn: false,
     googleConfigured: true,
     uiScale: 1,
+    idleDimAfterMs: 300_000,
+    idleDimTo: 10,
     configVersion: 1,
   };
 }
@@ -211,5 +213,39 @@ describe("Settings pairing code", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Pair Display" })).toBeNull();
     expect(screen.queryByText("ABC234")).toBeNull();
+  });
+});
+
+describe("Settings Idle Dim", () => {
+  test("Display section offers Dim after and Dim to and Save persists them", async () => {
+    const user = userEvent.setup();
+    const settings = publicSettings([ada]);
+    const fetchMock = installFetch(settings);
+    render(<SettingsScreen />);
+
+    const after = await screen.findByLabelText("Dim after");
+    const to = screen.getByLabelText("Dim to");
+    expect(after).toHaveValue("300000");
+    expect(to).toHaveValue("10");
+
+    await user.selectOptions(after, "120000");
+    await user.selectOptions(to, "20");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.filter((call) => {
+        const url = urlOf(call[0]);
+        const method = (call[1]?.method ?? "GET").toUpperCase();
+        return method === "PATCH" && url.endsWith("/api/settings");
+      });
+      expect(patches.length).toBeGreaterThan(0);
+      const body = JSON.parse(String(patches[0][1]?.body ?? "{}")) as {
+        idleDimAfterMs?: number;
+        idleDimTo?: number;
+      };
+      expect(body.idleDimAfterMs).toBe(120_000);
+      expect(body.idleDimTo).toBe(20);
+    });
+    expect(await screen.findByRole("button", { name: "Saved" })).toBeTruthy();
   });
 });

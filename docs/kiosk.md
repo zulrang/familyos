@@ -98,9 +98,20 @@ If the kiosk URL in `fullpageos.txt` changes, restart Chromium so the flag picks
 
 ## Idle dim
 
-DPMS stays off so the panel never blanks. After 5 minutes with no X input, `familyos-idle-dim` sets backlight VCP 10 via DDC (`ddcutil --bus "$DDC_BUS" setvcp 10`) and restores the previous value on tap.
+DPMS stays off so the panel never blanks. After idle with no X input,
+`familyos-idle-dim` sets backlight VCP 10 via DDC and restores the previous
+value on tap. Timeout and dim-to are Display Configuration: Settings on this
+Trusted Display saves them, and the kiosk Chromium page POSTs
+`{"idleDimAfterMs":300000,"idleDimTo":10}` to `http://127.0.0.1:7380/idle-dim`
+(loopback only). Last-good values live in `$XDG_RUNTIME_DIR/familyos-idle-dim.cfg`;
+missing config uses 5 minutes and 10%. Replacing the script still needs a
+process restart so it listens; changing the values does not need a Display
+reboot.
 
-Needs `xprintidle`, `ddcutil`, `i2c-dev` at boot (`/etc/modules`), and `pi` in group `i2c`. The reference Pi 5 ports are tried automatically: HDMI-1 on bus 11 and HDMI-2 on bus 12. `DDC_BUS` can pin a different port- and panel-specific bus; record overrides in `docs/kiosk.local.md`.
+Needs `xprintidle`, `ddcutil`, `python3`, `i2c-dev` at boot (`/etc/modules`),
+and `pi` in group `i2c`. The reference Pi 5 ports are tried automatically:
+HDMI-1 on bus 11 and HDMI-2 on bus 12. `DDC_BUS` can pin a different port- and
+panel-specific bus; record overrides in `docs/kiosk.local.md`.
 
 Repo copy: `kiosk/idle-dim`. After changing it:
 
@@ -117,7 +128,7 @@ ssh pi@fullpageos.local 'fuser -k /run/user/$(id -u)/familyos-idle-dim.lock 2>/d
 `/opt/custompios/scripts/start_gui` (LightDM session `guisession`):
 
 - power management off, orientation `normal`
-- `familyos-idle-dim` (backlight dim after 5 minutes idle)
+- `familyos-idle-dim` (backlight Idle Dim; loopback apply on 127.0.0.1:7380)
 - matchbox without cursor
 - unclutter-xfixes
 - `run_onepageos` → `start_chromium_browser` (kiosk Chromium + touch-events)

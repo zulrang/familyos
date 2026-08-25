@@ -3,6 +3,7 @@ import { Newsreader, Nunito_Sans } from "next/font/google";
 import { cookies } from "next/headers";
 import { DisplayTrustWatch } from "@/displays/DisplayTrustWatch";
 import { PairingScreen } from "@/displays/PairingScreen";
+import { IdleDimApply } from "@/shared/IdleDimApply";
 import { NavRail } from "@/shared/NavRail";
 import { resolveTrustedDisplay } from "@/shared/pairing";
 import "./globals.css";
@@ -52,7 +53,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     );
   }
 
-  const { uiScale } = display;
+  const { uiScale, idleDimAfterMs, idleDimTo } = display;
   return (
     <html
       lang="en"
@@ -60,6 +61,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       style={{ zoom: uiScale }}
     >
       <body>
+        <IdleDimApply idleDimAfterMs={idleDimAfterMs} idleDimTo={idleDimTo} />
         <DisplayTrustWatch />
         <div style={{ display: "flex", height: "100%" }}>
           <NavRail />

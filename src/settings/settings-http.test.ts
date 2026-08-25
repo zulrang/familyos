@@ -107,6 +107,8 @@ describe("Household Configuration HTTP", () => {
     return (await res.json()) as {
       familyName: string;
       uiScale: number;
+      idleDimAfterMs: number;
+      idleDimTo: number;
       configVersion: number;
       signedIn: boolean;
       listIds: string[];
@@ -158,6 +160,15 @@ describe("Household Configuration HTTP", () => {
     assert.equal(a.configVersion, 1);
   });
 
+  test("new Trusted Displays default Idle Dim to 5 minutes and 10%", async () => {
+    const a = await getSettings(first.cookie);
+    const b = await getSettings(second.cookie);
+    assert.equal(a.idleDimAfterMs, 300_000);
+    assert.equal(a.idleDimTo, 10);
+    assert.equal(b.idleDimAfterMs, 300_000);
+    assert.equal(b.idleDimTo, 10);
+  });
+
   test("Trusted Displays keep independent UI scales across GET reloads", async () => {
     const setA = await patchSettings(first.cookie, { uiScale: 1.5 });
     assert.equal(setA.status, 200);
@@ -169,6 +180,39 @@ describe("Household Configuration HTTP", () => {
 
     assert.equal((await getSettings(first.cookie)).uiScale, 1.5);
     assert.equal((await getSettings(second.cookie)).uiScale, 1.25);
+  });
+
+  test("Trusted Displays keep independent Idle Dim across GET reloads", async () => {
+    const setA = await patchSettings(first.cookie, {
+      idleDimAfterMs: 120_000,
+      idleDimTo: 20,
+    });
+    assert.equal(setA.status, 200);
+    const a = (await setA.json()) as {
+      idleDimAfterMs: number;
+      idleDimTo: number;
+    };
+    assert.equal(a.idleDimAfterMs, 120_000);
+    assert.equal(a.idleDimTo, 20);
+
+    const setB = await patchSettings(second.cookie, {
+      idleDimAfterMs: 30_000,
+      idleDimTo: 1,
+    });
+    assert.equal(setB.status, 200);
+    const b = (await setB.json()) as {
+      idleDimAfterMs: number;
+      idleDimTo: number;
+    };
+    assert.equal(b.idleDimAfterMs, 30_000);
+    assert.equal(b.idleDimTo, 1);
+
+    const firstGet = await getSettings(first.cookie);
+    const secondGet = await getSettings(second.cookie);
+    assert.equal(firstGet.idleDimAfterMs, 120_000);
+    assert.equal(firstGet.idleDimTo, 20);
+    assert.equal(secondGet.idleDimAfterMs, 30_000);
+    assert.equal(secondGet.idleDimTo, 1);
   });
 
   test("changing UI scale does not mutate Household Configuration", async () => {
@@ -186,6 +230,34 @@ describe("Household Configuration HTTP", () => {
     const after = await readFile(path.join(dataRoot, "household.json"), "utf8");
     assert.equal(after, before);
     assert.equal((await getSettings(second.cookie)).uiScale, 1.25);
+    assert.equal((await getSettings(second.cookie)).configVersion, 1);
+  });
+
+  test("changing Idle Dim does not mutate Household Configuration", async () => {
+    const before = await readFile(
+      path.join(dataRoot, "household.json"),
+      "utf8",
+    );
+    const householdBefore = await readHousehold();
+    assert.equal(householdBefore.configVersion, 1);
+
+    const res = await patchSettings(first.cookie, {
+      idleDimAfterMs: 600_000,
+      idleDimTo: 80,
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      idleDimAfterMs: number;
+      idleDimTo: number;
+      configVersion: number;
+    };
+    assert.equal(body.idleDimAfterMs, 600_000);
+    assert.equal(body.idleDimTo, 80);
+    assert.equal(body.configVersion, 1);
+
+    const after = await readFile(path.join(dataRoot, "household.json"), "utf8");
+    assert.equal(after, before);
+    assert.equal((await getSettings(second.cookie)).idleDimAfterMs, 30_000);
     assert.equal((await getSettings(second.cookie)).configVersion, 1);
   });
 
@@ -236,11 +308,15 @@ describe("Household Configuration HTTP", () => {
       familyName: string;
       configVersion: number;
       uiScale: number;
+      idleDimAfterMs: number;
+      idleDimTo: number;
       signedIn: boolean;
     };
     assert.equal(body.familyName, "RenamedHousehold");
     assert.equal(body.configVersion, 2);
     assert.equal(body.uiScale, 1.1);
+    assert.equal(body.idleDimAfterMs, 600_000);
+    assert.equal(body.idleDimTo, 80);
     assert.equal(body.signedIn, true);
     assert.equal((await readHousehold()).familyName, before.familyName);
     assert.equal((await readHousehold()).configVersion, 2);
@@ -268,6 +344,32 @@ describe("Household Configuration HTTP", () => {
     const badType = await patchSettings(second.cookie, { uiScale: "1.5" });
     assert.equal(badType.status, 200);
     assert.equal(((await badType.json()) as { uiScale: number }).uiScale, 1.25);
+  });
+
+  test("invalid Idle Dim values are normalized to the previous values", async () => {
+    const res = await patchSettings(first.cookie, {
+      idleDimAfterMs: 45_000,
+      idleDimTo: 15,
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      idleDimAfterMs: number;
+      idleDimTo: number;
+    };
+    assert.equal(body.idleDimAfterMs, 600_000);
+    assert.equal(body.idleDimTo, 80);
+
+    const badType = await patchSettings(second.cookie, {
+      idleDimAfterMs: "30000",
+      idleDimTo: 0,
+    });
+    assert.equal(badType.status, 200);
+    const secondBody = (await badType.json()) as {
+      idleDimAfterMs: number;
+      idleDimTo: number;
+    };
+    assert.equal(secondBody.idleDimAfterMs, 30_000);
+    assert.equal(secondBody.idleDimTo, 1);
   });
 
   test("GET exposes empty Household List selection", async () => {
