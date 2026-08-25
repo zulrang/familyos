@@ -498,4 +498,66 @@ describe("CalendarScreen stale writes", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Event" })).toBeInTheDocument();
   });
+
+  test("an open editor submits the version from when it opened, not a later poll", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let listed: CalEvent[] = [practice];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.includes("/api/events")) {
+          return json({ events: listed, stale: false });
+        }
+        if (method === "PATCH") {
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            expectedVersion?: string;
+          };
+          if (body.expectedVersion !== "v1") {
+            return json(
+              { error: "lost-update", got: body.expectedVersion },
+              500,
+            );
+          }
+          return json({ error: "version", event: current }, 409);
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CalendarScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Practice" }));
+    expect(await screen.findByPlaceholderText("Title")).toHaveValue("Practice");
+
+    listed = [current];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(
+      await screen.findByRole("button", { name: "Recital" }),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("Practice");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(
+        "This event changed on another Display. Reloaded — try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("Recital");
+    const patch = fetchMock.mock.calls.find(
+      ([, init]) => (init?.method ?? "GET").toUpperCase() === "PATCH",
+    );
+    expect(patch).toBeTruthy();
+    expect(JSON.parse(String(patch?.[1]?.body ?? "{}"))).toMatchObject({
+      expectedVersion: "v1",
+    });
+  });
 });

@@ -28,6 +28,7 @@ export type EventDraft = {
   who: EventWho;
   memberIds: string[];
   recurringEventId?: string;
+  expectedVersion?: string;
   scope: SeriesScope;
 };
 

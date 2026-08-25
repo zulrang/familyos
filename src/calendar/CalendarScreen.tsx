@@ -75,6 +75,7 @@ function toDraft(ev: CalEvent, timeZone: string): EventDraft {
     memberIds: [...ev.participantIds],
     who: eventWhoFromIds(ev.participantIds),
     recurringEventId: ev.recurringEventId,
+    expectedVersion: ev.expectedVersion,
     scope: "this",
   };
 }
@@ -221,10 +222,6 @@ export function CalendarScreen() {
 
   const status = timeZone ? statusEvent(events, now, timeZone) : null;
 
-  function eventExpectedVersion(eventId: string): string {
-    return events.find((e) => e.id === eventId)?.expectedVersion ?? "";
-  }
-
   function applyCurrentEvent(eventId: string, current: CalEvent | null) {
     setCalendarRead((cur) => ({
       ...cur,
@@ -272,7 +269,7 @@ export function CalendarScreen() {
         participantIds: draft.memberIds,
         scope: draft.recurringEventId ? draft.scope : "this",
       };
-      if (draft.id) body.expectedVersion = eventExpectedVersion(draft.id);
+      if (draft.id) body.expectedVersion = draft.expectedVersion ?? "";
       const res = await fetch(
         draft.id
           ? `/api/events/${encodeURIComponent(draft.id)}`
@@ -316,7 +313,7 @@ export function CalendarScreen() {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            expectedVersion: eventExpectedVersion(draft.id),
+            expectedVersion: draft.expectedVersion ?? "",
           }),
         },
       );
