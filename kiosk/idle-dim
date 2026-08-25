@@ -76,13 +76,17 @@ fi
 
 LISTEN_PID=
 cleanup() {
-  [ -n "$LISTEN_PID" ] && kill "$LISTEN_PID" 2>/dev/null || true
+  [ -n "$LISTEN_PID" ] || return 0
+  kill "$LISTEN_PID" 2>/dev/null || true
+  wait "$LISTEN_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-python3 - "$CFG" "$STATE" "$BUSES" "$LISTEN_PORT" "$LOCK" <<'PY' &
+# Close fd 9 in the child so flock dies with this process; _lock is a
+# separate open for fuser -k.
+python3 - "$CFG" "$STATE" "$BUSES" "$LISTEN_PORT" "$LOCK" 9>&- <<'PY' &
 import json
 import os
 import subprocess
