@@ -32,8 +32,9 @@ Considered and rejected or deferred. See the Decision Log (Section 3).
 
 - **Verification.** The `verified` event kind and its invariant stay in the
   schema so it is additive later, but no workflow or UI ships (D10).
-- **Rewards.** No points, stars, or reward logic. The kit's points pill is
-  omitted (`points` is optional in `MemberColumn`) (D11).
+- **Rewards UI.** Star values, balances, and the adjustments log are baked
+  into the domain (D19), but nothing star-shaped renders in v1: no points
+  pill, no redemption. The kit's `points` prop stays unused (D11).
 - **Device offline queue and staleness indicator.** Displays are LAN browsers;
   if the server is down the whole app is down (D12).
 - **Historical views.** The projection looks back one Window at most, and the
@@ -81,7 +82,16 @@ type TaskDefinition = {
   recurrence: Recurrence
   assignment: AssignmentPolicy
   time: LocalTime | null       // optional within-day time; drives column ordering
+  stars: number                // nonnegative integer earned per completion; 0 = no stars
   retiredAt: LocalDate | null  // write-once; null = active
+}
+
+type StarAdjustment = {        // append-only; no v1 writers (Rewards will append)
+  id: string
+  member: MemberId
+  delta: number                // negative = spend/redemption, positive = correction/bonus
+  reason: string | null
+  at: Instant
 }
 
 type Event =
@@ -105,6 +115,7 @@ Two append-only tables:
 |---|---|---|
 | `definitions` | `id` | Append-only. `retiredAt` is set exactly once, from null to a date. |
 | `events` | `(task, window, kind)` unique | Append-only. Never updated or deleted. |
+| `star_adjustments` | `id` | Append-only. Empty in v1; Rewards appends redemptions and corrections. |
 
 Enforce the unique event key and invariant 2 as SQL constraints; enforce the
 write-once `retiredAt` transition in the single writer.
@@ -161,9 +172,25 @@ Enforce these at the type or SQL-constraint level:
 6. Every `MemberId` in an assignment references an Active Member at write
    time. (Retirement then edits definitions, not the other way around — see
    Section 4.4.)
+7. `stars` is a nonnegative integer.
 
 There is **no** invariant that a submitted `window` must match the current
 window. See Section 5.3.
+
+### 2.6 Star Balances (derived, not stored)
+
+A member's **earned stars** = the sum of `stars` (from each event's Task
+Definition, retired or not) over all of that member's `completed` events —
+including events against closed windows and retired ids. The work counts,
+consistent with §5.3. Their **Star Balance** = earned stars + the sum of their
+`star_adjustments` deltas.
+
+No balance is ever stored. Both types earn identically; a Routine may carry
+stars just like a Chore (D14 stands: the types differ in label only).
+
+Known ceiling, accepted: a completion recorded against both the old and the
+new id of one lineage in the same window earns twice. This is the same
+stale-write semantics as D5 and costs a family nothing.
 
 ---
 
@@ -193,6 +220,7 @@ original chore spec; D10–D18 were settled in the 2026-08-25 design session.
 | D16 | Open, unclaimed Tasks render in a Household column appended to the member grid. | Duplicating into every column with the multi-member stripe; an "up for grabs" strip | Mirrors the Household Event concept and keeps each Task in exactly one place, so done/total counts stay honest. |
 | D17 | Retiring a Household Member auto-performs the standard retire-and-replace edit on affected definitions: rotations drop the member (pre-rotated per §4.3), fixed Tasks are retired and surfaced for recreation. | Blocking retirement on manual edits; projection silently skipping retired members | Reuses the one edit flow that exists and keeps the projection pure and ignorant of member state. |
 | D18 | FamilyOS-owned store in `node:sqlite`. | Google Tasks as the store; JSON files like Household Configuration | Rotation, windows, and append-only events do not map onto tasklist rows. The invariants want real unique constraints and transactions; `node:sqlite` provides them with zero new dependencies. See ADR 0006. |
+| D19 | Stars are baked into the domain now: a star value on each Task Definition, captured in the editor; balances derived from completions plus an append-only `star_adjustments` log with no v1 writers. | A materialized balance column; a star-entry row per completion | A stored balance drifts from facts, and per-completion entries duplicate what `completed` events already derive (D1). Only non-derivable facts — redemptions, corrections — get rows. Rewards later reads the same store instead of forcing a schema migration. |
 
 ---
 
@@ -320,9 +348,10 @@ Components: `MemberColumn` (without `points` and without `TimeOfDayTabs`),
 - **Skip.** A row action offering preset reasons — Away, Sick, Not needed —
   plus optional free text. Nothing is required; a skip may carry no reason.
 - **Create/edit.** FAB opens the Task editor: title, type (Chore/Routine),
-  recurrence, assignment, optional time. Editing an existing Task runs the
-  Section 4.3 flow. Type has no visual effect in v1 (D14).
-- **No points pill, no tabs, no expired rows.**
+  recurrence, assignment, optional time, and star value (default 0). Editing
+  an existing Task runs the Section 4.3 flow. Type has no visual effect in v1
+  (D14), and the star value is captured but rendered nowhere (D19).
+- **No points pill, no tabs, no expired rows, no star display.**
 
 ---
 
@@ -369,3 +398,13 @@ Write tests for each scenario. All references are to sections above.
     a server timestamp. (§4.2)
 16. Completing an unclaimed open Task requires a member pick; completing a
     claimed one attributes to the claimant. (D15, D16)
+
+### Stars
+
+17. A member's earned stars sum the definitions' star values over their
+    completions, including completions against retired ids and closed
+    windows. (§2.6)
+18. A `star_adjustments` delta changes the member's Star Balance:
+    balance = earned + adjustments. (§2.6)
+19. The editor persists a nonnegative star value; omitting it stores 0.
+    (§2.5 inv. 7, §6)
