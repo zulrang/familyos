@@ -16,6 +16,7 @@ import { redirectIfPairingRequired } from "@/shared/display-client";
 import { isIanaTimeZone } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { parseUiScale, UI_SCALES, type UiScale } from "@/shared/ui-scale";
+import { PairingCodeDialog } from "./PairingCodeDialog";
 
 const HOUSEHOLD_TIME_ZONES = (() => {
   const zones = Intl.supportedValuesOf("timeZone");
@@ -261,11 +262,6 @@ export function SettingsScreen() {
       }),
     );
 
-  const pairingMinutesLeft =
-    pairingExpiresAt == null
-      ? null
-      : Math.max(0, Math.ceil((pairingExpiresAt - Date.now()) / 60_000));
-
   return (
     <div
       style={{
@@ -378,30 +374,18 @@ export function SettingsScreen() {
           <Button icon="plus" onClick={() => void mintPairingCode()}>
             Generate pairing code
           </Button>
-          {pairingCode ? (
-            <div
-              style={{
-                font: "var(--fw-semibold) 22px/1 var(--font-sans)",
-                letterSpacing: "0.18em",
-                color: "var(--text-title)",
-              }}
-            >
-              {pairingCode}
-              {pairingMinutesLeft != null ? (
-                <span
-                  style={{
-                    marginLeft: 10,
-                    letterSpacing: "normal",
-                    font: "var(--type-card-meta)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  expires in ~{pairingMinutesLeft} min
-                </span>
-              ) : null}
-            </div>
-          ) : null}
         </div>
+        {pairingCode && pairingExpiresAt != null ? (
+          <PairingCodeDialog
+            code={pairingCode}
+            expiresAt={pairingExpiresAt}
+            origin={window.location.origin}
+            onClose={() => {
+              setPairingCode(null);
+              setPairingExpiresAt(null);
+            }}
+          />
+        ) : null}
 
         <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
           Google Calendar

@@ -78,6 +78,12 @@ function installFetch(
       if (method === "GET" && url.endsWith("/api/displays")) {
         return json({ displays: [], currentDisplayId: "d1" });
       }
+      if (method === "POST" && url.endsWith("/api/displays/pairing-code")) {
+        return json({
+          code: "ABC234",
+          expiresAt: Date.now() + 10 * 60 * 1000,
+        });
+      }
       if (method === "PATCH" && url.endsWith("/api/settings")) {
         const body = JSON.parse(String(init?.body ?? "{}"));
         if (options?.patch) return options.patch(body);
@@ -178,5 +184,32 @@ describe("Settings Member Color and retirement", () => {
         "Settings changed on another Display. Reloaded the current values — review and save again.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe("Settings pairing code", () => {
+  test("a generated code appears as a QR and typed secret in a dialog, not inline", async () => {
+    const user = userEvent.setup();
+    await renderSettings();
+
+    expect(screen.queryByRole("dialog", { name: "Pair Display" })).toBeNull();
+    expect(screen.queryByText("ABC234")).toBeNull();
+
+    await user.click(
+      screen.getByRole("button", { name: "Generate pairing code" }),
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "Pair Display" });
+    expect(dialog).toHaveTextContent("ABC234");
+    expect(
+      screen.getByRole("img", { name: "Pairing QR code" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/scan|QR/i, { selector: "p, span, div" }),
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair Display" })).toBeNull();
+    expect(screen.queryByText("ABC234")).toBeNull();
   });
 });

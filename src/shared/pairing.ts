@@ -1,8 +1,11 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
 import path from "node:path";
+import { renderUnicodeCompact } from "uqr";
 import { parseUiScale, type UiScale } from "@/shared/ui-scale";
 import { dataDir } from "./data-path";
+import { formatStartupPairingAnnouncement, pairingUrl } from "./pairing-qr";
 
 export const DISPLAY_COOKIE = "fos_display";
 export const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;
@@ -188,10 +191,30 @@ async function mintPendingCode(
     consumedAt: null,
   };
   await writeStore(store);
+  const origin = guessedPairingOrigin();
   console.log(
-    `FamilyOS pairing code: ${code} (expires in ${PAIRING_CODE_TTL_MS / 60000} minutes)`,
+    formatStartupPairingAnnouncement(
+      code,
+      origin,
+      PAIRING_CODE_TTL_MS / 60_000,
+    ),
+  );
+  console.log(
+    renderUnicodeCompact(pairingUrl(origin, code), { ecc: "M", border: 1 }),
   );
   return code;
+}
+
+function guessedPairingOrigin(): string {
+  const port = process.env.PORT ?? "3000";
+  for (const nets of Object.values(networkInterfaces())) {
+    for (const n of nets ?? []) {
+      if (n.family === "IPv4" && !n.internal) {
+        return `http://${n.address}:${port}`;
+      }
+    }
+  }
+  return `http://localhost:${port}`;
 }
 
 export type PairResult =
