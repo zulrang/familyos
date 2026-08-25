@@ -29,6 +29,8 @@ const settings: PublicSettings = {
   signedIn: true,
   googleConfigured: true,
   uiScale: 1,
+  idleDimAfterMs: 300_000,
+  idleDimTo: 10,
   configVersion: 1,
 };
 

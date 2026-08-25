@@ -5,8 +5,9 @@ wall-mounted touch Displays. The reference Display is a Raspberry Pi 5 running
 FullPageOS; see `docs/kiosk.md`.
 
 One Server Installation represents one Household. It holds shared household
-configuration and serves every Display on the local network. Each Display may
-have its own UI scale; all other v1 configuration and data is shared.
+configuration and serves every Display on the local network. Each Display has
+its own Display Configuration (Display size and Idle Dim); all other v1
+configuration and data is shared.
 
 ## Access
 

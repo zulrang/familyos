@@ -13,10 +13,27 @@ import {
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
+import {
+  applyIdleDim,
+  IDLE_DIM_AFTER_MS,
+  IDLE_DIM_TO,
+  type IdleDimAfterMs,
+  type IdleDimTo,
+  parseIdleDimAfterMs,
+  parseIdleDimTo,
+} from "@/shared/idle-dim";
 import { isIanaTimeZone } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { parseUiScale, UI_SCALES, type UiScale } from "@/shared/ui-scale";
 import { PairingCodeDialog } from "./PairingCodeDialog";
+
+const IDLE_DIM_AFTER_LABEL: Record<IdleDimAfterMs, string> = {
+  30000: "30 seconds",
+  60000: "1 minute",
+  120000: "2 minutes",
+  300000: "5 minutes",
+  600000: "10 minutes",
+};
 
 const HOUSEHOLD_TIME_ZONES = (() => {
   const zones = Intl.supportedValuesOf("timeZone");
@@ -73,6 +90,8 @@ export function SettingsScreen() {
   const [listIds, setListIds] = useState<string[]>([]);
   const [timeZone, setTimeZone] = useState("");
   const [uiScale, setUiScale] = useState<UiScale>(1);
+  const [idleDimAfterMs, setIdleDimAfterMs] = useState<IdleDimAfterMs>(300_000);
+  const [idleDimTo, setIdleDimTo] = useState<IdleDimTo>(10);
   const [displays, setDisplays] = useState<DisplayRecord[]>([]);
   const [currentDisplayId, setCurrentDisplayId] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
@@ -100,6 +119,8 @@ export function SettingsScreen() {
     setListIds(s.listIds ?? []);
     setTimeZone(s.timeZone);
     setUiScale(parseUiScale(s.uiScale));
+    setIdleDimAfterMs(parseIdleDimAfterMs(s.idleDimAfterMs));
+    setIdleDimTo(parseIdleDimTo(s.idleDimTo));
   }
 
   async function load() {
@@ -144,6 +165,10 @@ export function SettingsScreen() {
       timeZone !== settings.timeZone ||
       JSON.stringify(members) !== JSON.stringify(settings.members);
     const scaleDirty = !settings || uiScale !== settings.uiScale;
+    const idleDimDirty =
+      !settings ||
+      idleDimAfterMs !== settings.idleDimAfterMs ||
+      idleDimTo !== settings.idleDimTo;
 
     if (householdDirty) {
       const householdRes = await fetch("/api/settings", {
@@ -185,20 +210,28 @@ export function SettingsScreen() {
       await applyPublicSettings(savedHousehold);
     }
 
-    if (scaleDirty) {
-      // Scale is Display-local — never bundle it into Household Configuration writes.
-      const scaleRes = await fetch("/api/settings", {
+    if (scaleDirty || idleDimDirty) {
+      // Display Configuration — never bundle it into Household Configuration writes.
+      const displayRes = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uiScale }),
+        body: JSON.stringify({
+          ...(scaleDirty ? { uiScale } : {}),
+          ...(idleDimDirty ? { idleDimAfterMs, idleDimTo } : {}),
+        }),
       });
-      if (!scaleRes.ok) {
-        setError("Could not save display size.");
+      if (!displayRes.ok) {
+        setError("Could not save Display Configuration.");
         return;
       }
-      const savedScale = (await scaleRes.json()) as PublicSettings;
-      setSettings(savedScale);
-      setUiScale(parseUiScale(savedScale.uiScale));
+      const savedDisplay = (await displayRes.json()) as PublicSettings;
+      setSettings(savedDisplay);
+      setUiScale(parseUiScale(savedDisplay.uiScale));
+      setIdleDimAfterMs(parseIdleDimAfterMs(savedDisplay.idleDimAfterMs));
+      setIdleDimTo(parseIdleDimTo(savedDisplay.idleDimTo));
+      if (idleDimDirty) {
+        void applyIdleDim({ idleDimAfterMs, idleDimTo });
+      }
     }
 
     setSaved(true);
@@ -308,6 +341,54 @@ export function SettingsScreen() {
             {UI_SCALES.map((s) => (
               <option key={s} value={s}>
                 {Math.round(s * 100)}%
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: "block", marginBottom: 24 }}>
+          <div
+            style={{
+              font: "var(--type-card-meta)",
+              color: "var(--text-muted)",
+              marginBottom: 6,
+            }}
+          >
+            Dim after
+          </div>
+          <select
+            className="fos-input"
+            value={idleDimAfterMs}
+            onChange={(e) =>
+              setIdleDimAfterMs(parseIdleDimAfterMs(Number(e.target.value)))
+            }
+          >
+            {IDLE_DIM_AFTER_MS.map((ms) => (
+              <option key={ms} value={ms}>
+                {IDLE_DIM_AFTER_LABEL[ms]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ display: "block", marginBottom: 24 }}>
+          <div
+            style={{
+              font: "var(--type-card-meta)",
+              color: "var(--text-muted)",
+              marginBottom: 6,
+            }}
+          >
+            Dim to
+          </div>
+          <select
+            className="fos-input"
+            value={idleDimTo}
+            onChange={(e) =>
+              setIdleDimTo(parseIdleDimTo(Number(e.target.value)))
+            }
+          >
+            {IDLE_DIM_TO.map((pct) => (
+              <option key={pct} value={pct}>
+                {pct}%
               </option>
             ))}
           </select>

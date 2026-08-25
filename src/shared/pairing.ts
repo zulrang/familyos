@@ -3,6 +3,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { renderUnicodeCompact } from "uqr";
+import {
+  IDLE_DIM_DEFAULT_AFTER_MS,
+  IDLE_DIM_DEFAULT_TO,
+  type IdleDimAfterMs,
+  type IdleDimTo,
+  parseIdleDimAfterMs,
+  parseIdleDimTo,
+} from "@/shared/idle-dim";
 import { parseUiScale, type UiScale } from "@/shared/ui-scale";
 import { dataDir } from "./data-path";
 import { formatStartupPairingAnnouncement, pairingUrl } from "./pairing-qr";
@@ -15,6 +23,8 @@ export type TrustedDisplay = {
   createdAt: number;
   revokedAt: number | null;
   uiScale: UiScale;
+  idleDimAfterMs: IdleDimAfterMs;
+  idleDimTo: IdleDimTo;
 };
 
 /** Public list row — scale is per-session, not shared roster data. */
@@ -30,6 +40,8 @@ type StoredDisplay = {
   revokedAt: number | null;
   credentialHash: string;
   uiScale: UiScale;
+  idleDimAfterMs: IdleDimAfterMs;
+  idleDimTo: IdleDimTo;
 };
 
 type PendingCode = {
@@ -57,6 +69,8 @@ function normalizeDisplay(
     credentialHash:
       typeof row.credentialHash === "string" ? row.credentialHash : "",
     uiScale: parseUiScale(row.uiScale),
+    idleDimAfterMs: parseIdleDimAfterMs(row.idleDimAfterMs),
+    idleDimTo: parseIdleDimTo(row.idleDimTo),
   };
 }
 
@@ -138,6 +152,8 @@ export async function resolveTrustedDisplay(
     createdAt: row.createdAt,
     revokedAt: row.revokedAt,
     uiScale: row.uiScale,
+    idleDimAfterMs: row.idleDimAfterMs,
+    idleDimTo: row.idleDimTo,
   };
 }
 
@@ -157,6 +173,20 @@ export async function setDisplayUiScale(
   const row = store.displays.find((d) => d.id === displayId);
   if (!row || row.revokedAt != null) return false;
   row.uiScale = uiScale;
+  await writeStore(store);
+  return true;
+}
+
+export async function setDisplayIdleDim(
+  displayId: string,
+  idleDimAfterMs: IdleDimAfterMs,
+  idleDimTo: IdleDimTo,
+): Promise<boolean> {
+  const store = await readStore();
+  const row = store.displays.find((d) => d.id === displayId);
+  if (!row || row.revokedAt != null) return false;
+  row.idleDimAfterMs = idleDimAfterMs;
+  row.idleDimTo = idleDimTo;
   await writeStore(store);
   return true;
 }
@@ -248,6 +278,8 @@ export async function pairWithCode(
     createdAt: now,
     revokedAt: null,
     uiScale: 1,
+    idleDimAfterMs: IDLE_DIM_DEFAULT_AFTER_MS,
+    idleDimTo: IDLE_DIM_DEFAULT_TO,
   };
   pending.consumedAt = now;
   store.pendingCode = pending;
@@ -262,6 +294,8 @@ export async function pairWithCode(
       createdAt: display.createdAt,
       revokedAt: null,
       uiScale: display.uiScale,
+      idleDimAfterMs: display.idleDimAfterMs,
+      idleDimTo: display.idleDimTo,
     },
   };
 }
