@@ -139,6 +139,35 @@ describe("Idle Dim loopback apply", () => {
     assert.match(log, /setvcp 10 20/);
   });
 
+  test("SIGTERM stops idle-dim so a second instance can listen", async () => {
+    await startIdleDim();
+    assert.ok(child);
+    child.kill("SIGTERM");
+    const goneBy = Date.now() + 3000;
+    while (Date.now() < goneBy) {
+      try {
+        const res = await fetch(IDLE_DIM_APPLY_URL, {
+          method: "OPTIONS",
+          signal: AbortSignal.timeout(200),
+        });
+        if (res.status) await new Promise((r) => setTimeout(r, 50));
+      } catch (err) {
+        if (err instanceof Error && err.name === "TimeoutError") {
+          await new Promise((r) => setTimeout(r, 50));
+          continue;
+        }
+        child = undefined;
+        await startIdleDim();
+        assert.equal(
+          (await apply({ idleDimAfterMs: 60_000, idleDimTo: 10 })).status,
+          204,
+        );
+        return;
+      }
+    }
+    assert.fail("idle-dim still listening after SIGTERM");
+  });
+
   test("the listener is not reachable on the LAN", async () => {
     await startIdleDim();
     const locals = Object.values(networkInterfaces()).flatMap((nets) =>

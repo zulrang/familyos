@@ -66,26 +66,37 @@ fi
 
 trap '' HUP
 mkdir -p "$RUNTIME"
-LOCKDIR="$RUNTIME/familyos-idle-dim.lock.d"
-if ! mkdir "$LOCKDIR" 2>/dev/null; then
-  exit 0
+LOCK="$RUNTIME/familyos-idle-dim.lock"
+exec 9>"$LOCK"
+# util-linux flock is on FullPageOS; mac CI has none. The open fd still
+# lets fuser -k find this process (and SIGKILL still drops the lock).
+if command -v flock >/dev/null 2>&1; then
+  flock -n 9 || exit 0
 fi
 
 LISTEN_PID=
 cleanup() {
   [ -n "$LISTEN_PID" ] && kill "$LISTEN_PID" 2>/dev/null || true
-  rmdir "$LOCKDIR" 2>/dev/null || true
 }
-trap cleanup EXIT TERM INT
+trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
-python3 - "$CFG" "$STATE" "$BUSES" "$LISTEN_PORT" <<'PY' &
+python3 - "$CFG" "$STATE" "$BUSES" "$LISTEN_PORT" "$LOCK" <<'PY' &
 import json
 import os
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-CFG, STATE, BUSES, PORT = sys.argv[1], sys.argv[2], sys.argv[3].split(), int(sys.argv[4])
+CFG, STATE, BUSES, PORT, LOCK = (
+    sys.argv[1],
+    sys.argv[2],
+    sys.argv[3].split(),
+    int(sys.argv[4]),
+    sys.argv[5],
+)
+_lock = open(LOCK, "a")  # so fuser -k on the lock also stops the listener
 AFTER = {30000, 60000, 120000, 300000, 600000}
 TO = {1, 10, 20, 30, 40, 50, 60, 70, 80}
 
