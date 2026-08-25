@@ -1,21 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { pairingCodeFromSearch } from "@/shared/pairing-qr";
 import { Button } from "@/shared/ui/Button";
+
+const QR_PAIR_ATTEMPT_KEY = "fos_qr_pair";
 
 export function PairingScreen() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function pair() {
+  async function pairWith(nextCode: string) {
     setError(null);
     setBusy(true);
     try {
       const res = await fetch("/api/pair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: nextCode }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
@@ -38,6 +41,20 @@ export function PairingScreen() {
       setBusy(false);
     }
   }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: auto-pair once from the scanned URL
+  useEffect(() => {
+    const scanned = pairingCodeFromSearch(window.location.search);
+    if (!scanned) return;
+    setCode(scanned);
+    try {
+      if (sessionStorage.getItem(QR_PAIR_ATTEMPT_KEY) === scanned) return;
+      sessionStorage.setItem(QR_PAIR_ATTEMPT_KEY, scanned);
+    } catch {
+      /* ponytail: private-mode sessionStorage; a StrictMode double POST is the ceiling */
+    }
+    void pairWith(scanned);
+  }, []);
 
   return (
     <main
@@ -79,7 +96,7 @@ export function PairingScreen() {
             }}
           >
             Enter the short-lived code from the Server Installation or another
-            Trusted Display.
+            Trusted Display, or scan its QR code.
           </p>
         </div>
         <label
@@ -97,7 +114,7 @@ export function PairingScreen() {
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !busy && code.trim().length >= 4) {
-                void pair();
+                void pairWith(code);
               }
             }}
             autoComplete="one-time-code"
@@ -135,7 +152,7 @@ export function PairingScreen() {
           variant="primary"
           disabled={busy || code.trim().length < 4}
           onClick={() => {
-            void pair();
+            void pairWith(code);
           }}
         >
           Pair

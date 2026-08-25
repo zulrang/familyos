@@ -195,4 +195,39 @@ describe("Display pairing HTTP", () => {
     assert.equal(res.status, 403);
     assert.equal(((await res.json()) as { error: string }).error, "invalid");
   });
+
+  test("a scanned pairing URL maps to the same secret and one-shot rules", async () => {
+    const { pairingCodeFromSearch, pairingUrl } = await import(
+      "@/shared/pairing-qr"
+    );
+    await patchPendingCode({
+      code: "K7MNPQ",
+      expiresAt: Date.now() + 60_000,
+      consumedAt: null,
+    });
+    const scanned = pairingUrl("http://familyos.test", "K7MNPQ");
+    const code = pairingCodeFromSearch(new URL(scanned).search);
+    assert.equal(code, "K7MNPQ");
+    assert.equal(scanned.includes("credential"), false);
+    assert.equal(scanned.includes("token"), false);
+
+    const res = await handlePair(
+      new Request("http://familyos.test/api/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+    );
+    assert.equal(res.status, 200);
+
+    const reuse = await handlePair(
+      new Request("http://familyos.test/api/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+    );
+    assert.equal(reuse.status, 403);
+    assert.equal(((await reuse.json()) as { error: string }).error, "reused");
+  });
 });
