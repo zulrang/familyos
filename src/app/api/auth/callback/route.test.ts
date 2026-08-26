@@ -51,7 +51,7 @@ describe("Google OAuth callback HTTP", () => {
 
   test("exchanges the code without a Display cookie when state matches", async () => {
     await seedPendingState();
-    let tokenBody: string | null = null;
+    let tokenBody = "";
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       if (url === TOKEN_URL) {
@@ -81,7 +81,7 @@ describe("Google OAuth callback HTTP", () => {
 
     assert.notEqual(res.status, 401);
     assert.equal(res.headers.get("location"), "http://familyos.test/settings");
-    assert.ok(tokenBody?.includes("code=auth-code"));
+    assert.ok(tokenBody.includes("code=auth-code"));
     const provider = await readProvider();
     assert.equal(provider.tokens?.access_token, "new-access");
     assert.equal(provider.providerConnectionId, "acct-google");
@@ -92,7 +92,7 @@ describe("Google OAuth callback HTTP", () => {
     process.env.GOOGLE_REDIRECT_URI =
       "http://localhost:3000/api/auth/callback/google";
     await seedPendingState();
-    let tokenBody: string | null = null;
+    let tokenBody = "";
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       if (url === TOKEN_URL) {
@@ -126,7 +126,7 @@ describe("Google OAuth callback HTTP", () => {
       res.headers.get("location"),
       "http://192.168.1.20:3000/settings",
     );
-    assert.ok(tokenBody?.includes("192.168.1.20%3A3000"));
-    assert.equal(tokenBody?.includes("localhost"), false);
+    assert.ok(tokenBody.includes("192.168.1.20%3A3000"));
+    assert.equal(tokenBody.includes("localhost"), false);
   });
 });
