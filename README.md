@@ -21,8 +21,8 @@ less-cramped Five-Day View defined in `docs/requirements.md`.
 
 ```bash
 pnpm install
-# create .env.local with GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
-# Calendar API on; redirect URI http://localhost:3000/api/auth/callback/google
+git config core.hooksPath .githooks
+cp .env.example .env.local   # add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
 pnpm dev
 # enter the pairing code printed in the server log
 ```

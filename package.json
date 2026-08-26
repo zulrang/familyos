@@ -10,7 +10,8 @@
     "format": "biome format --write",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:contract": "vitest run --config vitest.contract.config.mts"
+    "test:contract": "vitest run --config vitest.contract.config.mts",
+    "scan-secrets": "bash scripts/scan-secrets.sh"
   },
   "dependencies": {
     "next": "16.3.1",

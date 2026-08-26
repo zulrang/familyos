@@ -29,7 +29,10 @@ From a clone of this repo:
 ```bash
 cd familyos
 pnpm install
+git config core.hooksPath .githooks
 ```
+
+The hooks path enables a pre-push secret scan (`scripts/scan-secrets.sh`). Run `pnpm scan-secrets` anytime to check commits ahead of `origin/main`.
 
 ## 2. Google OAuth
 
@@ -45,13 +48,13 @@ Household Member identity.
 
    `http://localhost:3000/api/auth/callback/google`
 
-Create `.env.local` in the repo root (gitignored):
+Copy the tracked template and fill in your OAuth client values:
 
+```bash
+cp .env.example .env.local
 ```
-GOOGLE_CLIENT_ID=....apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback/google
-```
+
+`.env.local` is gitignored. `.env.example` stays in the repo with empty placeholders.
 
 Login requests `calendar.events`, `calendar.calendarlist.readonly`, and `tasks`. Tokens are stored on the machine running Next, in `data/kiosk.json` (also gitignored) — not in the browser. Easiest path: sign in once from that machine. The wall display then uses the same server-side tokens. If you signed in before Tasks was added, sign out and back in so Google can grant the new scope.
 
