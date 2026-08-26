@@ -371,4 +371,42 @@ describe("TasksScreen", () => {
       total: 1,
     });
   });
+
+  test("an explicit completer replaces a concurrent claimant in optimistic progress", () => {
+    const store = emptyView();
+    const staleOccurrence: Occurrence = {
+      state: "pending",
+      task: "open-race" as Occurrence["task"],
+      window: store.today,
+      title: "Feed cat",
+      type: "chore",
+      lineage: "lin-open-race" as Occurrence["lineage"],
+      time: null,
+      assignee: null,
+    };
+    store.occurrences = [
+      {
+        ...staleOccurrence,
+        state: "claimed",
+        assignee: "dad",
+        by: "dad",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+
+    const completed = markDone(store, staleOccurrence, "ellie");
+
+    expect(completed.occurrences[0]).toMatchObject({
+      state: "done",
+      assignee: "ellie",
+      by: "ellie",
+    });
+    expect(completed.progress).toEqual([
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 1, total: 1 },
+    ]);
+  });
 });

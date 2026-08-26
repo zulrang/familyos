@@ -87,9 +87,9 @@ export function markDone(
   if (!current || current.state === "done") {
     return view;
   }
-  const by = current.assignee ?? member;
+  const by = member ?? current.assignee;
   if (!by) return view;
-  const wasUnclaimed = current.assignee === null;
+  const priorAssignee = current.assignee;
   return {
     ...view,
     occurrences: view.occurrences.map((row) =>
@@ -103,15 +103,19 @@ export function markDone(
           }
         : row,
     ),
-    progress: view.progress.map((row) =>
-      row.member === by
-        ? {
-            ...row,
-            done: row.done + 1,
-            total: row.total + (wasUnclaimed ? 1 : 0),
-          }
-        : row,
-    ),
+    progress: view.progress.map((row) => {
+      if (row.member === by) {
+        return {
+          ...row,
+          done: row.done + 1,
+          total: row.total + (priorAssignee === by ? 0 : 1),
+        };
+      }
+      if (priorAssignee !== null && row.member === priorAssignee) {
+        return { ...row, total: row.total - 1 };
+      }
+      return row;
+    }),
   };
 }
 
