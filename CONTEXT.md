@@ -66,9 +66,31 @@ _Avoid_: Enabled user
 
 **Retired Member**:
 A former active member retained so existing events still identify the person.
-A retired member cannot be selected for new events and does not hold a Member
-Color — retirement frees that color for reuse.
+They cannot be selected for new events, hold no Member Color, and keep a Star
+Balance that Grants and Spends may still change.
 _Avoid_: Deleted member
+
+**Star Balance**:
+A Household Member's stored nonnegative star total. Completing an Occurrence
+adds the Task's star value at that moment; later Grants and Spends may change
+it, and it is not derived from completions.
+_Avoid_: score, wallet, points total
+
+**Grant**:
+An increase to a Star Balance that is not from completing a Task. A Grant of
+0 is rejected.
+_Avoid_: set, bonus, correction
+
+**Spend**:
+A decrease to a Star Balance. A Spend of 0, or one that would put the balance
+below 0, is rejected.
+_Avoid_: redemption, set
+
+**Star Adjustment**:
+An append-only record of a Grant or Spend, with an optional reason.
+Completions are not recorded here, and Star Adjustments are not folded to
+produce Star Balance.
+_Avoid_: ledger, transaction
 
 **Event Participant**:
 A Household Member explicitly associated with an event by the member's stable
@@ -171,11 +193,14 @@ advances a Rotation.
 _Avoid_: dismiss, delete
 
 **Star**:
-The unit of reward on a Task Definition. Completions earn the star value of
-the definition they belong to. Chores and Routines earn identically.
+The unit of reward on a Task Definition. Completing an Occurrence adds that
+definition's star value to the completing member's Star Balance and counts
+toward Stars Earned. Chores and Routines earn identically.
 _Avoid_: point, credit
 
-**Star Balance**:
-A member's earned Stars adjusted by any recorded redemptions or corrections.
-It is always derived, never stored.
-_Avoid_: score, wallet, points total
+**Stars Earned**:
+The sum of Task star values over completions that happened in a given
+Household Time Zone range, for the Household or for one member. Skips,
+claims, Grants, and Spends are not included; retired members and closed Task
+Windows are.
+_Avoid_: Star Balance, Window (for the range)

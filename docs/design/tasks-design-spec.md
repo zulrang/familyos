@@ -1,12 +1,14 @@
 # Tasks — Technical Design Specification
 
 **Status:** Approved for implementation
-**Date:** 2026-08-26 (D5/D6 amended, D20 added; supersedes `chores-design-spec.md`, 2026-08-23)
+**Date:** 2026-08-26 (D5/D6 amended, D19 revised ADR 0007, D20 added;
+supersedes `chores-design-spec.md`, 2026-08-23)
 **Audience:** Implementing developer
 
-Domain terms (Task, Chore, Routine, Occurrence, Window, Rotation, Claim, Skip)
-are defined in `CONTEXT.md`. The storage-ownership decision is recorded in
-`docs/adr/0006-familyos-owned-task-store.md`.
+Domain terms (Task, Chore, Routine, Occurrence, Window, Rotation, Claim, Skip,
+Star, Star Balance, Stars Earned, Grant, Spend, Star Adjustment) are defined
+in `CONTEXT.md`. The storage-ownership decision is recorded in
+`docs/adr/0006-familyos-owned-task-store.md`. Star Balance storage is ADR 0007.
 
 ---
 
@@ -33,9 +35,10 @@ Considered and rejected or deferred. See the Decision Log (Section 3).
 
 - **Verification.** The `verified` event kind and its invariant stay in the
   schema so it is additive later, but no workflow or UI ships (D10).
-- **Rewards UI.** Star values, balances, and the adjustments log are baked
-  into the domain (D19), but nothing star-shaped renders in v1: no points
-  pill, no redemption. The kit's `points` prop stays unused (D11).
+- **Rewards UI.** Star values, stored Star Balances, and Star Adjustments are
+  baked into the domain (D19, ADR 0007), but nothing star-shaped renders in
+  v1: no points pill, no Grant/Spend UI. The kit's `points` prop stays unused
+  (D11).
 - **Device offline queue and staleness indicator.** Displays are LAN browsers;
   if the server is down the whole app is down (D12).
 - **Historical views.** The projection looks back one Window at most, and the
@@ -86,10 +89,15 @@ type TaskDefinition = {
   retiredAt: LocalDate | null  // write-once; null = active
 }
 
+type StarBalance = {
+  member: MemberId
+  balance: number              // nonnegative integer; source of truth; missing row = 0
+}
+
 type StarAdjustment = {        // append-only; no v1 writers (Rewards will append)
   id: string
   member: MemberId
-  delta: number                // negative = spend/redemption, positive = correction/bonus
+  delta: number                // nonzero; positive = Grant, negative = Spend
   reason: string | null
   at: Instant
 }
@@ -109,11 +117,14 @@ captured at creation and stored as a future hook (Rewards will count Chores).
 SQLite via the built-in `node:sqlite` module (Node 24; zero new dependencies).
 One database file under `data/`, gitignored like all server-local state.
 
+Tables:
+
 | Table | Key | Mutability |
 |---|---|---|
 | `definitions` | `id` | `id`, `lineage`, `recurrence`, and `assignment` never change. `title`, `type`, `time`, and `stars` may be overwritten. `retiredAt` is set exactly once, from null to a date. |
 | `events` | `(task, window, kind)` unique | Append-only. Never updated or deleted. |
-| `star_adjustments` | `id` | Append-only. Empty in v1; Rewards appends redemptions and corrections. |
+| `star_balances` | `member` | Mutable nonnegative integer. Missing row is 0. |
+| `star_adjustments` | `id` | Append-only. Empty in v1; Rewards appends Grants and Spends. |
 
 Enforce the unique event key and invariant 2 as SQL constraints; enforce the
 write-once `retiredAt` transition and in-place column updates in the single
@@ -172,27 +183,40 @@ Enforce these at the type or SQL-constraint level:
    time. (Retirement then edits definitions, not the other way around — see
    Section 4.4.)
 7. `stars` is a nonnegative integer.
+8. Star Balance is a nonnegative integer. A Grant or Spend of 0 is rejected.
+   A Spend that would put the balance below 0 is rejected.
+9. A `completed` event credits Star Balance only on `inserted`, never on
+   `already-present`.
 
 There is **no** invariant that a submitted `window` must match the current
 window. See Section 5.3.
 
-### 2.6 Star Balances (derived, not stored)
+### 2.6 Star Balance (stored) and Stars Earned (derived)
 
-A member's **earned stars** = the sum of `stars` (from each event's Task
-Definition, retired or not) over all of that member's `completed` events —
-including events against closed windows and retired ids. The work counts,
-consistent with §5.3. Their **Star Balance** = earned stars + the sum of their
-`star_adjustments` deltas.
+**Star Balance** is a nonnegative integer keyed by Household Member. It is the
+source of truth. A successful insert of `completed` adds that Task
+Definition's `stars` (retired or not, closed window or not) to
+`completed.by`. Retries that hit `already-present` add nothing. Both types
+earn identically (D14). Cutover starts every member at 0; existing
+completions are not backfilled.
 
-An in-place star change overwrites that definition, so existing completions
-on that id are revalued. A retire-and-replace freezes the old row's stars;
-completions on the retired id keep the old value.
+An in-place star change does not rewrite stored Star Balance. Later
+completions on that id credit the new value. A retire-and-replace freezes the
+old row; a completion against the retired id credits that row's stars at
+insert time.
 
-No balance is ever stored. Both types earn identically; a Routine may carry
-stars just like a Chore (D14 stands: the types differ in label only).
+**Stars Earned** is the sum of those same definition star values over
+`completed` events whose `at` falls in a given Household Time Zone range, for
+the Household or for one member. Skips, claims, Grants, and Spends are not
+included. It is not a v1 endpoint. An in-place star change revalues this fold
+because it reads the definition as it stands.
+
+**Star Adjustment** records a Grant or Spend only. Completions are not
+copied here. Adjustments are applied to the integer at write time and are
+never folded on read. No v1 writers (D11).
 
 Known ceiling, accepted: a completion recorded against both the old and the
-new id of one lineage in the same window earns twice. This is the same
+new id of one lineage in the same window credits twice. This is the same
 stale-write semantics as D5 and costs a family nothing.
 
 ---
@@ -202,7 +226,8 @@ stale-write semantics as D5 and costs a family nothing.
 These decisions are final. Each rejected alternative caused a concrete
 problem. Do not reintroduce the alternatives. D1–D9 carry over from the
 original chore spec; D10–D18 were settled in the 2026-08-25 design session.
-D5 and D6 were amended, and D20 added, on 2026-08-26.
+D5 and D6 were amended, and D20 added, on 2026-08-26. D19 was revised
+2026-08-26 (ADR 0007).
 
 | # | Decision | Rejected alternative | Reason |
 |---|---|---|---|
@@ -224,7 +249,7 @@ D5 and D6 were amended, and D20 added, on 2026-08-26.
 | D16 | Open, unclaimed Tasks render in a Household column appended to the member grid. | Duplicating into every column with the multi-member stripe; an "up for grabs" strip | Mirrors the Household Event concept and keeps each Task in exactly one place, so done/total counts stay honest. |
 | D17 | Retiring a Household Member auto-performs the standard retire-and-replace edit on affected definitions: rotations drop the member (pre-rotated per §4.3), fixed Tasks are retired and surfaced for recreation. | Blocking retirement on manual edits; projection silently skipping retired members | Reuses the one edit flow that exists and keeps the projection pure and ignorant of member state. |
 | D18 | FamilyOS-owned store in `node:sqlite`. | Google Tasks as the store; JSON files like Household Configuration | Rotation, windows, and append-only events do not map onto tasklist rows. The invariants want real unique constraints and transactions; `node:sqlite` provides them with zero new dependencies. See ADR 0006. |
-| D19 | Stars are baked into the domain now: a star value on each Task Definition, captured in the editor; balances derived from completions plus an append-only `star_adjustments` log with no v1 writers. | A materialized balance column; a star-entry row per completion | A stored balance drifts from facts, and per-completion entries duplicate what `completed` events already derive (D1). Only non-derivable facts — redemptions, corrections — get rows. Rewards later reads the same store instead of forcing a schema migration. |
+| D19 | Star value on each Task Definition, captured in the editor. Star Balance is a stored nonnegative integer on the member, credited once on `completed` insert, starting at 0. Stars Earned is a derived fold over `completed.at` in an input range. Star Adjustments record Grants and Spends only, not folded, no v1 writers. (ADR 0007) | Derive Star Balance from completions plus adjustments; a Star Adjustment row per completion; absolute Set; snapshot the old fold at cutover | A spendable total must be allowed to disagree with the Task log, and historical completions must not rewrite it. Stars Earned already folds completions for a period. The `completed` event is the receipt. Grant and Spend already move the integer both ways. Nothing star-shaped renders yet, so starting at 0 loses nothing visible. |
 | D20 | Concurrent definition saves are last-write-wins. No edit versions, no merge. | A retire-and-replace must read-and-merge the latest title/stars so a concurrent rename cannot be wiped | This is a fridge on the LAN, not a collaborative editor. |
 
 ---
@@ -245,18 +270,23 @@ Write path, in order:
 2. Check invariant 2 (`verified` requires `completed`).
 3. Insert. On unique-key conflict `(task, window, kind)`: treat as success.
    Do not error.
+4. If a `completed` event was `inserted`, add that definition's `stars` to
+   the stored Star Balance for `by`. Do not add on `already-present`.
 
 Response: per-event status. `inserted` and `already-present` are both success.
 
-There are exactly two checks on this path. Do not add more. In particular, do
-not validate that `window` matches the current window, and do not validate
-that the `task` id is active. See D5 and D9.
+There are exactly two checks on this path (steps 1–2). Do not add more. In
+particular, do not validate that `window` matches the current window, and do
+not validate that the `task` id is active. See D5 and D9. Star Balance credit
+is a write side effect, not a check.
 
 ### 4.2 `GET` view
 
 Returns the full projection for today: an `Occurrence[]` with Task title,
-type, lineage, assignee, state, and time, plus per-member done/total counts.
-Include the server timestamp of the projection in the response.
+type, lineage, assignee, state, and time, plus per-member done/total counts
+and stored Star Balances. Include the server timestamp of the projection in
+the response. Do not fold completions or Star Adjustments to produce
+balances.
 
 ### 4.3 Definition editing
 
@@ -332,20 +362,21 @@ is an input.
 These are facts about the design, not edge cases to fix.
 
 1. **Duplicate submission.** A Display retries a batch. The unique key makes
-   the retry a no-op. The server reports success.
+   the retry a no-op, including Star Balance. The server reports success.
 2. **Event against a retired definition.** Someone changed recurrence or
    assignment while another Display had a stale view. The server accepts the
-   event. The projection ignores retired ids, so the event is inert. This is
-   correct: the pre-rotation in the retire-and-replace flow (Section 4.3)
-   already accounted for the turn.
+   event and credits Star Balance. The projection ignores retired ids, so the
+   row is inert. This is correct: the pre-rotation in the retire-and-replace
+   flow (Section 4.3) already accounted for the turn.
 3. **Event against the same id after an in-place save.** Someone renamed the
    Task or changed its stars while another Display still showed the old
    title. The server accepts the event. The projection includes it. Same
-   TaskId, still live.
+   TaskId, still live. Star Balance credits the definition's stars at insert
+   time, not a later in-place value.
 4. **Event against a closed window.** A completion syncs after the window
    rolled over. The server accepts the event. The event advances the rotation
-   count. The projection never displays it. The work counts; the calendar has
-   moved on.
+   count and credits Star Balance. The projection never displays it. The work
+   counts; the calendar has moved on.
 
 ---
 
@@ -425,11 +456,12 @@ Write tests for each scenario. All references are to sections above.
 
 ### Stars
 
-17. A member's earned stars sum the definitions' star values over their
-    completions, including completions against retired ids and closed
-    windows. (§2.6)
-18. A `star_adjustments` delta changes the member's Star Balance:
-    balance = earned + adjustments. (§2.6)
+17. Inserting a `completed` event adds that definition's star value to the
+    completing member's stored Star Balance, including retired ids and closed
+    windows. An `already-present` completion does not add again. A missing
+    row is 0. (§2.6, inv. 9)
+18. `GET` returns stored Star Balances, not a fold of completions or Star
+    Adjustments. (§2.6)
 19. The editor persists a nonnegative star value; omitting it stores 0.
     (§2.5 inv. 7, §6)
 20. Changing only title, type, time, or stars overwrites the current

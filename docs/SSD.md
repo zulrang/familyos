@@ -122,7 +122,7 @@ Other rail destinations are stubs.
 | App shell (`src/app` layout + rail) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
 | Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
 | Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
-| Tasks (`src/tasks/`) | Task Definitions, Task events, star values and derived Star Balances, the pure Occurrence projection, the Tasks screen and Task editor | Google Tasks rows, Rewards redemption UX, verification workflow, member records |
+| Tasks (`src/tasks/`) | Task Definitions, Task events, star values, stored Star Balances (keyed by MemberId), the pure Occurrence projection, the Tasks screen and Task editor | Google Tasks rows, Rewards Grant/Spend UX, verification workflow, member roster |
 | Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, Display Configuration (Display size, Idle Dim) | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
@@ -131,7 +131,8 @@ Household Members are shared server data, not an auth directory. There may be
 at most six Active Members, each representing one person with a unique Member
 Color (`#rrggbb`, FamilyOS-owned). Retiring a member keeps the identity record
 for existing events, removes it from new-event choices, and frees the color for
-reuse. Member email is not a v1 field. See
+reuse. Star Balance stays on that MemberId; Grants and Spends may still change
+it. Member email is not a v1 field. See
 `docs/adr/0003-member-color-is-familyos-owned.md`.
 
 ## 4. Data Flow and Contracts
@@ -214,7 +215,13 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
   may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Rewards, Meals, Recipes, Photos, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant.
-- Task data is FamilyOS-owned and append-only (ADR 0006). Do not store Tasks in Google Tasks, materialize occurrence rows or star balances, add a verification workflow, or render stars anywhere — star values are captured in the editor but display nothing until Rewards ships. The spec's decision log (D1–D19) rejects each of these by name.
+- Task data is FamilyOS-owned and append-only (ADR 0006), except Star Balance
+  which is a mutable integer (ADR 0007). Do not store Tasks in Google Tasks,
+  materialize occurrence rows, derive Star Balance from completions, add a
+  verification workflow, add Grant/Spend writers, or render stars anywhere.
+  Star values are captured in the editor; completion credits the stored
+  integer; display nothing until Rewards ships. The spec's decision log
+  (D1–D19) rejects the rest by name.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
 - Tests are Vitest only (`pnpm test` / `pnpm test:contract`). Component tests need `// @vitest-environment jsdom` because the default env is `node`. Don’t add a second runner.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
