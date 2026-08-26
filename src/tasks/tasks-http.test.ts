@@ -399,9 +399,7 @@ describe("Tasks HTTP", () => {
     );
     assert.equal(completedRow?.state, "done");
     if (completedRow?.state === "done") assert.equal(completedRow.by, "dad");
-    const dadCompleted = completed.progress.find(
-      (row) => row.member === "dad",
-    );
+    const dadCompleted = completed.progress.find((row) => row.member === "dad");
     assert.equal(dadCompleted?.done, (dadBefore?.done ?? 0) + 1);
     const balanceBefore =
       before.starBalances.find((row) => row.member === "dad")?.balance ?? 0;

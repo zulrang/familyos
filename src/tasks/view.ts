@@ -67,9 +67,7 @@ function foldOccurrence(
       by: completed.by,
       at: completed.at,
       assignee:
-        definition.assignment.kind === "fixed"
-          ? pendingAssignee
-          : completed.by,
+        definition.assignment.kind === "fixed" ? pendingAssignee : completed.by,
     };
   }
   const skipped = events.get(`${definition.id}:${window}:skipped`);

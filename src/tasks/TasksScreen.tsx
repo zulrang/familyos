@@ -535,10 +535,8 @@ function CreateSheet({
   const stars = Number(draft.stars);
   const assignmentReady =
     draft.assignment.kind === "open" ||
-    (draft.assignment.kind === "fixed" &&
-      draft.assignment.member.length > 0) ||
-    (draft.assignment.kind === "rotation" &&
-      draft.assignment.order.length > 0);
+    (draft.assignment.kind === "fixed" && draft.assignment.member.length > 0) ||
+    (draft.assignment.kind === "rotation" && draft.assignment.order.length > 0);
   const canSave =
     draft.title.trim().length > 0 &&
     assignmentReady &&
