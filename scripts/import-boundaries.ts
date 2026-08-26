@@ -2,15 +2,14 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-// Slice import boundary config — docs/code-design-principles.md #3.
-// Feature slices: calendar, lists, displays. Platform/household: members, settings.
-const FEATURE_SLICES = new Set(["calendar", "lists", "displays"]);
+const FEATURE_SLICES = new Set(["calendar", "lists", "displays", "tasks"]);
 const SLICES = new Set([
   "calendar",
   "lists",
   "displays",
   "members",
   "settings",
+  "tasks",
 ]);
 const SETTINGS_HTTP = "src/settings/settings-http.ts";
 const LIST_CALENDARS = "src/calendar/google-events";
@@ -21,7 +20,7 @@ function posix(p: string): string {
 
 function srcDirOf(repoPath: string): string | null {
   const m = stripExt(repoPath).match(
-    /^src\/(calendar|lists|displays|members|settings|shared)(?:\/|$)/,
+    /^src\/(calendar|lists|displays|members|settings|shared|tasks)(?:\/|$)/,
   );
   return m ? m[1] : null;
 }
