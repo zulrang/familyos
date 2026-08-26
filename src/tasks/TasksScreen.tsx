@@ -48,6 +48,7 @@ function emptyView(): TasksViewRead {
   return {
     occurrences: [],
     progress: [],
+    starBalances: [],
     today: "1970-01-01" as TasksViewRead["today"],
     generatedAt: nowInstant(),
   };
@@ -71,6 +72,7 @@ type Draft = {
   recurrence: DraftRecurrence;
   member: string;
   time: string;
+  stars: string;
 };
 
 const RECURRENCE_CHOICES = [
@@ -86,6 +88,7 @@ const EMPTY_DRAFT: Draft = {
   recurrence: { kind: "daily" },
   member: "",
   time: "",
+  stars: "0",
 };
 
 const WEEKDAY_OPTIONS: { value: Weekday; label: string }[] = [
@@ -223,7 +226,16 @@ export function TasksScreen() {
     if (!sheet) return;
     const title = sheet.title.trim();
     const recurrence = parseDraftRecurrence(sheet.recurrence);
-    if (!title || !sheet.member || !recurrence) return;
+    const stars = Number(sheet.stars);
+    if (
+      !title ||
+      !sheet.member ||
+      !recurrence ||
+      !Number.isSafeInteger(stars) ||
+      stars < 0
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/tasks", {
@@ -235,6 +247,7 @@ export function TasksScreen() {
           recurrence,
           member: sheet.member,
           ...(sheet.time ? { time: sheet.time } : {}),
+          stars,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -382,10 +395,13 @@ function CreateSheet({
   onSave: () => void;
 }) {
   const closeFromBackdrop = useRef(false);
+  const stars = Number(draft.stars);
   const canSave =
     draft.title.trim().length > 0 &&
     draft.member.length > 0 &&
-    parseDraftRecurrence(draft.recurrence) !== null;
+    parseDraftRecurrence(draft.recurrence) !== null &&
+    Number.isSafeInteger(stars) &&
+    stars >= 0;
   const weeklyDays =
     draft.recurrence.kind === "weekly" ? draft.recurrence.days : null;
   return (
@@ -556,6 +572,16 @@ function CreateSheet({
           aria-label="Time"
           value={draft.time}
           onChange={(e) => onChange({ ...draft, time: e.target.value })}
+        />
+        <input
+          className="fos-input"
+          type="number"
+          min="0"
+          max={Number.MAX_SAFE_INTEGER}
+          step="1"
+          aria-label="Stars"
+          value={draft.stars}
+          onChange={(e) => onChange({ ...draft, stars: e.target.value })}
         />
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Button

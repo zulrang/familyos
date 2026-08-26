@@ -3,6 +3,8 @@ import {
   type LocalDate,
   type Occurrence,
   type Recurrence,
+  type StarAdjustment,
+  type StarBalance,
   type TaskDefinition,
   type TaskEvent,
   type TaskId,
@@ -183,4 +185,35 @@ export function view(
   }
   out.sort((a, b) => compareOccurrences(a, b, order));
   return out;
+}
+
+export function starBalances(
+  definitions: readonly TaskDefinition[],
+  events: readonly TaskEvent[],
+  adjustments: readonly StarAdjustment[],
+): StarBalance[] {
+  const starsByTask = new Map(
+    definitions.map((definition) => [definition.id, definition.stars]),
+  );
+  const balances = new Map<StarBalance["member"], number>();
+  for (const event of events) {
+    if (event.kind !== "completed") continue;
+    const stars = starsByTask.get(event.task);
+    if (stars === undefined) continue;
+    const balance = (balances.get(event.by) ?? 0) + stars;
+    if (!Number.isSafeInteger(balance)) {
+      throw new RangeError("star balance exceeds safe integer range");
+    }
+    balances.set(event.by, balance);
+  }
+  for (const adjustment of adjustments) {
+    const balance = (balances.get(adjustment.member) ?? 0) + adjustment.delta;
+    if (!Number.isSafeInteger(balance)) {
+      throw new RangeError("star balance exceeds safe integer range");
+    }
+    balances.set(adjustment.member, balance);
+  }
+  return [...balances]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([member, balance]) => ({ member, balance }));
 }

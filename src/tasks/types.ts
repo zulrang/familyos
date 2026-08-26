@@ -97,9 +97,15 @@ export type MemberProgress = {
   total: number;
 };
 
+export type StarBalance = {
+  member: MemberId;
+  balance: number;
+};
+
 export type TasksViewRead = {
   occurrences: Occurrence[];
   progress: MemberProgress[];
+  starBalances: StarBalance[];
   today: LocalDate;
   generatedAt: Instant;
 };
@@ -110,6 +116,7 @@ export type CreateTaskDraft = {
   recurrence: Recurrence;
   member: MemberId;
   time: LocalTime | null;
+  stars: number;
 };
 
 const WEEKDAYS = new Set<string>([
@@ -303,7 +310,14 @@ export function parseEventBatch(raw: unknown): TaskEvent[] | null {
   return events;
 }
 
-const CREATE_KEYS = new Set(["title", "type", "recurrence", "member", "time"]);
+const CREATE_KEYS = new Set([
+  "title",
+  "type",
+  "recurrence",
+  "member",
+  "time",
+  "stars",
+]);
 
 export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   if (!isRecord(raw)) return null;
@@ -316,12 +330,16 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   const recurrence = parseRecurrence(raw.recurrence);
   const member = nonEmptyString(raw.member);
   if (!title || !type || !recurrence || !member) return null;
+  const stars = raw.stars === undefined ? 0 : raw.stars;
+  if (typeof stars !== "number" || !Number.isSafeInteger(stars) || stars < 0) {
+    return null;
+  }
   let time: LocalTime | null = null;
   if (raw.time !== undefined && raw.time !== null && raw.time !== "") {
     time = parseLocalTime(raw.time);
     if (!time) return null;
   }
-  return { title, type, recurrence, member, time };
+  return { title, type, recurrence, member, time, stars };
 }
 
 export function createFixedDefinition(draft: CreateTaskDraft): TaskDefinition {
@@ -333,7 +351,7 @@ export function createFixedDefinition(draft: CreateTaskDraft): TaskDefinition {
     recurrence: draft.recurrence,
     assignment: { kind: "fixed", member: draft.member },
     time: draft.time,
-    stars: 0,
+    stars: draft.stars,
     retiredAt: null,
   };
 }
