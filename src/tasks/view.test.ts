@@ -264,4 +264,33 @@ describe("tasks view", () => {
       ],
     );
   });
+
+  test("star balances reject an unsafe accumulated value", () => {
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: addLocalDays(today, -1),
+        by: dad,
+        at: "2026-08-24T12:00:00Z" as Instant,
+      },
+    ];
+
+    assert.throws(
+      () =>
+        starBalances(
+          [definition({ id: "t1" as TaskId, stars: Number.MAX_SAFE_INTEGER })],
+          events,
+          [],
+        ),
+      new RangeError("star balance exceeds safe integer range"),
+    );
+  });
 });

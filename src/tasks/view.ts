@@ -120,13 +120,18 @@ export function starBalances(
     if (event.kind !== "completed") continue;
     const stars = starsByTask.get(event.task);
     if (stars === undefined) continue;
-    balances.set(event.by, (balances.get(event.by) ?? 0) + stars);
+    const balance = (balances.get(event.by) ?? 0) + stars;
+    if (!Number.isSafeInteger(balance)) {
+      throw new RangeError("star balance exceeds safe integer range");
+    }
+    balances.set(event.by, balance);
   }
   for (const adjustment of adjustments) {
-    balances.set(
-      adjustment.member,
-      (balances.get(adjustment.member) ?? 0) + adjustment.delta,
-    );
+    const balance = (balances.get(adjustment.member) ?? 0) + adjustment.delta;
+    if (!Number.isSafeInteger(balance)) {
+      throw new RangeError("star balance exceeds safe integer range");
+    }
+    balances.set(adjustment.member, balance);
   }
   return [...balances]
     .sort(([left], [right]) => left.localeCompare(right))

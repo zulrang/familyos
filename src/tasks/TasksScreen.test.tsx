@@ -190,6 +190,28 @@ describe("TasksScreen", () => {
     });
   });
 
+  test("the editor cannot submit an unsafe integer star value", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetch(emptyView());
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, String(Number.MAX_SAFE_INTEGER + 1));
+
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.find(
+        ([input, init]) =>
+          urlOf(input) === "/api/tasks" &&
+          (init?.method ?? "GET").toUpperCase() === "POST",
+      ),
+    ).toBeUndefined();
+  });
+
   test("balances and star values do not render in task columns", async () => {
     const store = emptyView();
     store.starBalances = [{ member: "dad", balance: 99 }];

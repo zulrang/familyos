@@ -171,7 +171,7 @@ export function TasksScreen() {
     if (!sheet) return;
     const title = sheet.title.trim();
     const stars = Number(sheet.stars);
-    if (!title || !sheet.member || !Number.isInteger(stars) || stars < 0) {
+    if (!title || !sheet.member || !Number.isSafeInteger(stars) || stars < 0) {
       return;
     }
     setBusy(true);
@@ -336,7 +336,7 @@ function CreateSheet({
   const canSave =
     draft.title.trim().length > 0 &&
     draft.member.length > 0 &&
-    Number.isInteger(stars) &&
+    Number.isSafeInteger(stars) &&
     stars >= 0;
   return (
     <div
@@ -440,6 +440,7 @@ function CreateSheet({
           className="fos-input"
           type="number"
           min="0"
+          max={Number.MAX_SAFE_INTEGER}
           step="1"
           aria-label="Stars"
           value={draft.stars}

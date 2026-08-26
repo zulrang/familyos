@@ -199,8 +199,8 @@ describe("Tasks HTTP", () => {
     );
   });
 
-  test("create rejects malformed star values", async () => {
-    for (const stars of [-1, 1.5, "2", null]) {
+  test("create rejects malformed and unsafe star values without breaking reads", async () => {
+    for (const stars of [-1, 1.5, "2", null, Number.MAX_SAFE_INTEGER + 1]) {
       const before = loadDefinitions().length;
       const response = await handleCreateTask(
         req("http://familyos.test/api/tasks", {
@@ -216,6 +216,10 @@ describe("Tasks HTTP", () => {
       assert.equal(response.status, 400);
       assert.equal(loadDefinitions().length, before);
     }
+    assert.equal(
+      (await handleGetTasks(req("http://familyos.test/api/tasks"))).status,
+      200,
+    );
   });
 
   test("GET exposes derived star balances without a writer route", async () => {

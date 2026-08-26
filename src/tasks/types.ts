@@ -322,7 +322,7 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   const member = nonEmptyString(raw.member);
   if (!title || !type || !member) return null;
   const stars = raw.stars === undefined ? 0 : raw.stars;
-  if (typeof stars !== "number" || !Number.isInteger(stars) || stars < 0) {
+  if (typeof stars !== "number" || !Number.isSafeInteger(stars) || stars < 0) {
     return null;
   }
   let time: LocalTime | null = null;
