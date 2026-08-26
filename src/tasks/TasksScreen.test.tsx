@@ -76,6 +76,7 @@ function installFetch(store: TasksViewRead) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           title: string;
           type: "chore" | "routine";
+          recurrence: unknown;
           member: string;
           time?: string;
         };
@@ -143,11 +144,24 @@ function installFetch(store: TasksViewRead) {
   return fetchMock;
 }
 
+function submittedRecurrence(
+  fetchMock: ReturnType<typeof installFetch>,
+): unknown {
+  const createCall = fetchMock.mock.calls.find(
+    ([input, init]) =>
+      urlOf(input).endsWith("/api/tasks") && (init?.method ?? "GET") === "POST",
+  );
+  const body = JSON.parse(String(createCall?.[1]?.body ?? "{}")) as {
+    recurrence?: unknown;
+  };
+  return body.recurrence;
+}
+
 describe("TasksScreen", () => {
   test("creating a task shows it in the assignee column the same day", async () => {
     const user = userEvent.setup();
     const store = emptyView();
-    installFetch(store);
+    const fetchMock = installFetch(store);
     render(<TasksScreen />);
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
@@ -161,6 +175,69 @@ describe("TasksScreen", () => {
       .closest("section");
     expect(ellie).toHaveTextContent("Walk dog");
     expect(ellie).toHaveTextContent("0/1");
+    expect(submittedRecurrence(fetchMock)).toEqual({ kind: "daily" });
+  });
+
+  test("the editor submits selected weekly days", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Bins");
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Mon" }));
+    await user.click(screen.getByRole("button", { name: "Thu" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "weekly",
+      days: ["mon", "thu"],
+    });
+  });
+
+  test("the editor requires and submits a date for a once task", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Change filter");
+    await user.click(screen.getByRole("button", { name: "Once" }));
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.type(screen.getByLabelText("Date"), "2026-09-01");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "once",
+      date: "2026-09-01",
+    });
+  });
+
+  test("the editor limits monthly recurrence to days 1 through 28", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Water filter");
+    await user.click(screen.getByRole("button", { name: "Monthly" }));
+    const day = screen.getByRole("spinbutton", { name: "Day of month" });
+    await user.clear(day);
+    await user.type(day, "29");
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.clear(day);
+    await user.type(day, "28");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "monthly",
+      day: 28,
+    });
   });
 
   test("tapping the circle marks the row done and increments progress once", async () => {

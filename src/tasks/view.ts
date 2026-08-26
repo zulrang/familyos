@@ -2,10 +2,27 @@ import {
   addLocalDays,
   type LocalDate,
   type Occurrence,
+  type Recurrence,
   type TaskDefinition,
   type TaskEvent,
   type TaskId,
+  type Weekday,
 } from "./types";
+
+type WindowStarts = {
+  current: LocalDate | null;
+  previous: LocalDate | null;
+};
+
+const WEEKDAY_INDEX: Record<Weekday, number> = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+};
 
 function eventMap(events: readonly TaskEvent[]): Map<string, TaskEvent> {
   const map = new Map<string, TaskEvent>();
@@ -18,7 +35,7 @@ function eventMap(events: readonly TaskEvent[]): Map<string, TaskEvent> {
 function foldOccurrence(
   definition: TaskDefinition,
   window: LocalDate,
-  today: LocalDate,
+  fallbackState: "pending" | "expired",
   events: Map<string, TaskEvent>,
 ): Occurrence {
   const base = {
@@ -54,10 +71,76 @@ function foldOccurrence(
       by: claimed.by,
     };
   }
-  if (window === today) {
-    return { ...base, state: "pending" };
+  return { ...base, state: fallbackState };
+}
+
+function weekday(date: LocalDate): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+}
+
+function monthlyDate(
+  date: LocalDate,
+  monthOffset: number,
+  day: number,
+): LocalDate {
+  const [year, month] = date.split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1 + monthOffset, day));
+  return `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, "0")}-${String(target.getUTCDate()).padStart(2, "0")}` as LocalDate;
+}
+
+function weeklyWindowStarts(
+  days: readonly Weekday[],
+  today: LocalDate,
+): WindowStarts {
+  const selected = [...new Set(days.map((day) => WEEKDAY_INDEX[day]))];
+  const todayIndex = weekday(today);
+  const currentOffset = Math.min(
+    ...selected.map((day) => (todayIndex - day + 7) % 7),
+  );
+  const current = addLocalDays(today, -currentOffset);
+  const currentIndex = weekday(current);
+  const previousOffset = Math.min(
+    ...selected.map((day) => (currentIndex - day + 7) % 7 || 7),
+  );
+  return {
+    current,
+    previous: addLocalDays(current, -previousOffset),
+  };
+}
+
+function windowStarts(recurrence: Recurrence, today: LocalDate): WindowStarts {
+  switch (recurrence.kind) {
+    case "once":
+      return {
+        current: today === recurrence.date ? recurrence.date : null,
+        previous: today > recurrence.date ? recurrence.date : null,
+      };
+    case "daily": {
+      return {
+        current: today,
+        previous: addLocalDays(today, -1),
+      };
+    }
+    case "weekly":
+      return weeklyWindowStarts(recurrence.days, today);
+    case "monthly": {
+      const todayDay = Number(today.slice(8, 10));
+      const current = monthlyDate(
+        today,
+        recurrence.day <= todayDay ? 0 : -1,
+        recurrence.day,
+      );
+      return {
+        current,
+        previous: monthlyDate(current, -1, recurrence.day),
+      };
+    }
+    default: {
+      const _exhaustive: never = recurrence;
+      return _exhaustive;
+    }
   }
-  return { ...base, state: "expired" };
 }
 
 function compareOccurrences(
@@ -86,20 +169,17 @@ export function view(
     order.set(definition.id, index);
   });
   const byKey = eventMap(events);
-  const yesterday = addLocalDays(today, -1);
   const out: Occurrence[] = [];
   for (const definition of definitions) {
     if (definition.retiredAt !== null) continue;
-    // ponytail: #60 ceiling is daily + fixed. Other kinds stay total and emit nothing.
-    if (
-      definition.recurrence.kind !== "daily" ||
-      definition.assignment.kind !== "fixed"
-    ) {
-      continue;
+    if (definition.assignment.kind !== "fixed") continue;
+    const windows = windowStarts(definition.recurrence, today);
+    if (windows.previous !== null) {
+      void foldOccurrence(definition, windows.previous, "expired", byKey);
     }
-    void foldOccurrence(definition, yesterday, today, byKey);
-    const current = foldOccurrence(definition, today, today, byKey);
-    if (current.state !== "expired") out.push(current);
+    if (windows.current !== null) {
+      out.push(foldOccurrence(definition, windows.current, "pending", byKey));
+    }
   }
   out.sort((a, b) => compareOccurrences(a, b, order));
   return out;

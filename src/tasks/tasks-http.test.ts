@@ -112,6 +112,7 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Walk dog",
           type: "chore",
+          recurrence: { kind: "daily" },
           member: "dad",
         }),
       }),
@@ -123,6 +124,7 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Brush teeth",
           type: "routine",
+          recurrence: { kind: "daily" },
           member: "dad",
           time: "07:00",
         }),
@@ -155,6 +157,7 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Trash",
           type: "chore",
+          recurrence: { kind: "daily" },
           member: "ellie",
         }),
       }),
@@ -245,6 +248,7 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Laundry",
           type: "chore",
+          recurrence: { kind: "daily" },
           member: "dad",
         }),
       }),
@@ -293,25 +297,68 @@ describe("Tasks HTTP", () => {
     assert.equal(body.error, "pairing required");
   });
 
-  test("create rejects recurrence and retired members", async () => {
-    const recurrence = await handleCreateTask(
-      req("http://familyos.test/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          title: "Nope",
-          type: "chore",
-          member: "dad",
-          recurrence: { kind: "weekly", days: ["mon"] },
+  test("create persists each recurrence kind with fixed assignment and zero stars", async () => {
+    const recurrences = [
+      { kind: "once", date: "2026-09-01" },
+      { kind: "daily" },
+      { kind: "weekly", days: ["mon", "thu"] },
+      { kind: "monthly", day: 28 },
+    ];
+    for (const recurrence of recurrences) {
+      const response = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: `${recurrence.kind} task`,
+            type: "chore",
+            recurrence,
+            member: "dad",
+          }),
         }),
-      }),
-    );
-    assert.equal(recurrence.status, 400);
+      );
+      assert.equal(response.status, 200);
+      const { definition } = (await response.json()) as {
+        definition: TaskDefinition;
+      };
+      assert.deepEqual(definition.recurrence, recurrence);
+      assert.deepEqual(definition.assignment, {
+        kind: "fixed",
+        member: "dad",
+      });
+      assert.equal(definition.stars, 0);
+    }
+  });
+
+  test("create rejects invalid monthly days and an empty weekly schedule", async () => {
+    for (const recurrence of [
+      { kind: "monthly", day: 29 },
+      { kind: "monthly", day: 30 },
+      { kind: "monthly", day: 31 },
+      { kind: "weekly", days: [] },
+    ]) {
+      const response = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Nope",
+            type: "chore",
+            recurrence,
+            member: "dad",
+          }),
+        }),
+      );
+      assert.equal(response.status, 400);
+    }
+  });
+
+  test("create rejects retired members", async () => {
     const missing = await handleCreateTask(
       req("http://familyos.test/api/tasks", {
         method: "POST",
         body: JSON.stringify({
           title: "Nope",
           type: "chore",
+          recurrence: { kind: "daily" },
           member: "ghost",
         }),
       }),

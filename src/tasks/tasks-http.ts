@@ -4,7 +4,7 @@ import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { msToZonedDate } from "@/shared/time";
 import { applyEvent, insertDefinition, loadStore } from "./store";
 import {
-  dailyFixedDefinition,
+  createFixedDefinition,
   parseCreateTaskDraft,
   parseEventBatch,
   parseLocalDate,
@@ -62,7 +62,7 @@ export async function handleCreateTask(request: Request): Promise<Response> {
   if (!member || member.status !== "active") {
     return jsonError("active member required", 400);
   }
-  const definition = dailyFixedDefinition(draft);
+  const definition = createFixedDefinition(draft);
   insertDefinition(definition);
   return Response.json({ definition });
 }
