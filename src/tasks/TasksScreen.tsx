@@ -52,16 +52,20 @@ function emptyView(): TasksViewRead {
   };
 }
 
-type Draft = {
+type DraftFields = {
   title: string;
   type: TaskType;
-  member: string;
   time: string;
 };
+
+type Draft =
+  | (DraftFields & { assignment: "fixed"; member: string })
+  | (DraftFields & { assignment: "rotation"; order: string[] });
 
 const EMPTY_DRAFT: Draft = {
   title: "",
   type: "chore",
+  assignment: "fixed",
   member: "",
   time: "",
 };
@@ -167,7 +171,17 @@ export function TasksScreen() {
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
-    if (!title || !sheet.member) return;
+    const assignment =
+      sheet.assignment === "fixed"
+        ? { kind: "fixed" as const, member: sheet.member }
+        : { kind: "rotation" as const, order: sheet.order };
+    if (
+      !title ||
+      (assignment.kind === "fixed" && !assignment.member) ||
+      (assignment.kind === "rotation" && assignment.order.length === 0)
+    ) {
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/tasks", {
@@ -176,7 +190,7 @@ export function TasksScreen() {
         body: JSON.stringify({
           title,
           type: sheet.type,
-          member: sheet.member,
+          assignment,
           ...(sheet.time ? { time: sheet.time } : {}),
         }),
       });
@@ -325,7 +339,11 @@ function CreateSheet({
   onSave: () => void;
 }) {
   const closeFromBackdrop = useRef(false);
-  const canSave = draft.title.trim().length > 0 && draft.member.length > 0;
+  const canSave =
+    draft.title.trim().length > 0 &&
+    (draft.assignment === "fixed"
+      ? draft.member.length > 0
+      : draft.order.length > 0);
   return (
     <div
       style={{
@@ -392,15 +410,70 @@ function CreateSheet({
             </Button>
           ))}
         </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button
+            variant={draft.assignment === "fixed" ? "primary" : "secondary"}
+            onClick={() =>
+              onChange({
+                ...draft,
+                assignment: "fixed",
+                member:
+                  draft.assignment === "fixed"
+                    ? draft.member
+                    : (draft.order[0] ?? members[0]?.id ?? ""),
+              })
+            }
+            style={{ flex: 1 }}
+          >
+            Fixed
+          </Button>
+          <Button
+            variant={draft.assignment === "rotation" ? "primary" : "secondary"}
+            onClick={() =>
+              onChange({
+                ...draft,
+                assignment: "rotation",
+                order:
+                  draft.assignment === "rotation"
+                    ? draft.order
+                    : draft.member
+                      ? [draft.member]
+                      : [],
+              })
+            }
+            style={{ flex: 1 }}
+          >
+            Rotation
+          </Button>
+        </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {members.map((member) => {
             const surface = memberSurface(member.color);
-            const selected = draft.member === member.id;
+            const position =
+              draft.assignment === "fixed"
+                ? draft.member === member.id
+                  ? 0
+                  : -1
+                : draft.order.indexOf(member.id);
+            const selected = position >= 0;
             return (
               <button
                 key={member.id}
                 type="button"
-                onClick={() => onChange({ ...draft, member: member.id })}
+                aria-label={member.name}
+                aria-pressed={selected}
+                onClick={() => {
+                  if (draft.assignment === "fixed") {
+                    onChange({ ...draft, member: member.id });
+                    return;
+                  }
+                  onChange({
+                    ...draft,
+                    order: selected
+                      ? draft.order.filter((id) => id !== member.id)
+                      : [...draft.order, member.id],
+                  });
+                }}
                 style={{
                   border: "none",
                   borderRadius: "var(--radius-pill)",
@@ -413,6 +486,17 @@ function CreateSheet({
                 }}
               >
                 {member.name}
+                {draft.assignment === "rotation" && selected ? (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      marginLeft: 7,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {position + 1}
+                  </span>
+                ) : null}
               </button>
             );
           })}

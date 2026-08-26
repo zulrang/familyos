@@ -15,6 +15,8 @@ import { view } from "./view";
 
 const today = "2026-08-25" as LocalDate;
 const dad = "dad" as MemberId;
+const ellie = "ellie" as MemberId;
+const luke = "luke" as MemberId;
 
 function definition(
   overrides: Partial<TaskDefinition> & Pick<TaskDefinition, "id">,
@@ -149,7 +151,7 @@ describe("tasks view", () => {
     assert.deepEqual(occurrences, []);
   });
 
-  test("unsupported recurrence and assignment kinds do not throw", () => {
+  test("unsupported recurrence and open assignment do not throw", () => {
     const occurrences = view(
       [
         definition({
@@ -164,15 +166,119 @@ describe("tasks view", () => {
           id: "open" as TaskId,
           assignment: { kind: "open" },
         }),
-        definition({
-          id: "rotation" as TaskId,
-          assignment: { kind: "rotation", order: [dad] },
-        }),
       ],
       [],
       today,
     );
     assert.deepEqual(occurrences, []);
+  });
+
+  test("four completed turns assign a three-member rotation to the second member", () => {
+    const task = "rotation" as TaskId;
+    const completed = [
+      "2026-08-20",
+      "2026-08-21",
+      "2026-08-22",
+      "2026-08-23",
+    ].map(
+      (window, index): TaskEvent => ({
+        kind: "completed",
+        task,
+        window: window as LocalDate,
+        by: [dad, ellie, luke, dad][index] ?? dad,
+        at: `2026-08-${20 + index}T12:00:00Z` as Instant,
+      }),
+    );
+    const [row] = view(
+      [
+        definition({
+          id: task,
+          assignment: { kind: "rotation", order: [dad, ellie, luke] },
+        }),
+      ],
+      completed,
+      today,
+    );
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, ellie);
+    assert.equal(
+      completed.some((event) => event.window === row?.window),
+      false,
+    );
+  });
+
+  test("a completion in a closed window advances without rendering", () => {
+    const task = "rotation-closed" as TaskId;
+    const closedWindow = addLocalDays(today, -1);
+    const [row] = view(
+      [
+        definition({
+          id: task,
+          assignment: { kind: "rotation", order: [dad, ellie] },
+        }),
+      ],
+      [
+        {
+          kind: "completed",
+          task,
+          window: closedWindow,
+          by: dad,
+          at: "2026-08-24T12:00:00Z" as Instant,
+        },
+      ],
+      today,
+    );
+    assert.equal(row?.window, today);
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, ellie);
+  });
+
+  test("a skip does not advance a rotation", () => {
+    const task = "rotation-skip" as TaskId;
+    const [row] = view(
+      [
+        definition({
+          id: task,
+          assignment: { kind: "rotation", order: [dad, ellie] },
+        }),
+      ],
+      [
+        {
+          kind: "skipped",
+          task,
+          window: addLocalDays(today, -1),
+          reason: null,
+        },
+      ],
+      today,
+    );
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, dad);
+  });
+
+  test("a completed rotation stays with its completer", () => {
+    const task = "rotation-done" as TaskId;
+    const [row] = view(
+      [
+        definition({
+          id: task,
+          assignment: { kind: "rotation", order: [dad, ellie] },
+        }),
+      ],
+      [
+        {
+          kind: "completed",
+          task,
+          window: today,
+          by: dad,
+          at: "2026-08-25T12:00:00Z" as Instant,
+        },
+      ],
+      today,
+    );
+    assert.equal(row?.state, "done");
+    assert.equal(row?.assignee, dad);
+    if (row?.state === "done") assert.equal(row.by, dad);
   });
 
   test("verified is metadata and does not change pending", () => {
