@@ -38,4 +38,4 @@ Preconditions:
 - `/?code=` auto-pairs once per sessionStorage key. A second load of the same URL will not POST again.
 - Pairing with curl to `POST /api/pair` is not this feature's user path.
 - A cookie from a previous run on the same origin will skip the gate. Use the isolated port, or a clean browser profile.
-- `pnpm dev` on port 3000 is a different instance. Doctor origin is the only URL that counts.
+- `pnpm dev` on port 3001 (or `pnpm start` on 3000) is a different instance. Doctor origin is the only URL that counts.

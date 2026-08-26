@@ -24,6 +24,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 
 ## Non-Obvious Rules
 - One Server Installation = one Household and multiple paired Displays. Not phone-first or multi-tenant. Fixed 74px rail; light-only (no create-next-app dark mode or Geist).
+- Production (`pnpm start`) is port 3000; development (`pnpm dev`) is 3001 so both can run.
 - Google Calendar (one selected) and Google Tasks (explicitly selected tasklists) are the sources of truth — no local event/list database.
 - Event Participants are stable Household Member IDs in Google private event properties only; Member Color is presentation.
 - Calendar target is a rolling Five-Day View with five-day paging and contrasted weekends — do not treat the current seven-day UI as canonical.

@@ -7,7 +7,7 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Launch with `.cursor/skills/verify-familyos/scripts/verify-familyos launch`.
 - Doctor must report `origin: http://127.0.0.1:4310` (or the `FAMILYOS_VERIFY_PORT` you set), `data` under `/tmp/familyos-verify/`, and `ready: true`.
 - Start unpaired (`trusted_displays: 0`) unless a feature file says otherwise.
-- Drive only the instance that doctor accepted. Never `localhost:3000` unless that is the origin doctor printed.
+- Drive only the instance that doctor accepted. Never `localhost:3000` or `:3001` unless that is the origin doctor printed.
 - Google Calendar and Google Tasks mutations need `.env.local` plus an operator-completed Google sign-in. Without that, mark those sub-features `verified-unreachable`.
 
 ## Driving conventions

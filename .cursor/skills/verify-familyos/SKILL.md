@@ -19,7 +19,7 @@ From the repo root:
 .cursor/skills/verify-familyos/scripts/verify-familyos launch
 ```
 
-That command installs deps if `node_modules` is missing (`pnpm install --frozen-lockfile`), then starts `pnpm exec next dev -H 127.0.0.1 -p 4310` with `FAMILYOS_DATA_DIR` under `/tmp/familyos-verify/<run-id>/data`. It does not use `pnpm dev` (that script binds `0.0.0.0:3000` and would collide with a human's session). It does not copy `data/` from the checkout.
+That command installs deps if `node_modules` is missing (`pnpm install --frozen-lockfile`), then starts `pnpm exec next dev -H 127.0.0.1 -p 4310` with `FAMILYOS_DATA_DIR` under `/tmp/familyos-verify/<run-id>/data`. It does not use `pnpm dev` (that script binds `0.0.0.0:3001` and would collide with a human's session). It does not copy `data/` from the checkout.
 
 Ready when `GET http://127.0.0.1:4310/api/ready` returns `{"ready":true,...}` and the helper prints a doctor block. Startup also logs `FamilyOS pairing code: ……` when the disposable data dir has no Trusted Display.
 
@@ -49,7 +49,7 @@ Pass only if all of these hold:
 - `/api/ready` returns `"ready":true`
 - `origin` is `http://127.0.0.1:<port>`
 
-If the listener belongs to some other process, stop. Do not drive `localhost:3000` or any instance you did not launch. Two verification instances can run side by side if they use different `FAMILYOS_VERIFY_PORT` and `FAMILYOS_VERIFY_RUN` values. They must not share a data dir.
+If the listener belongs to some other process, stop. Do not drive `localhost:3000`, `:3001`, or any instance you did not launch. Two verification instances can run side by side if they use different `FAMILYOS_VERIFY_PORT` and `FAMILYOS_VERIFY_RUN` values. They must not share a data dir.
 
 `google_env: env-present` means `.env.local` exists. Do not read it. `google_env: no` means Calendar and Lists stay on the credentials-missing banners. `trusted_displays` counts rows in the disposable `displays.json`.
 

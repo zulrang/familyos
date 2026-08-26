@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "dev": "PORT=3001 next dev -H 0.0.0.0 -p 3001",
     "build": "next build",
-    "start": "next start -H 0.0.0.0 -p 3000",
+    "start": "PORT=3000 next start -H 0.0.0.0 -p 3000",
     "lint": "biome check && vitest run src/import-boundaries.test.ts",
     "format": "biome format --write",
     "test": "vitest run",

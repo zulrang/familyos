@@ -46,7 +46,8 @@ Whether those are already applied on a given Pi is a local-doc fact.
 pnpm build && pnpm start
 ```
 
-`pnpm start` binds `0.0.0.0:3000` so the Pi can reach it. Reload Chromium after the switch.
+`pnpm start` binds `0.0.0.0:3000` so the Pi can reach it. `pnpm dev` is `:3001`
+and is not the kiosk origin. Reload Chromium after the switch.
 
 Pi Chromium also ships `--force-renderer-accessibility` (screen-reader tree on every tap). `/etc/chromium.d/familyos-perf` strips that and raises raster threads. Repo copy: `kiosk/chromium.d/familyos-perf`.
 

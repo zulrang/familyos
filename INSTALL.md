@@ -59,22 +59,29 @@ If you insist on completing Google login **on the panel**, `GOOGLE_REDIRECT_URI`
 
 ## 3. Run
 
+Production (`pnpm start`) listens on **3000**. Development (`pnpm dev`) listens
+on **3001**, so both can run on the same machine. The Google redirect URI in
+step 2 stays `localhost:3000` (sign in from production, or add the `:3001`
+callback in Cloud Console if you complete OAuth on the dev server).
+
 ```bash
 pnpm dev
 ```
 
 Watch the server log for `FamilyOS pairing code: ……`. Open
-[http://localhost:3000](http://localhost:3000), enter the code to pair this
+[http://localhost:3001](http://localhost:3001), enter the code to pair this
 browser profile, then go to **Settings**, sign in with Google, pick the family
 calendar, add household members and their colors. Save.
 
-`pnpm dev` binds `0.0.0.0:3000`, so another device on the LAN can hit `http://<this-machine>:3000` already. For a wall panel, serve production instead — Fast Refresh over Wi-Fi makes taps feel drunk:
+`pnpm dev` binds `0.0.0.0:3001`, so another device on the LAN can hit
+`http://<this-machine>:3001`. For a wall panel, serve production instead — Fast
+Refresh over Wi-Fi makes taps feel drunk:
 
 ```bash
 pnpm build && pnpm start
 ```
 
-Same bind: `0.0.0.0:3000`.
+`pnpm start` binds `0.0.0.0:3000`. Point the kiosk at that origin.
 
 ## 4. Wall kiosk (optional)
 
