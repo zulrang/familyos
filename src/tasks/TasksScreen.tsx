@@ -22,6 +22,7 @@ import {
   type Occurrence,
   type TasksViewRead,
   type TaskType,
+  type Weekday,
 } from "./types";
 
 function headerDate(d: Date, timeZone: string): string {
@@ -53,21 +54,75 @@ function emptyView(): TasksViewRead {
   };
 }
 
+type DraftRecurrence =
+  | { kind: "daily" }
+  | { kind: "once"; date: string }
+  | { kind: "weekly"; days: Weekday[] }
+  | { kind: "monthly"; day: string };
+
+type RecurrenceRequest =
+  | { kind: "daily" }
+  | { kind: "once"; date: string }
+  | { kind: "weekly"; days: Weekday[] }
+  | { kind: "monthly"; day: number };
+
 type Draft = {
   title: string;
   type: TaskType;
+  recurrence: DraftRecurrence;
   member: string;
   time: string;
   stars: string;
 };
 
+const RECURRENCE_CHOICES = [
+  { label: "Once", value: { kind: "once", date: "" } },
+  { label: "Daily", value: { kind: "daily" } },
+  { label: "Weekly", value: { kind: "weekly", days: [] } },
+  { label: "Monthly", value: { kind: "monthly", day: "1" } },
+] satisfies { label: string; value: DraftRecurrence }[];
+
 const EMPTY_DRAFT: Draft = {
   title: "",
   type: "chore",
+  recurrence: { kind: "daily" },
   member: "",
   time: "",
   stars: "0",
 };
+
+const WEEKDAY_OPTIONS: { value: Weekday; label: string }[] = [
+  { value: "sun", label: "Sun" },
+  { value: "mon", label: "Mon" },
+  { value: "tue", label: "Tue" },
+  { value: "wed", label: "Wed" },
+  { value: "thu", label: "Thu" },
+  { value: "fri", label: "Fri" },
+  { value: "sat", label: "Sat" },
+];
+
+function parseDraftRecurrence(
+  recurrence: DraftRecurrence,
+): RecurrenceRequest | null {
+  switch (recurrence.kind) {
+    case "daily":
+      return recurrence;
+    case "once":
+      return recurrence.date ? recurrence : null;
+    case "weekly":
+      return recurrence.days.length > 0 ? recurrence : null;
+    case "monthly": {
+      const day = Number(recurrence.day);
+      return Number.isInteger(day) && day >= 1 && day <= 28
+        ? { kind: "monthly", day }
+        : null;
+    }
+    default: {
+      const _exhaustive: never = recurrence;
+      return _exhaustive;
+    }
+  }
+}
 
 export function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
   const current = view.occurrences.find(
@@ -170,8 +225,15 @@ export function TasksScreen() {
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
+    const recurrence = parseDraftRecurrence(sheet.recurrence);
     const stars = Number(sheet.stars);
-    if (!title || !sheet.member || !Number.isSafeInteger(stars) || stars < 0) {
+    if (
+      !title ||
+      !sheet.member ||
+      !recurrence ||
+      !Number.isSafeInteger(stars) ||
+      stars < 0
+    ) {
       return;
     }
     setBusy(true);
@@ -182,6 +244,7 @@ export function TasksScreen() {
         body: JSON.stringify({
           title,
           type: sheet.type,
+          recurrence,
           member: sheet.member,
           ...(sheet.time ? { time: sheet.time } : {}),
           stars,
@@ -336,8 +399,11 @@ function CreateSheet({
   const canSave =
     draft.title.trim().length > 0 &&
     draft.member.length > 0 &&
+    parseDraftRecurrence(draft.recurrence) !== null &&
     Number.isSafeInteger(stars) &&
     stars >= 0;
+  const weeklyDays =
+    draft.recurrence.kind === "weekly" ? draft.recurrence.days : null;
   return (
     <div
       style={{
@@ -404,6 +470,77 @@ function CreateSheet({
             </Button>
           ))}
         </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {RECURRENCE_CHOICES.map(({ label, value }) => (
+            <Button
+              key={value.kind}
+              variant={
+                draft.recurrence.kind === value.kind ? "primary" : "secondary"
+              }
+              onClick={() => onChange({ ...draft, recurrence: value })}
+              style={{ flex: 1 }}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+        {draft.recurrence.kind === "once" ? (
+          <input
+            className="fos-input"
+            type="date"
+            aria-label="Date"
+            value={draft.recurrence.date}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                recurrence: { kind: "once", date: event.target.value },
+              })
+            }
+          />
+        ) : null}
+        {weeklyDays ? (
+          <div style={{ display: "flex", gap: 6 }}>
+            {WEEKDAY_OPTIONS.map(({ value, label }) => {
+              const selected = weeklyDays.includes(value);
+              return (
+                <Button
+                  key={value}
+                  variant={selected ? "primary" : "secondary"}
+                  onClick={() => {
+                    const days = selected
+                      ? weeklyDays.filter((day) => day !== value)
+                      : [...weeklyDays, value];
+                    onChange({
+                      ...draft,
+                      recurrence: { kind: "weekly", days },
+                    });
+                  }}
+                  aria-pressed={selected}
+                  style={{ flex: 1, paddingInline: 8 }}
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+        ) : null}
+        {draft.recurrence.kind === "monthly" ? (
+          <input
+            className="fos-input"
+            type="number"
+            min={1}
+            max={28}
+            step={1}
+            aria-label="Day of month"
+            value={draft.recurrence.day}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                recurrence: { kind: "monthly", day: event.target.value },
+              })
+            }
+          />
+        ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {members.map((member) => {
             const surface = memberSurface(member.color);
