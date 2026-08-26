@@ -62,14 +62,6 @@ type Draft =
   | (DraftFields & { assignment: "fixed"; member: string })
   | (DraftFields & { assignment: "rotation"; order: string[] });
 
-const EMPTY_DRAFT: Draft = {
-  title: "",
-  type: "chore",
-  assignment: "fixed",
-  member: "",
-  time: "",
-};
-
 export function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
   const current = view.occurrences.find(
     (row) => row.task === occ.task && row.window === occ.window,
@@ -303,8 +295,11 @@ export function TasksScreen() {
           label="Add task"
           onClick={() =>
             setSheet({
-              ...EMPTY_DRAFT,
+              title: "",
+              type: "chore",
+              assignment: "fixed",
               member: members[0]?.id ?? "",
+              time: "",
             })
           }
         />
