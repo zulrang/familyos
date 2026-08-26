@@ -199,6 +199,7 @@ export async function handleGetLists(
     const gw = await resolveGateway(gateway);
     lists = await gw.listSelected(listIds);
   } catch (e) {
+    if (e instanceof AuthError) return listsError(e);
     const cached = await cachedSelectedLists(
       provider.providerConnectionId,
       listIds,

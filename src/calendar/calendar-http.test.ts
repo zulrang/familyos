@@ -576,7 +576,7 @@ describe("Household Calendar outage cache", () => {
     assert.equal(gateway.store.has("ev-seed"), true);
   });
 
-  test("disconnect returns matching cache as stale without live provider data", async () => {
+  test("disconnect with cache returns unauthorized", async () => {
     gateway.offline = false;
     assert.equal(
       (await handleListEvents(req(eventsUrl()), gateway)).status,
@@ -587,14 +587,10 @@ describe("Household Calendar outage cache", () => {
       oauthState: null,
       providerConnectionId: "acct-a",
     });
-    const stale = await handleListEvents(req(eventsUrl()), gateway);
-    assert.equal(stale.status, 200);
-    const body = (await stale.json()) as {
-      events: CalEvent[];
-      stale: boolean;
-    };
-    assert.equal(body.stale, true);
-    assert.equal(body.events[0]?.title, "Practice");
+    const denied = await handleListEvents(req(eventsUrl()), gateway);
+    assert.equal(denied.status, 401);
+    const body = (await denied.json()) as { error: string };
+    assert.equal(body.error, "unauthorized");
     const create = await handleCreateEvent(
       req("http://familyos.test/api/events", {
         method: "POST",

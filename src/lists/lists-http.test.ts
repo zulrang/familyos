@@ -792,7 +792,7 @@ describe("Household Lists outage cache", () => {
     assert.equal(gateway.store.get("tl-chores")?.items[0]?.done, true);
   });
 
-  test("disconnect returns matching cache as stale without live provider data", async () => {
+  test("disconnect with cache returns unauthorized", async () => {
     gateway.offline = false;
     assert.equal(
       (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
@@ -804,20 +804,13 @@ describe("Household Lists outage cache", () => {
       oauthState: null,
       providerConnectionId: "acct-a",
     });
-    const stale = await handleGetLists(
+    const denied = await handleGetLists(
       req("http://familyos.test/api/lists"),
       gateway,
     );
-    assert.equal(stale.status, 200);
-    const body = (await stale.json()) as {
-      lists: HouseholdList[];
-      stale: boolean;
-    };
-    assert.equal(body.stale, true);
-    assert.deepEqual(
-      body.lists.map((l) => l.id),
-      ["tl-groceries", "tl-chores"],
-    );
+    assert.equal(denied.status, 401);
+    const body = (await denied.json()) as { error: string };
+    assert.equal(body.error, "unauthorized");
     const add = await handleAddItem(
       req("http://familyos.test/api/lists/tl-groceries/items", {
         method: "POST",

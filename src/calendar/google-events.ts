@@ -21,14 +21,14 @@ import {
 } from "@/calendar/recurrence";
 import type { CalEvent, GoogleCalendar, SeriesScope } from "@/calendar/types";
 import type { LegacyTone } from "@/members/members";
-import { gfetch } from "@/shared/google";
+import { gfetch, throwIfGoogleFailed } from "@/shared/google";
 import { EventConflictError } from "./calendar-error";
 
 export async function listCalendars(): Promise<GoogleCalendar[]> {
   const res = await gfetch(
     "https://www.googleapis.com/calendar/v3/users/me/calendarList",
   );
-  if (!res.ok) throw new Error(`calendarList ${res.status}`);
+  await throwIfGoogleFailed(res, "calendarList");
   const data = (await res.json()) as {
     items?: {
       id: string;
@@ -116,7 +116,7 @@ export async function listEvents(
     u.searchParams.set("maxResults", "250");
     if (pageToken) u.searchParams.set("pageToken", pageToken);
     const res = await gfetch(u.toString());
-    if (!res.ok) throw new Error(`events ${res.status}`);
+    await throwIfGoogleFailed(res, "events");
     const data = (await res.json()) as {
       items?: GEvent[];
       nextPageToken?: string;

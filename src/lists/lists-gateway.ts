@@ -1,6 +1,5 @@
 import type { HouseholdList, ListItem } from "@/lists/types";
-import { AuthError } from "@/shared/auth-error";
-import { ListItemConflictError, ProviderUnavailableError } from "./lists-error";
+import { rethrowAsUnavailable } from "./lists-error";
 import * as tasks from "./tasks";
 
 /** Port for Household Lists provider operations (Google Tasks adapter / Fake). */
@@ -33,9 +32,7 @@ function live<Args extends unknown[], Result>(
     try {
       return await fn(...args);
     } catch (e) {
-      if (e instanceof AuthError) throw e;
-      if (e instanceof ListItemConflictError) throw e;
-      throw new ProviderUnavailableError();
+      rethrowAsUnavailable(e);
     }
   };
 }

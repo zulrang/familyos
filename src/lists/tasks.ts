@@ -1,5 +1,5 @@
 import type { HouseholdList, ListItem } from "@/lists/types";
-import { gfetch } from "@/shared/google";
+import { gfetch, throwIfGoogleFailed } from "@/shared/google";
 import { sortByPosition } from "./list-text";
 import { ListItemConflictError } from "./lists-error";
 
@@ -32,7 +32,7 @@ async function pages<T>(
     }
     if (pageToken) u.searchParams.set("pageToken", pageToken);
     const res = await gfetch(u.toString());
-    if (!res.ok) throw new Error(`${u.pathname} ${res.status}`);
+    await throwIfGoogleFailed(res, u.pathname);
     const data = (await res.json()) as {
       items?: T[];
       nextPageToken?: string;

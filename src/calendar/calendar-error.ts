@@ -3,9 +3,17 @@ import { AuthError } from "@/shared/auth-error";
 
 /** Google Calendar is unreachable or disconnected. */
 export class ProviderUnavailableError extends Error {
-  constructor() {
-    super("unavailable");
+  constructor(options?: ErrorOptions) {
+    super("unavailable", options);
   }
+}
+
+export function rethrowAsUnavailable(e: unknown): never {
+  if (e instanceof AuthError) throw e;
+  if (e instanceof EventConflictError) throw e;
+  const cause = e instanceof Error ? e : new Error(String(e));
+  console.error("calendar unavailable:", cause);
+  throw new ProviderUnavailableError({ cause });
 }
 
 /** Stale Calendar write: provider state moved past the expected version. */

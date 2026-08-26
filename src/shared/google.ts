@@ -1,6 +1,7 @@
 import { AuthError } from "@/shared/auth-error";
 import { googleClient } from "@/shared/google-env";
 import {
+  clearProviderConnection,
   establishProviderConnection,
   patchProvider,
   readProvider,
@@ -27,18 +28,43 @@ export function authUrl(state: string): string {
   return u.toString();
 }
 
-async function tokenRequest(body: Record<string, string>): Promise<{
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-}> {
+async function tokenRequest(body: Record<string, string>): Promise<
+  | {
+      ok: true;
+      access_token: string;
+      refresh_token?: string;
+      expires_in: number;
+    }
+  | { ok: false; status: number; body: string }
+> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(body),
   });
-  if (!res.ok) throw new Error(`Google token error ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    const text = (await res.text()).slice(0, 400);
+    return { ok: false, status: res.status, body: text };
+  }
+  return { ok: true, ...(await res.json()) };
+}
+
+function tokenError(status: number, body: string): Error {
+  return new Error(`Google token error ${status}${body ? ` ${body}` : ""}`);
+}
+
+function isInvalidGrant(body: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "error" in parsed &&
+      parsed.error === "invalid_grant"
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function googleAccountId(accessToken: string): Promise<string> {
@@ -61,6 +87,7 @@ export async function exchangeCode(code: string): Promise<void> {
     redirect_uri: redirect,
     grant_type: "authorization_code",
   });
+  if (!tok.ok) throw tokenError(tok.status, tok.body);
   const tokens: Tokens = {
     access_token: tok.access_token,
     refresh_token: tok.refresh_token ?? cur.tokens?.refresh_token ?? "",
@@ -82,6 +109,13 @@ async function accessToken(): Promise<string> {
     client_secret: secret,
     grant_type: "refresh_token",
   });
+  if (!tok.ok) {
+    if (tok.status === 400 && isInvalidGrant(tok.body)) {
+      await clearProviderConnection();
+      throw new AuthError();
+    }
+    throw tokenError(tok.status, tok.body);
+  }
   const next: Tokens = {
     access_token: tok.access_token,
     refresh_token: tok.refresh_token ?? s.tokens.refresh_token,
@@ -111,4 +145,13 @@ export async function gfetch(
     throw new AuthError();
   }
   return res;
+}
+
+export async function throwIfGoogleFailed(
+  res: Response,
+  what: string,
+): Promise<void> {
+  if (res.ok) return;
+  const body = (await res.text()).slice(0, 400);
+  throw new Error(`${what} ${res.status}${body ? ` ${body}` : ""}`);
 }

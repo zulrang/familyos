@@ -13,6 +13,7 @@ export async function GET(request: Request) {
   } catch (e) {
     if (e instanceof AuthError)
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    console.error("tasklists:", e);
     return NextResponse.json({ error: "failed" }, { status: 500 });
   }
 }

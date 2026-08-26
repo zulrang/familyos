@@ -176,6 +176,7 @@ export async function handleListEvents(
     const gw = await resolveGateway(gateway);
     events = await gw.listEvents(gate.calendarId, from, to, gate.timeZone);
   } catch (e) {
+    if (e instanceof AuthError) return calendarError(e);
     const cached = await cachedEvents(
       provider.providerConnectionId,
       gate.calendarId,

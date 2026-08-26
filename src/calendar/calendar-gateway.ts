@@ -1,7 +1,6 @@
 import type { EventWrite } from "@/calendar/google-events";
 import type { CalEvent, SeriesScope } from "@/calendar/types";
-import { AuthError } from "@/shared/auth-error";
-import { EventConflictError, ProviderUnavailableError } from "./calendar-error";
+import { rethrowAsUnavailable } from "./calendar-error";
 import * as events from "./google-events";
 
 /** Port for Household Calendar event operations (Google adapter / Fake). */
@@ -41,9 +40,7 @@ function live<Args extends unknown[], Result>(
     try {
       return await fn(...args);
     } catch (e) {
-      if (e instanceof AuthError) throw e;
-      if (e instanceof EventConflictError) throw e;
-      throw new ProviderUnavailableError();
+      rethrowAsUnavailable(e);
     }
   };
 }
