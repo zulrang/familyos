@@ -54,6 +54,14 @@ function emptyView(): TasksViewRead {
   };
 }
 
+type DraftFields = {
+  title: string;
+  type: TaskType;
+  recurrence: DraftRecurrence;
+  time: string;
+  stars: string;
+};
+
 type DraftRecurrence =
   | { kind: "daily" }
   | { kind: "once"; date: string }
@@ -66,14 +74,9 @@ type RecurrenceRequest =
   | { kind: "weekly"; days: Weekday[] }
   | { kind: "monthly"; day: number };
 
-type Draft = {
-  title: string;
-  type: TaskType;
-  recurrence: DraftRecurrence;
-  member: string;
-  time: string;
-  stars: string;
-};
+type Draft =
+  | (DraftFields & { assignment: "fixed"; member: string })
+  | (DraftFields & { assignment: "rotation"; order: string[] });
 
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
@@ -81,15 +84,6 @@ const RECURRENCE_CHOICES = [
   { label: "Weekly", value: { kind: "weekly", days: [] } },
   { label: "Monthly", value: { kind: "monthly", day: "1" } },
 ] satisfies { label: string; value: DraftRecurrence }[];
-
-const EMPTY_DRAFT: Draft = {
-  title: "",
-  type: "chore",
-  recurrence: { kind: "daily" },
-  member: "",
-  time: "",
-  stars: "0",
-};
 
 const WEEKDAY_OPTIONS: { value: Weekday; label: string }[] = [
   { value: "sun", label: "Sun" },
@@ -225,11 +219,16 @@ export function TasksScreen() {
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
+    const assignment =
+      sheet.assignment === "fixed"
+        ? { kind: "fixed" as const, member: sheet.member }
+        : { kind: "rotation" as const, order: sheet.order };
     const recurrence = parseDraftRecurrence(sheet.recurrence);
     const stars = Number(sheet.stars);
     if (
       !title ||
-      !sheet.member ||
+      (assignment.kind === "fixed" && !assignment.member) ||
+      (assignment.kind === "rotation" && assignment.order.length === 0) ||
       !recurrence ||
       !Number.isSafeInteger(stars) ||
       stars < 0
@@ -245,7 +244,7 @@ export function TasksScreen() {
           title,
           type: sheet.type,
           recurrence,
-          member: sheet.member,
+          assignment,
           ...(sheet.time ? { time: sheet.time } : {}),
           stars,
         }),
@@ -359,8 +358,13 @@ export function TasksScreen() {
           label="Add task"
           onClick={() =>
             setSheet({
-              ...EMPTY_DRAFT,
+              title: "",
+              type: "chore",
+              recurrence: { kind: "daily" },
+              assignment: "fixed",
               member: members[0]?.id ?? "",
+              time: "",
+              stars: "0",
             })
           }
         />
@@ -398,7 +402,9 @@ function CreateSheet({
   const stars = Number(draft.stars);
   const canSave =
     draft.title.trim().length > 0 &&
-    draft.member.length > 0 &&
+    (draft.assignment === "fixed"
+      ? draft.member.length > 0
+      : draft.order.length > 0) &&
     parseDraftRecurrence(draft.recurrence) !== null &&
     Number.isSafeInteger(stars) &&
     stars >= 0;
@@ -469,6 +475,42 @@ function CreateSheet({
               {type === "chore" ? "Chore" : "Routine"}
             </Button>
           ))}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button
+            variant={draft.assignment === "fixed" ? "primary" : "secondary"}
+            onClick={() =>
+              onChange({
+                ...draft,
+                assignment: "fixed",
+                member:
+                  draft.assignment === "fixed"
+                    ? draft.member
+                    : (draft.order[0] ?? members[0]?.id ?? ""),
+              })
+            }
+            style={{ flex: 1 }}
+          >
+            Fixed
+          </Button>
+          <Button
+            variant={draft.assignment === "rotation" ? "primary" : "secondary"}
+            onClick={() =>
+              onChange({
+                ...draft,
+                assignment: "rotation",
+                order:
+                  draft.assignment === "rotation"
+                    ? draft.order
+                    : draft.member
+                      ? [draft.member]
+                      : [],
+              })
+            }
+            style={{ flex: 1 }}
+          >
+            Rotation
+          </Button>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {RECURRENCE_CHOICES.map(({ label, value }) => (
@@ -544,12 +586,31 @@ function CreateSheet({
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {members.map((member) => {
             const surface = memberSurface(member.color);
-            const selected = draft.member === member.id;
+            const position =
+              draft.assignment === "fixed"
+                ? draft.member === member.id
+                  ? 0
+                  : -1
+                : draft.order.indexOf(member.id);
+            const selected = position >= 0;
             return (
               <button
                 key={member.id}
                 type="button"
-                onClick={() => onChange({ ...draft, member: member.id })}
+                aria-label={member.name}
+                aria-pressed={selected}
+                onClick={() => {
+                  if (draft.assignment === "fixed") {
+                    onChange({ ...draft, member: member.id });
+                    return;
+                  }
+                  onChange({
+                    ...draft,
+                    order: selected
+                      ? draft.order.filter((id) => id !== member.id)
+                      : [...draft.order, member.id],
+                  });
+                }}
                 style={{
                   border: "none",
                   borderRadius: "var(--radius-pill)",
@@ -562,6 +623,17 @@ function CreateSheet({
                 }}
               >
                 {member.name}
+                {draft.assignment === "rotation" && selected ? (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      marginLeft: 7,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {position + 1}
+                  </span>
+                ) : null}
               </button>
             );
           })}

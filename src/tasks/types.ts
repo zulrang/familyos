@@ -114,7 +114,9 @@ export type CreateTaskDraft = {
   title: string;
   type: TaskType;
   recurrence: Recurrence;
-  member: MemberId;
+  assignment:
+    | { kind: "fixed"; member: MemberId }
+    | { kind: "rotation"; order: NonEmpty<MemberId> };
   time: LocalTime | null;
   stars: number;
 };
@@ -314,7 +316,7 @@ const CREATE_KEYS = new Set([
   "title",
   "type",
   "recurrence",
-  "member",
+  "assignment",
   "time",
   "stars",
 ]);
@@ -328,8 +330,16 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   const title = raw.title.trim();
   const type = parseTaskType(raw.type);
   const recurrence = parseRecurrence(raw.recurrence);
-  const member = nonEmptyString(raw.member);
-  if (!title || !type || !recurrence || !member) return null;
+  const assignment = parseAssignment(raw.assignment);
+  if (
+    !title ||
+    !type ||
+    !recurrence ||
+    !assignment ||
+    assignment.kind === "open"
+  ) {
+    return null;
+  }
   const stars = raw.stars === undefined ? 0 : raw.stars;
   if (typeof stars !== "number" || !Number.isSafeInteger(stars) || stars < 0) {
     return null;
@@ -339,17 +349,17 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
     time = parseLocalTime(raw.time);
     if (!time) return null;
   }
-  return { title, type, recurrence, member, time, stars };
+  return { title, type, recurrence, assignment, time, stars };
 }
 
-export function createFixedDefinition(draft: CreateTaskDraft): TaskDefinition {
+export function createDefinition(draft: CreateTaskDraft): TaskDefinition {
   return {
     id: newTaskId(),
     lineage: newLineageId(),
     title: draft.title,
     type: draft.type,
     recurrence: draft.recurrence,
-    assignment: { kind: "fixed", member: draft.member },
+    assignment: draft.assignment,
     time: draft.time,
     stars: draft.stars,
     retiredAt: null,

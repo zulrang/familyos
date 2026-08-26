@@ -39,7 +39,16 @@ function foldOccurrence(
   window: LocalDate,
   fallbackState: "pending" | "expired",
   events: Map<string, TaskEvent>,
+  completedCount: number,
 ): Occurrence {
+  const pendingAssignee =
+    definition.assignment.kind === "fixed"
+      ? definition.assignment.member
+      : definition.assignment.kind === "rotation"
+        ? definition.assignment.order[
+            completedCount % definition.assignment.order.length
+          ]
+        : null;
   const base = {
     task: definition.id,
     window,
@@ -47,10 +56,7 @@ function foldOccurrence(
     type: definition.type,
     lineage: definition.lineage,
     time: definition.time,
-    assignee:
-      definition.assignment.kind === "fixed"
-        ? definition.assignment.member
-        : null,
+    assignee: pendingAssignee,
   };
   const completed = events.get(`${definition.id}:${window}:completed`);
   if (completed?.kind === "completed") {
@@ -59,6 +65,10 @@ function foldOccurrence(
       state: "done",
       by: completed.by,
       at: completed.at,
+      assignee:
+        definition.assignment.kind === "rotation"
+          ? completed.by
+          : pendingAssignee,
     };
   }
   const skipped = events.get(`${definition.id}:${window}:skipped`);
@@ -171,16 +181,36 @@ export function view(
     order.set(definition.id, index);
   });
   const byKey = eventMap(events);
+  const completedCounts = new Map<TaskId, number>();
+  for (const event of events) {
+    if (event.kind !== "completed") continue;
+    completedCounts.set(event.task, (completedCounts.get(event.task) ?? 0) + 1);
+  }
   const out: Occurrence[] = [];
   for (const definition of definitions) {
     if (definition.retiredAt !== null) continue;
-    if (definition.assignment.kind !== "fixed") continue;
+    if (definition.assignment.kind === "open") continue;
     const windows = windowStarts(definition.recurrence, today);
+    const completedCount = completedCounts.get(definition.id) ?? 0;
     if (windows.previous !== null) {
-      void foldOccurrence(definition, windows.previous, "expired", byKey);
+      void foldOccurrence(
+        definition,
+        windows.previous,
+        "expired",
+        byKey,
+        completedCount,
+      );
     }
     if (windows.current !== null) {
-      out.push(foldOccurrence(definition, windows.current, "pending", byKey));
+      out.push(
+        foldOccurrence(
+          definition,
+          windows.current,
+          "pending",
+          byKey,
+          completedCount,
+        ),
+      );
     }
   }
   out.sort((a, b) => compareOccurrences(a, b, order));

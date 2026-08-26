@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
-import type { EventReceipt, TaskDefinition, TasksViewRead } from "./types";
+import {
+  addLocalDays,
+  type EventReceipt,
+  type TaskDefinition,
+  type TasksViewRead,
+} from "./types";
 
 describe("Tasks HTTP", () => {
   let dataRoot: string;
@@ -118,7 +123,7 @@ describe("Tasks HTTP", () => {
           title: "Walk dog",
           type: "chore",
           recurrence: { kind: "daily" },
-          member: "dad",
+          assignment: { kind: "fixed", member: "dad" },
         }),
       }),
     );
@@ -130,7 +135,7 @@ describe("Tasks HTTP", () => {
           title: "Brush teeth",
           type: "routine",
           recurrence: { kind: "daily" },
-          member: "dad",
+          assignment: { kind: "fixed", member: "dad" },
           time: "07:00",
         }),
       }),
@@ -155,7 +160,7 @@ describe("Tasks HTTP", () => {
     assert.deepEqual(ellieProgress, { member: "ellie", done: 0, total: 0 });
   });
 
-  test("create persists non-daily recurrence with stars and defaults omitted stars to zero", async () => {
+  test("create persists a weekly rotation with stars and defaults omitted stars to zero", async () => {
     const omitted = await handleCreateTask(
       req("http://familyos.test/api/tasks", {
         method: "POST",
@@ -163,7 +168,7 @@ describe("Tasks HTTP", () => {
           title: "Default stars",
           type: "chore",
           recurrence: { kind: "monthly", day: 28 },
-          member: "dad",
+          assignment: { kind: "fixed", member: "dad" },
         }),
       }),
     );
@@ -186,7 +191,7 @@ describe("Tasks HTTP", () => {
           title: "Earn stars",
           type: "routine",
           recurrence: { kind: "weekly", days: ["mon", "thu"] },
-          member: "ellie",
+          assignment: { kind: "rotation", order: ["ellie", "dad"] },
           stars: 7,
         }),
       }),
@@ -202,6 +207,10 @@ describe("Tasks HTTP", () => {
       kind: "weekly",
       days: ["mon", "thu"],
     });
+    assert.deepEqual(persisted?.assignment, {
+      kind: "rotation",
+      order: ["ellie", "dad"],
+    });
     assert.equal(persisted?.stars, 7);
   });
 
@@ -215,7 +224,7 @@ describe("Tasks HTTP", () => {
             title: "Invalid stars",
             type: "chore",
             recurrence: { kind: "daily" },
-            member: "dad",
+            assignment: { kind: "fixed", member: "dad" },
             stars,
           }),
         }),
@@ -237,7 +246,7 @@ describe("Tasks HTTP", () => {
           title: "Star task",
           type: "chore",
           recurrence: { kind: "daily" },
-          member: "dad",
+          assignment: { kind: "fixed", member: "dad" },
           stars: 5,
         }),
       }),
@@ -287,7 +296,7 @@ describe("Tasks HTTP", () => {
           title: "Trash",
           type: "chore",
           recurrence: { kind: "daily" },
-          member: "ellie",
+          assignment: { kind: "fixed", member: "ellie" },
         }),
       }),
     );
@@ -347,6 +356,95 @@ describe("Tasks HTTP", () => {
     );
   });
 
+  test("a closed-window completion advances an active-member rotation", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Dishes rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: ["dad", "ellie"] },
+        }),
+      }),
+    );
+    assert.equal(created.status, 200);
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const closedWindow = addLocalDays(before.today, -1);
+    const completed = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "completed",
+              task: definition.id,
+              window: closedWindow,
+              by: "dad",
+              at: "2026-08-25T16:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(completed.status, 200);
+    const completedBody = (await completed.json()) as {
+      receipts: EventReceipt[];
+    };
+    assert.equal(completedBody.receipts[0]?.status, "inserted");
+
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = after.occurrences.find(
+      (occurrence) => occurrence.task === definition.id,
+    );
+    assert.equal(row?.window, after.today);
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, "ellie");
+    assert.equal(
+      after.occurrences.some(
+        (occurrence) =>
+          occurrence.task === definition.id &&
+          occurrence.window === closedWindow,
+      ),
+      false,
+    );
+  });
+
+  test("rotation creation requires a nonempty active-member order", async () => {
+    const empty = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Empty rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: [] },
+        }),
+      }),
+    );
+    assert.equal(empty.status, 400);
+
+    const inactive = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Bad rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: ["dad", "ghost"] },
+        }),
+      }),
+    );
+    assert.equal(inactive.status, 400);
+  });
+
   test("a malformed batch rejects before any write", async () => {
     const before = loadEvents().length;
     const res = await handlePostTaskEvents(
@@ -378,7 +476,7 @@ describe("Tasks HTTP", () => {
           title: "Laundry",
           type: "chore",
           recurrence: { kind: "daily" },
-          member: "dad",
+          assignment: { kind: "fixed", member: "dad" },
         }),
       }),
     );
@@ -441,7 +539,7 @@ describe("Tasks HTTP", () => {
             title: `${recurrence.kind} task`,
             type: "chore",
             recurrence,
-            member: "dad",
+            assignment: { kind: "fixed", member: "dad" },
           }),
         }),
       );
@@ -472,7 +570,7 @@ describe("Tasks HTTP", () => {
             title: "Nope",
             type: "chore",
             recurrence,
-            member: "dad",
+            assignment: { kind: "fixed", member: "dad" },
           }),
         }),
       );
@@ -488,7 +586,7 @@ describe("Tasks HTTP", () => {
           title: "Nope",
           type: "chore",
           recurrence: { kind: "daily" },
-          member: "ghost",
+          assignment: { kind: "fixed", member: "ghost" },
         }),
       }),
     );

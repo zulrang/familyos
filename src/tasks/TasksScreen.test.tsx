@@ -78,10 +78,16 @@ function installFetch(store: TasksViewRead) {
           title: string;
           type: "chore" | "routine";
           recurrence: unknown;
-          member: string;
+          assignment:
+            | { kind: "fixed"; member: string }
+            | { kind: "rotation"; order: string[] };
           time?: string;
           stars: number;
         };
+        const assignee =
+          body.assignment.kind === "fixed"
+            ? body.assignment.member
+            : (body.assignment.order[0] ?? null);
         const occ: Occurrence = {
           state: "pending",
           task: `task-${store.occurrences.length + 1}` as Occurrence["task"],
@@ -91,7 +97,7 @@ function installFetch(store: TasksViewRead) {
           lineage:
             `lin-${store.occurrences.length + 1}` as Occurrence["lineage"],
           time: (body.time ?? null) as Occurrence["time"],
-          assignee: body.member,
+          assignee,
         };
         store.occurrences = [...store.occurrences, occ].sort((a, b) => {
           if (a.time && b.time)
@@ -101,7 +107,7 @@ function installFetch(store: TasksViewRead) {
           return 0;
         });
         store.progress = store.progress.map((row) =>
-          row.member === body.member ? { ...row, total: row.total + 1 } : row,
+          row.member === assignee ? { ...row, total: row.total + 1 } : row,
         );
         return json({ definition: { id: occ.task } });
       }
@@ -300,6 +306,41 @@ describe("TasksScreen", () => {
     expect(screen.queryByText(/star|point|balance/i)).not.toBeInTheDocument();
   });
 
+  test("the editor submits recurrence, rotation order, and stars together", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Dishes rotation");
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(screen.getByRole("button", { name: "Mon" }));
+    await user.click(screen.getByRole("button", { name: "Rotation" }));
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, "4");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("Dishes rotation")).toBeInTheDocument();
+    const createCall = fetchMock.mock.calls.find(([input, init]) => {
+      return (
+        urlOf(input).endsWith("/api/tasks") &&
+        init?.method === "POST" &&
+        !urlOf(input).endsWith("/events")
+      );
+    });
+    expect(JSON.parse(String(createCall?.[1]?.body ?? "{}"))).toMatchObject({
+      recurrence: { kind: "weekly", days: ["mon"] },
+      stars: 4,
+      assignment: {
+        kind: "rotation",
+        order: ["dad", "ellie"],
+      },
+    });
+  });
+
   test("tapping the circle marks the row done and increments progress once", async () => {
     const user = userEvent.setup();
     const store = emptyView();
@@ -338,6 +379,51 @@ describe("TasksScreen", () => {
       );
     });
     expect(screen.getByRole("checkbox", { name: "Dishes" })).toBeChecked();
+  });
+
+  test("one tap attributes a rotation completion and keeps the done row with its completer", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "rotation" as Occurrence["task"],
+        window: store.today,
+        title: "Kitchen",
+        type: "chore",
+        lineage: "rotation-lineage" as Occurrence["lineage"],
+        time: null,
+        assignee: "ellie",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("checkbox", { name: "Kitchen" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Kitchen" })).toBeChecked();
+    });
+    const ellieColumn = screen
+      .getByRole("heading", { name: "Ellie" })
+      .closest("section");
+    expect(ellieColumn).toHaveTextContent("Kitchen");
+    expect(ellieColumn).toHaveTextContent("1/1");
+    expect(
+      screen.queryByRole("button", { name: "Dad" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ellie" }),
+    ).not.toBeInTheDocument();
+    const eventCall = fetchMock.mock.calls.find(([input]) =>
+      urlOf(input).endsWith("/api/tasks/events"),
+    );
+    const event = JSON.parse(String(eventCall?.[1]?.body ?? "{}")).events[0];
+    expect(event.by).toBe("ellie");
   });
 
   test("reapplying a stale optimistic completion does not increment progress twice", () => {
