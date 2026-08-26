@@ -114,9 +114,7 @@ export type CreateTaskDraft = {
   title: string;
   type: TaskType;
   recurrence: Recurrence;
-  assignment:
-    | { kind: "fixed"; member: MemberId }
-    | { kind: "rotation"; order: NonEmpty<MemberId> };
+  assignment: AssignmentPolicy;
   time: LocalTime | null;
   stars: number;
 };
@@ -331,15 +329,7 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   const type = parseTaskType(raw.type);
   const recurrence = parseRecurrence(raw.recurrence);
   const assignment = parseAssignment(raw.assignment);
-  if (
-    !title ||
-    !type ||
-    !recurrence ||
-    !assignment ||
-    assignment.kind === "open"
-  ) {
-    return null;
-  }
+  if (!title || !type || !recurrence || !assignment) return null;
   const stars = raw.stars === undefined ? 0 : raw.stars;
   if (typeof stars !== "number" || !Number.isSafeInteger(stars) || stars < 0) {
     return null;

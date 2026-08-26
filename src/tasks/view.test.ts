@@ -58,6 +58,56 @@ describe("tasks view", () => {
     assert.equal(occurrences[0]?.lineage, "lin-1");
   });
 
+  test("a daily open task is pending and unclaimed", () => {
+    const [row] = view(
+      [
+        definition({
+          id: "open" as TaskId,
+          assignment: { kind: "open" },
+        }),
+      ],
+      [],
+      today,
+    );
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, null);
+  });
+
+  test("a claim places an open occurrence with its first claimant", () => {
+    const task = "open" as TaskId;
+    const claims: TaskEvent[] = [
+      { kind: "claimed", task, window: today, by: ellie },
+      { kind: "claimed", task, window: today, by: dad },
+    ];
+    const [row] = view(
+      [definition({ id: task, assignment: { kind: "open" } })],
+      claims,
+      today,
+    );
+    assert.equal(row?.state, "claimed");
+    assert.equal(row?.assignee, ellie);
+    if (row?.state === "claimed") assert.equal(row.by, ellie);
+  });
+
+  test("an unclaimed open completion is attributed to its member", () => {
+    const task = "open" as TaskId;
+    const completed: TaskEvent = {
+      kind: "completed",
+      task,
+      window: today,
+      by: ellie,
+      at: "2026-08-25T12:00:00Z" as Instant,
+    };
+    const [row] = view(
+      [definition({ id: task, assignment: { kind: "open" } })],
+      [completed],
+      today,
+    );
+    assert.equal(row?.state, "done");
+    assert.equal(row?.assignee, ellie);
+    if (row?.state === "done") assert.equal(row.by, ellie);
+  });
+
   test("timed occurrences sort before untimed, then by creation order", () => {
     const occurrences = view(
       [
@@ -258,18 +308,39 @@ describe("tasks view", () => {
     );
   });
 
-  test("open assignments do not render", () => {
-    const occurrences = view(
-      [
-        definition({
-          id: "open" as TaskId,
-          assignment: { kind: "open" },
-        }),
-      ],
-      [],
-      today,
-    );
-    assert.deepEqual(occurrences, []);
+  test("a weekly open task can be claimed or completed during its window", () => {
+    const task = definition({
+      id: "weekly-open" as TaskId,
+      recurrence: { kind: "weekly", days: ["mon"] },
+      assignment: { kind: "open" },
+      stars: 4,
+    });
+    const window = "2026-08-24" as LocalDate;
+    const claim: TaskEvent = {
+      kind: "claimed",
+      task: task.id,
+      window,
+      by: ellie,
+    };
+    const [claimed] = view([task], [claim], today);
+    assert.equal(claimed?.window, window);
+    assert.equal(claimed?.state, "claimed");
+    assert.equal(claimed?.assignee, ellie);
+
+    const completion: TaskEvent = {
+      kind: "completed",
+      task: task.id,
+      window,
+      by: dad,
+      at: "2026-08-25T12:00:00Z" as Instant,
+    };
+    const [completed] = view([task], [claim, completion], today);
+    assert.equal(completed?.state, "done");
+    assert.equal(completed?.assignee, dad);
+    if (completed?.state === "done") assert.equal(completed.by, dad);
+    assert.deepEqual(starBalances([task], [claim, completion], []), [
+      { member: dad, balance: 4 },
+    ]);
   });
 
   test("four completed turns assign a three-member rotation to the second member", () => {

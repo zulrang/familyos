@@ -4,8 +4,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
-import { markDone, TasksScreen } from "./TasksScreen";
-import type { Instant, Occurrence, TasksViewRead } from "./types";
+import { claimOccurrence, markDone, TasksScreen } from "./TasksScreen";
+import type { Occurrence, TasksViewRead } from "./types";
 
 afterEach(() => {
   cleanup();
@@ -19,6 +19,7 @@ const settings: PublicSettings = {
   members: [
     { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
     { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+    { id: "former", name: "Former", status: "retired" },
   ],
   calendarId: null,
   listIds: [],
@@ -80,14 +81,17 @@ function installFetch(store: TasksViewRead) {
           recurrence: unknown;
           assignment:
             | { kind: "fixed"; member: string }
-            | { kind: "rotation"; order: string[] };
+            | { kind: "rotation"; order: string[] }
+            | { kind: "open" };
           time?: string;
           stars: number;
         };
         const assignee =
           body.assignment.kind === "fixed"
             ? body.assignment.member
-            : (body.assignment.order[0] ?? null);
+            : body.assignment.kind === "rotation"
+              ? (body.assignment.order[0] ?? null)
+              : null;
         const occ: Occurrence = {
           state: "pending",
           task: `task-${store.occurrences.length + 1}` as Occurrence["task"],
@@ -106,40 +110,39 @@ function installFetch(store: TasksViewRead) {
           if (b.time) return 1;
           return 0;
         });
-        store.progress = store.progress.map((row) =>
-          row.member === assignee ? { ...row, total: row.total + 1 } : row,
-        );
+        if (assignee) {
+          store.progress = store.progress.map((row) =>
+            row.member === assignee ? { ...row, total: row.total + 1 } : row,
+          );
+        }
         return json({ definition: { id: occ.task } });
       }
       if (method === "POST" && url.endsWith("/api/tasks/events")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
-          events: { task: string; window: string }[];
+          events: {
+            kind: "claimed" | "completed";
+            task: string;
+            window: string;
+            by: string;
+          }[];
         };
         const event = body.events[0];
-        const already = store.occurrences.find(
-          (row) =>
-            row.task === event?.task &&
-            row.window === event.window &&
-            row.state === "done",
+        const current = store.occurrences.find(
+          (row) => row.task === event?.task && row.window === event.window,
         );
-        store.occurrences = store.occurrences.map((row) =>
-          row.task === event?.task && row.window === event.window
-            ? {
-                ...row,
-                state: "done",
-                by: row.assignee ?? "dad",
-                at: "2026-08-25T16:05:00Z" as Instant,
-                assignee: row.assignee,
-              }
-            : row,
-        );
-        if (!already) {
-          store.progress = store.progress.map((row) => {
-            const occ = store.occurrences.find((o) => o.task === event?.task);
-            return occ && row.member === occ.assignee
-              ? { ...row, done: row.done + 1 }
-              : row;
-          });
+        const already =
+          event?.kind === "claimed"
+            ? current?.state === "claimed"
+            : current?.state === "done";
+        if (event?.kind === "claimed" && current && !already) {
+          const next = claimOccurrence(store, current, event.by);
+          store.occurrences = next.occurrences;
+          store.progress = next.progress;
+        }
+        if (event?.kind === "completed" && current && !already) {
+          const next = markDone(store, current, event.by);
+          store.occurrences = next.occurrences;
+          store.progress = next.progress;
         }
         return json({
           receipts: [{ status: already ? "already-present" : "inserted" }],
@@ -341,6 +344,163 @@ describe("TasksScreen", () => {
     });
   });
 
+  test("the Household column appears only for an unclaimed open occurrence", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await screen.findByRole("button", { name: "Add task" });
+    expect(
+      screen.queryByRole("heading", { name: "Household" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Open dishes");
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(screen.getByRole("button", { name: "Mon" }));
+    await user.click(screen.getByRole("button", { name: "Household" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, "5");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const household = await screen.findByRole("heading", {
+      name: "Household",
+    });
+    expect(household.closest("section")).toHaveTextContent("Open dishes");
+    expect(household.closest("section")).toHaveTextContent("0/1");
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") &&
+        init?.method === "POST" &&
+        !urlOf(input).endsWith("/events"),
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body ?? "{}"))).toMatchObject({
+      recurrence: { kind: "weekly", days: ["mon"] },
+      assignment: { kind: "open" },
+      stars: 5,
+    });
+  });
+
+  test("claiming moves an open occurrence and its count to the chosen member", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "open-claim" as Occurrence["task"],
+        window: store.today,
+        title: "Open dishes",
+        type: "chore",
+        lineage: "lin-open-claim" as Occurrence["lineage"],
+        time: null,
+        assignee: null,
+      },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Claim Open dishes" }),
+    );
+    const picker = screen.getByRole("dialog", { name: "Claim task" });
+    expect(
+      screen.queryByRole("button", { name: "Former" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("heading", { name: "Household" }),
+      ).not.toBeInTheDocument();
+    });
+    const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
+    expect(dad).toHaveTextContent("Open dishes");
+    expect(dad).toHaveTextContent("0/1");
+    expect(picker).not.toBeInTheDocument();
+    const claimRequest = fetchMock.mock.calls.find(([, init]) =>
+      String(init?.body).includes('"kind":"claimed"'),
+    );
+    expect(String(claimRequest?.[1]?.body)).toContain('"by":"dad"');
+  });
+
+  test("completing an unclaimed open occurrence requires a member pick", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "open-complete" as Occurrence["task"],
+        window: store.today,
+        title: "Feed cat",
+        type: "chore",
+        lineage: "lin-open-complete" as Occurrence["lineage"],
+        time: null,
+        assignee: null,
+      },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("checkbox", { name: "Feed cat" }));
+    expect(
+      screen.getByRole("dialog", { name: "Complete task" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Feed cat" })).toBeChecked();
+    });
+    const ellie = screen
+      .getByRole("heading", { name: "Ellie" })
+      .closest("section");
+    expect(ellie).toHaveTextContent("Feed cat");
+    expect(ellie).toHaveTextContent("1/1");
+    const completionRequest = fetchMock.mock.calls.find(([, init]) =>
+      String(init?.body).includes('"kind":"completed"'),
+    );
+    expect(String(completionRequest?.[1]?.body)).toContain('"by":"ellie"');
+  });
+
+  test("completing a claimed occurrence uses the claimant without a picker", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "claimed",
+        task: "claimed-complete" as Occurrence["task"],
+        window: store.today,
+        title: "Take bins out",
+        type: "chore",
+        lineage: "lin-claimed-complete" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+        by: "dad",
+      },
+    ];
+    store.progress[0] = { member: "dad", done: 0, total: 1 };
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Take bins out" }),
+    );
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", { name: "Take bins out" }),
+      ).toBeChecked();
+    });
+    const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
+    expect(dad).toHaveTextContent("1/1");
+    const completionRequest = fetchMock.mock.calls.find(([, init]) =>
+      String(init?.body).includes('"kind":"completed"'),
+    );
+    expect(String(completionRequest?.[1]?.body)).toContain('"by":"dad"');
+  });
+
   test("tapping the circle marks the row done and increments progress once", async () => {
     const user = userEvent.setup();
     const store = emptyView();
@@ -452,5 +612,43 @@ describe("TasksScreen", () => {
       done: 1,
       total: 1,
     });
+  });
+
+  test("an explicit completer replaces a concurrent claimant in optimistic progress", () => {
+    const store = emptyView();
+    const staleOccurrence: Occurrence = {
+      state: "pending",
+      task: "open-race" as Occurrence["task"],
+      window: store.today,
+      title: "Feed cat",
+      type: "chore",
+      lineage: "lin-open-race" as Occurrence["lineage"],
+      time: null,
+      assignee: null,
+    };
+    store.occurrences = [
+      {
+        ...staleOccurrence,
+        state: "claimed",
+        assignee: "dad",
+        by: "dad",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+
+    const completed = markDone(store, staleOccurrence, "ellie");
+
+    expect(completed.occurrences[0]).toMatchObject({
+      state: "done",
+      assignee: "ellie",
+      by: "ellie",
+    });
+    expect(completed.progress).toEqual([
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 1, total: 1 },
+    ]);
   });
 });

@@ -288,6 +288,127 @@ describe("Tasks HTTP", () => {
     );
   });
 
+  test("a starred monthly open task projects through claim and completion", async () => {
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Wash bedding",
+          type: "chore",
+          recurrence: { kind: "monthly", day: 15 },
+          assignment: { kind: "open" },
+          stars: 7,
+        }),
+      }),
+    );
+    assert.equal(created.status, 200);
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    assert.deepEqual(definition.recurrence, { kind: "monthly", day: 15 });
+    assert.deepEqual(definition.assignment, { kind: "open" });
+    assert.equal(definition.stars, 7);
+
+    const unclaimed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const open = unclaimed.occurrences.find(
+      (row) => row.task === definition.id,
+    );
+    assert.equal(open?.state, "pending");
+    assert.equal(open?.assignee, null);
+    assert.deepEqual(unclaimed.progress, before.progress);
+    assert.ok(open);
+
+    const firstClaim = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "claimed",
+              task: definition.id,
+              window: open.window,
+              by: "dad",
+            },
+          ],
+        }),
+      }),
+    );
+    const firstReceipt = (await firstClaim.json()) as {
+      receipts: EventReceipt[];
+    };
+    assert.equal(firstReceipt.receipts[0]?.status, "inserted");
+
+    const secondClaim = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "claimed",
+              task: definition.id,
+              window: open.window,
+              by: "ellie",
+            },
+          ],
+        }),
+      }),
+    );
+    const secondReceipt = (await secondClaim.json()) as {
+      receipts: EventReceipt[];
+    };
+    assert.equal(secondReceipt.receipts[0]?.status, "already-present");
+
+    const claimed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const claimedRow = claimed.occurrences.find(
+      (row) => row.task === definition.id,
+    );
+    assert.equal(claimedRow?.state, "claimed");
+    assert.equal(claimedRow?.assignee, "dad");
+    const dadBefore = before.progress.find((row) => row.member === "dad");
+    const dadClaimed = claimed.progress.find((row) => row.member === "dad");
+    assert.equal(dadClaimed?.total, (dadBefore?.total ?? 0) + 1);
+
+    await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "completed",
+              task: definition.id,
+              window: open.window,
+              by: "dad",
+              at: "2026-08-25T16:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    const completed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const completedRow = completed.occurrences.find(
+      (row) => row.task === definition.id,
+    );
+    assert.equal(completedRow?.state, "done");
+    if (completedRow?.state === "done") assert.equal(completedRow.by, "dad");
+    const dadCompleted = completed.progress.find((row) => row.member === "dad");
+    assert.equal(dadCompleted?.done, (dadBefore?.done ?? 0) + 1);
+    const balanceBefore =
+      before.starBalances.find((row) => row.member === "dad")?.balance ?? 0;
+    assert.deepEqual(
+      completed.starBalances.find((row) => row.member === "dad"),
+      { member: "dad", balance: balanceBefore + 7 },
+    );
+  });
+
   test("completion increments progress; a duplicate stores one fact", async () => {
     const created = await handleCreateTask(
       req("http://familyos.test/api/tasks", {

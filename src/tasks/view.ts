@@ -29,7 +29,8 @@ const WEEKDAY_INDEX: Record<Weekday, number> = {
 function eventMap(events: readonly TaskEvent[]): Map<string, TaskEvent> {
   const map = new Map<string, TaskEvent>();
   for (const event of events) {
-    map.set(`${event.task}:${event.window}:${event.kind}`, event);
+    const key = `${event.task}:${event.window}:${event.kind}`;
+    if (!map.has(key)) map.set(key, event);
   }
   return map;
 }
@@ -66,9 +67,7 @@ function foldOccurrence(
       by: completed.by,
       at: completed.at,
       assignee:
-        definition.assignment.kind === "rotation"
-          ? completed.by
-          : pendingAssignee,
+        definition.assignment.kind === "fixed" ? pendingAssignee : completed.by,
     };
   }
   const skipped = events.get(`${definition.id}:${window}:skipped`);
@@ -79,6 +78,8 @@ function foldOccurrence(
   if (claimed?.kind === "claimed") {
     return {
       ...base,
+      assignee:
+        definition.assignment.kind === "open" ? claimed.by : base.assignee,
       state: "claimed",
       by: claimed.by,
     };
@@ -189,7 +190,6 @@ export function view(
   const out: Occurrence[] = [];
   for (const definition of definitions) {
     if (definition.retiredAt !== null) continue;
-    if (definition.assignment.kind === "open") continue;
     const windows = windowStarts(definition.recurrence, today);
     const completedCount = completedCounts.get(definition.id) ?? 0;
     if (windows.previous !== null) {

@@ -62,7 +62,9 @@ export async function handleCreateTask(request: Request): Promise<Response> {
   const assignedMembers =
     draft.assignment.kind === "fixed"
       ? [draft.assignment.member]
-      : draft.assignment.order;
+      : draft.assignment.kind === "rotation"
+        ? draft.assignment.order
+        : [];
   if (
     assignedMembers.some(
       (id) => memberById(household.members, id)?.status !== "active",

@@ -74,9 +74,12 @@ type RecurrenceRequest =
   | { kind: "weekly"; days: Weekday[] }
   | { kind: "monthly"; day: number };
 
-type Draft =
-  | (DraftFields & { assignment: "fixed"; member: string })
-  | (DraftFields & { assignment: "rotation"; order: string[] });
+type DraftAssignment =
+  | { kind: "fixed"; member: string }
+  | { kind: "rotation"; order: string[] }
+  | { kind: "open" };
+
+type Draft = DraftFields & { assignment: DraftAssignment };
 
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
@@ -118,14 +121,30 @@ function parseDraftRecurrence(
   }
 }
 
-export function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
+type MemberAction =
+  | { kind: "claim"; occurrence: Occurrence }
+  | { kind: "complete"; occurrence: Occurrence };
+
+const HOUSEHOLD_SURFACE: MemberSurface = {
+  fill: "#dcebf6",
+  soft: "#eef4f8",
+  ink: "#425466",
+};
+
+export function markDone(
+  view: TasksViewRead,
+  occ: Occurrence,
+  member?: string,
+): TasksViewRead {
   const current = view.occurrences.find(
     (row) => row.task === occ.task && row.window === occ.window,
   );
-  if (!current || current.state === "done" || current.assignee === null) {
+  if (!current || current.state === "done") {
     return view;
   }
-  const by = current.assignee;
+  const by = member ?? current.assignee;
+  if (!by) return view;
+  const priorAssignee = current.assignee;
   return {
     ...view,
     occurrences: view.occurrences.map((row) =>
@@ -139,8 +158,47 @@ export function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
           }
         : row,
     ),
+    progress: view.progress.map((row) => {
+      if (row.member === by) {
+        return {
+          ...row,
+          done: row.done + 1,
+          total: row.total + (priorAssignee === by ? 0 : 1),
+        };
+      }
+      if (priorAssignee !== null && row.member === priorAssignee) {
+        return { ...row, total: row.total - 1 };
+      }
+      return row;
+    }),
+  };
+}
+
+export function claimOccurrence(
+  view: TasksViewRead,
+  occ: Occurrence,
+  member: string,
+): TasksViewRead {
+  const current = view.occurrences.find(
+    (row) => row.task === occ.task && row.window === occ.window,
+  );
+  if (!current || current.state !== "pending" || current.assignee !== null) {
+    return view;
+  }
+  return {
+    ...view,
+    occurrences: view.occurrences.map((row) =>
+      row.task === occ.task && row.window === occ.window
+        ? {
+            ...row,
+            state: "claimed" as const,
+            by: member,
+            assignee: member,
+          }
+        : row,
+    ),
     progress: view.progress.map((row) =>
-      row.member === by ? { ...row, done: row.done + 1 } : row,
+      row.member === member ? { ...row, total: row.total + 1 } : row,
     ),
   };
 }
@@ -150,6 +208,7 @@ export function TasksScreen() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
   const [sheet, setSheet] = useState<Draft | null>(null);
+  const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -186,9 +245,12 @@ export function TasksScreen() {
 
   const members = settings ? activeMembers(settings.members) : [];
 
-  async function complete(occ: Occurrence) {
-    if (!occ.assignee) return;
-    setTasks((cur) => markDone(cur, occ));
+  async function complete(occ: Occurrence, member = occ.assignee) {
+    if (!member) {
+      setMemberAction({ kind: "complete", occurrence: occ });
+      return;
+    }
+    setTasks((cur) => markDone(cur, occ, member));
     try {
       const res = await fetch("/api/tasks/events", {
         method: "POST",
@@ -199,7 +261,7 @@ export function TasksScreen() {
               kind: "completed",
               task: occ.task,
               window: occ.window,
-              by: occ.assignee,
+              by: member,
               at: new Date().toISOString(),
             },
           ],
@@ -216,19 +278,48 @@ export function TasksScreen() {
     }
   }
 
+  async function claim(occ: Occurrence, member?: string) {
+    if (!member) {
+      setMemberAction({ kind: "claim", occurrence: occ });
+      return;
+    }
+    setTasks((cur) => claimOccurrence(cur, occ, member));
+    try {
+      const res = await fetch("/api/tasks/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "claimed",
+              task: occ.task,
+              window: occ.window,
+              by: member,
+            },
+          ],
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) {
+        setError("Could not claim task.");
+      }
+      await load();
+    } catch {
+      setError("Could not claim task.");
+      await load();
+    }
+  }
+
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
-    const assignment =
-      sheet.assignment === "fixed"
-        ? { kind: "fixed" as const, member: sheet.member }
-        : { kind: "rotation" as const, order: sheet.order };
     const recurrence = parseDraftRecurrence(sheet.recurrence);
     const stars = Number(sheet.stars);
     if (
       !title ||
-      (assignment.kind === "fixed" && !assignment.member) ||
-      (assignment.kind === "rotation" && assignment.order.length === 0) ||
+      (sheet.assignment.kind === "fixed" && !sheet.assignment.member) ||
+      (sheet.assignment.kind === "rotation" &&
+        sheet.assignment.order.length === 0) ||
       !recurrence ||
       !Number.isSafeInteger(stars) ||
       stars < 0
@@ -244,7 +335,7 @@ export function TasksScreen() {
           title,
           type: sheet.type,
           recurrence,
-          assignment,
+          assignment: sheet.assignment,
           ...(sheet.time ? { time: sheet.time } : {}),
           stars,
         }),
@@ -264,6 +355,10 @@ export function TasksScreen() {
   const surfaces = new Map<string, MemberSurface>(
     members.map((member) => [member.id, memberSurface(member.color)]),
   );
+  const householdRows = tasks.occurrences.filter(
+    (row) => row.state === "pending" && row.assignee === null,
+  );
+  const columnCount = members.length + (householdRows.length > 0 ? 1 : 0);
 
   return (
     <div
@@ -309,7 +404,7 @@ export function TasksScreen() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${members.length}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
             gap: 14,
             padding: "4px 24px 24px",
             flex: 1,
@@ -351,6 +446,26 @@ export function TasksScreen() {
               </MemberColumn>
             );
           })}
+          {householdRows.length > 0 ? (
+            <MemberColumn
+              name="Household"
+              surface={HOUSEHOLD_SURFACE}
+              done={0}
+              total={householdRows.length}
+            >
+              {householdRows.map((row) => (
+                <TaskRow
+                  key={`${row.task}:${row.window}`}
+                  label={row.title}
+                  time={row.time}
+                  done={false}
+                  surface={HOUSEHOLD_SURFACE}
+                  onClaim={() => claim(row)}
+                  onComplete={() => complete(row)}
+                />
+              ))}
+            </MemberColumn>
+          ) : null}
         </div>
       ) : null}
       {members.length > 0 ? (
@@ -361,8 +476,10 @@ export function TasksScreen() {
               title: "",
               type: "chore",
               recurrence: { kind: "daily" },
-              assignment: "fixed",
-              member: members[0]?.id ?? "",
+              assignment: {
+                kind: "fixed",
+                member: members[0]?.id ?? "",
+              },
               time: "",
               stars: "0",
             })
@@ -377,6 +494,22 @@ export function TasksScreen() {
           onChange={setSheet}
           onClose={() => setSheet(null)}
           onSave={createTask}
+        />
+      ) : null}
+      {memberAction ? (
+        <MemberPicker
+          action={memberAction.kind}
+          members={members}
+          onClose={() => setMemberAction(null)}
+          onPick={(member) => {
+            const action = memberAction;
+            setMemberAction(null);
+            if (action.kind === "claim") {
+              claim(action.occurrence, member.id).catch(() => {});
+            } else {
+              complete(action.occurrence, member.id).catch(() => {});
+            }
+          }}
         />
       ) : null}
     </div>
@@ -400,11 +533,13 @@ function CreateSheet({
 }) {
   const closeFromBackdrop = useRef(false);
   const stars = Number(draft.stars);
+  const assignmentReady =
+    draft.assignment.kind === "open" ||
+    (draft.assignment.kind === "fixed" && draft.assignment.member.length > 0) ||
+    (draft.assignment.kind === "rotation" && draft.assignment.order.length > 0);
   const canSave =
     draft.title.trim().length > 0 &&
-    (draft.assignment === "fixed"
-      ? draft.member.length > 0
-      : draft.order.length > 0) &&
+    assignmentReady &&
     parseDraftRecurrence(draft.recurrence) !== null &&
     Number.isSafeInteger(stars) &&
     stars >= 0;
@@ -478,15 +613,21 @@ function CreateSheet({
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <Button
-            variant={draft.assignment === "fixed" ? "primary" : "secondary"}
+            variant={
+              draft.assignment.kind === "fixed" ? "primary" : "secondary"
+            }
             onClick={() =>
               onChange({
                 ...draft,
-                assignment: "fixed",
-                member:
-                  draft.assignment === "fixed"
-                    ? draft.member
-                    : (draft.order[0] ?? members[0]?.id ?? ""),
+                assignment: {
+                  kind: "fixed",
+                  member:
+                    draft.assignment.kind === "fixed"
+                      ? draft.assignment.member
+                      : draft.assignment.kind === "rotation"
+                        ? (draft.assignment.order[0] ?? members[0]?.id ?? "")
+                        : (members[0]?.id ?? ""),
+                },
               })
             }
             style={{ flex: 1 }}
@@ -494,17 +635,23 @@ function CreateSheet({
             Fixed
           </Button>
           <Button
-            variant={draft.assignment === "rotation" ? "primary" : "secondary"}
+            variant={
+              draft.assignment.kind === "rotation" ? "primary" : "secondary"
+            }
             onClick={() =>
               onChange({
                 ...draft,
-                assignment: "rotation",
-                order:
-                  draft.assignment === "rotation"
-                    ? draft.order
-                    : draft.member
-                      ? [draft.member]
-                      : [],
+                assignment: {
+                  kind: "rotation",
+                  order:
+                    draft.assignment.kind === "rotation"
+                      ? draft.assignment.order
+                      : draft.assignment.kind === "fixed"
+                        ? [draft.assignment.member]
+                        : members[0]
+                          ? [members[0].id]
+                          : [],
+                },
               })
             }
             style={{ flex: 1 }}
@@ -584,14 +731,35 @@ function CreateSheet({
           />
         ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => onChange({ ...draft, assignment: { kind: "open" } })}
+            style={{
+              border: "none",
+              borderRadius: "var(--radius-pill)",
+              padding: "8px 14px",
+              minHeight: "var(--hit-min)",
+              background:
+                draft.assignment.kind === "open"
+                  ? HOUSEHOLD_SURFACE.fill
+                  : HOUSEHOLD_SURFACE.soft,
+              color: HOUSEHOLD_SURFACE.ink,
+              font: "var(--type-card-meta)",
+              cursor: "pointer",
+            }}
+          >
+            Household
+          </button>
           {members.map((member) => {
             const surface = memberSurface(member.color);
             const position =
-              draft.assignment === "fixed"
-                ? draft.member === member.id
+              draft.assignment.kind === "fixed"
+                ? draft.assignment.member === member.id
                   ? 0
                   : -1
-                : draft.order.indexOf(member.id);
+                : draft.assignment.kind === "rotation"
+                  ? draft.assignment.order.indexOf(member.id)
+                  : -1;
             const selected = position >= 0;
             return (
               <button
@@ -600,15 +768,23 @@ function CreateSheet({
                 aria-label={member.name}
                 aria-pressed={selected}
                 onClick={() => {
-                  if (draft.assignment === "fixed") {
-                    onChange({ ...draft, member: member.id });
+                  if (draft.assignment.kind !== "rotation") {
+                    onChange({
+                      ...draft,
+                      assignment: { kind: "fixed", member: member.id },
+                    });
                     return;
                   }
                   onChange({
                     ...draft,
-                    order: selected
-                      ? draft.order.filter((id) => id !== member.id)
-                      : [...draft.order, member.id],
+                    assignment: {
+                      kind: "rotation",
+                      order: selected
+                        ? draft.assignment.order.filter(
+                            (id) => id !== member.id,
+                          )
+                        : [...draft.assignment.order, member.id],
+                    },
                   });
                 }}
                 style={{
@@ -623,7 +799,7 @@ function CreateSheet({
                 }}
               >
                 {member.name}
-                {draft.assignment === "rotation" && selected ? (
+                {draft.assignment.kind === "rotation" && selected ? (
                   <span
                     aria-hidden="true"
                     style={{
@@ -663,6 +839,96 @@ function CreateSheet({
           >
             Add
           </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemberPicker({
+  action,
+  members,
+  onClose,
+  onPick,
+}: {
+  action: MemberAction["kind"];
+  members: ActiveMember[];
+  onClose: () => void;
+  onPick: (member: ActiveMember) => void;
+}) {
+  const title = action === "claim" ? "Claim task" : "Complete task";
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 9,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          inset: 0,
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+        }}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-member-picker-title"
+        style={{
+          position: "relative",
+          width: 360,
+          maxWidth: "calc(100% - 48px)",
+          background: "var(--surface-screen)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "var(--shadow-panel)",
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2
+            id="task-member-picker-title"
+            style={{ font: "var(--type-section)", flex: 1 }}
+          >
+            {title}
+          </h2>
+          <IconButton icon="x" label="Close" onClick={onClose} />
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {members.map((member) => {
+            const surface = memberSurface(member.color);
+            return (
+              <button
+                key={member.id}
+                type="button"
+                onClick={() => onPick(member)}
+                style={{
+                  border: "none",
+                  borderRadius: "var(--radius-pill)",
+                  padding: "8px 14px",
+                  minHeight: "var(--hit-min)",
+                  background: surface.soft,
+                  color: surface.ink,
+                  font: "var(--type-card-meta)",
+                  cursor: "pointer",
+                }}
+              >
+                {member.name}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

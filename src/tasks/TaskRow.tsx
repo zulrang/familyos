@@ -19,6 +19,7 @@ export function TaskRow({
   done,
   surface,
   onComplete,
+  onClaim,
   style,
 }: {
   label: string;
@@ -26,6 +27,7 @@ export function TaskRow({
   done: boolean;
   surface: MemberSurface;
   onComplete: () => void;
+  onClaim?: () => void;
   style?: CSSProperties;
 }) {
   const ink = done ? onFillInk(surface.fill) : surface.ink;
@@ -67,9 +69,29 @@ export function TaskRow({
           </span>
         ) : null}
       </span>
+      {onClaim ? (
+        <button
+          type="button"
+          aria-label={`Claim ${label}`}
+          onClick={onClaim}
+          style={{
+            marginLeft: "auto",
+            minHeight: "var(--hit-min)",
+            padding: "0 14px",
+            border: "1px solid var(--surface-grid-line)",
+            borderRadius: "var(--radius-pill)",
+            background: "var(--surface-card)",
+            color: "var(--text-title)",
+            font: "var(--type-card-meta)",
+            cursor: "pointer",
+          }}
+        >
+          Claim
+        </button>
+      ) : null}
       <label
         style={{
-          marginLeft: "auto",
+          marginLeft: onClaim ? 0 : "auto",
           width: 26,
           height: 26,
           flex: "0 0 auto",
