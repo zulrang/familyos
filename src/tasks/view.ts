@@ -10,7 +10,8 @@ import {
 function eventMap(events: readonly TaskEvent[]): Map<string, TaskEvent> {
   const map = new Map<string, TaskEvent>();
   for (const event of events) {
-    map.set(`${event.task}:${event.window}:${event.kind}`, event);
+    const key = `${event.task}:${event.window}:${event.kind}`;
+    if (!map.has(key)) map.set(key, event);
   }
   return map;
 }
@@ -35,8 +36,11 @@ function foldOccurrence(
   };
   const completed = events.get(`${definition.id}:${window}:completed`);
   if (completed?.kind === "completed") {
+    const assignee =
+      definition.assignment.kind === "open" ? completed.by : base.assignee;
     return {
       ...base,
+      assignee,
       state: "done",
       by: completed.by,
       at: completed.at,
@@ -50,6 +54,8 @@ function foldOccurrence(
   if (claimed?.kind === "claimed") {
     return {
       ...base,
+      assignee:
+        definition.assignment.kind === "open" ? claimed.by : base.assignee,
       state: "claimed",
       by: claimed.by,
     };
@@ -90,10 +96,9 @@ export function view(
   const out: Occurrence[] = [];
   for (const definition of definitions) {
     if (definition.retiredAt !== null) continue;
-    // ponytail: #60 ceiling is daily + fixed. Other kinds stay total and emit nothing.
     if (
       definition.recurrence.kind !== "daily" ||
-      definition.assignment.kind !== "fixed"
+      definition.assignment.kind === "rotation"
     ) {
       continue;
     }

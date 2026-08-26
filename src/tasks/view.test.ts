@@ -15,6 +15,7 @@ import { view } from "./view";
 
 const today = "2026-08-25" as LocalDate;
 const dad = "dad" as MemberId;
+const ellie = "ellie" as MemberId;
 
 function definition(
   overrides: Partial<TaskDefinition> & Pick<TaskDefinition, "id">,
@@ -45,6 +46,56 @@ describe("tasks view", () => {
     assert.equal(occurrences[0]?.window, today);
     assert.equal(occurrences[0]?.assignee, dad);
     assert.equal(occurrences[0]?.lineage, "lin-1");
+  });
+
+  test("a daily open task is pending and unclaimed", () => {
+    const [row] = view(
+      [
+        definition({
+          id: "open" as TaskId,
+          assignment: { kind: "open" },
+        }),
+      ],
+      [],
+      today,
+    );
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, null);
+  });
+
+  test("a claim places an open occurrence with its first claimant", () => {
+    const task = "open" as TaskId;
+    const claims: TaskEvent[] = [
+      { kind: "claimed", task, window: today, by: ellie },
+      { kind: "claimed", task, window: today, by: dad },
+    ];
+    const [row] = view(
+      [definition({ id: task, assignment: { kind: "open" } })],
+      claims,
+      today,
+    );
+    assert.equal(row?.state, "claimed");
+    assert.equal(row?.assignee, ellie);
+    if (row?.state === "claimed") assert.equal(row.by, ellie);
+  });
+
+  test("an unclaimed open completion is attributed to its member", () => {
+    const task = "open" as TaskId;
+    const completed: TaskEvent = {
+      kind: "completed",
+      task,
+      window: today,
+      by: ellie,
+      at: "2026-08-25T12:00:00Z" as Instant,
+    };
+    const [row] = view(
+      [definition({ id: task, assignment: { kind: "open" } })],
+      [completed],
+      today,
+    );
+    assert.equal(row?.state, "done");
+    assert.equal(row?.assignee, ellie);
+    if (row?.state === "done") assert.equal(row.by, ellie);
   });
 
   test("timed occurrences sort before untimed, then by creation order", () => {
@@ -149,7 +200,7 @@ describe("tasks view", () => {
     assert.deepEqual(occurrences, []);
   });
 
-  test("unsupported recurrence and assignment kinds do not throw", () => {
+  test("non-daily recurrence and rotation do not render", () => {
     const occurrences = view(
       [
         definition({
@@ -159,10 +210,6 @@ describe("tasks view", () => {
         definition({
           id: "weekly" as TaskId,
           recurrence: { kind: "weekly", days: ["mon"] },
-        }),
-        definition({
-          id: "open" as TaskId,
-          assignment: { kind: "open" },
         }),
         definition({
           id: "rotation" as TaskId,

@@ -4,7 +4,7 @@ import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { msToZonedDate } from "@/shared/time";
 import { applyEvent, insertDefinition, loadStore } from "./store";
 import {
-  dailyFixedDefinition,
+  dailyDefinition,
   parseCreateTaskDraft,
   parseEventBatch,
   parseLocalDate,
@@ -57,12 +57,14 @@ export async function handleCreateTask(request: Request): Promise<Response> {
   if (isUnauthorized(display)) return display;
   const draft = parseCreateTaskDraft(await readJson(request));
   if (!draft) return jsonError("invalid body", 400);
-  const household = await readHousehold();
-  const member = memberById(household.members, draft.member);
-  if (!member || member.status !== "active") {
-    return jsonError("active member required", 400);
+  if (draft.assignment.kind === "fixed") {
+    const household = await readHousehold();
+    const member = memberById(household.members, draft.assignment.member);
+    if (!member || member.status !== "active") {
+      return jsonError("active member required", 400);
+    }
   }
-  const definition = dailyFixedDefinition(draft);
+  const definition = dailyDefinition(draft);
   insertDefinition(definition);
   return Response.json({ definition });
 }

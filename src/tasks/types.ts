@@ -107,8 +107,8 @@ export type TasksViewRead = {
 export type CreateTaskDraft = {
   title: string;
   type: TaskType;
-  member: MemberId;
   time: LocalTime | null;
+  assignment: { kind: "fixed"; member: MemberId } | { kind: "open" };
 };
 
 const WEEKDAYS = new Set<string>([
@@ -312,24 +312,31 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   if (typeof raw.title !== "string") return null;
   const title = raw.title.trim();
   const type = parseTaskType(raw.type);
-  const member = nonEmptyString(raw.member);
-  if (!title || !type || !member) return null;
+  if (!title || !type) return null;
+  let assignment: CreateTaskDraft["assignment"];
+  if (raw.member === null) {
+    assignment = { kind: "open" };
+  } else {
+    const member = nonEmptyString(raw.member);
+    if (!member) return null;
+    assignment = { kind: "fixed", member };
+  }
   let time: LocalTime | null = null;
   if (raw.time !== undefined && raw.time !== null && raw.time !== "") {
     time = parseLocalTime(raw.time);
     if (!time) return null;
   }
-  return { title, type, member, time };
+  return { title, type, assignment, time };
 }
 
-export function dailyFixedDefinition(draft: CreateTaskDraft): TaskDefinition {
+export function dailyDefinition(draft: CreateTaskDraft): TaskDefinition {
   return {
     id: newTaskId(),
     lineage: newLineageId(),
     title: draft.title,
     type: draft.type,
     recurrence: { kind: "daily" },
-    assignment: { kind: "fixed", member: draft.member },
+    assignment: draft.assignment,
     time: draft.time,
     stars: 0,
     retiredAt: null,

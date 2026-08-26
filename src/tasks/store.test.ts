@@ -97,6 +97,35 @@ describe("tasks sqlite store", () => {
     assert.equal(stored.length, 1);
   });
 
+  test("a duplicate claim keeps the first accepted claimant", () => {
+    const task = crypto.randomUUID() as TaskId;
+    const window = "2026-08-25" as LocalDate;
+    assert.equal(
+      applyEvent({
+        kind: "claimed",
+        task,
+        window,
+        by: "dad" as MemberId,
+      }).status,
+      "inserted",
+    );
+    assert.equal(
+      applyEvent({
+        kind: "claimed",
+        task,
+        window,
+        by: "ellie" as MemberId,
+      }).status,
+      "already-present",
+    );
+    const claims = loadEvents().filter(
+      (row) =>
+        row.task === task && row.window === window && row.kind === "claimed",
+    );
+    assert.equal(claims.length, 1);
+    assert.equal(claims[0]?.kind === "claimed" ? claims[0].by : null, "dad");
+  });
+
   test("verified requires a matching completed event", () => {
     const task = crypto.randomUUID() as TaskId;
     const window = "2026-08-25" as LocalDate;
