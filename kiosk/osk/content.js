@@ -53,7 +53,8 @@
       else hideBoard();
     }
     if (msg.type === "insert") {
-      const target = focused || (Date.now() - lastFocusAt < 2000 ? lastField : null);
+      const target =
+        focused || (Date.now() - lastFocusAt < 2000 ? lastField : null);
       if (target) insert(target, msg.key);
     }
   });
@@ -136,7 +137,8 @@
         const btn = document.createElement("button");
         btn.type = "button";
         btn.dataset.key = key;
-        btn.className = "key" + (wideClass(key) ? ` ${wideClass(key)}` : "");
+        const wide = wideClass(key);
+        btn.className = `key${wide ? ` ${wide}` : ""}`;
         if (key === "shift" && (shifted || caps)) btn.classList.add("active");
         btn.textContent = labelFor(key);
         rowEl.appendChild(btn);
@@ -148,7 +150,8 @@
   function wideClass(key) {
     if (key === "space") return "space";
     if (key === "shift" || key === "backspace" || key === "enter") return "mod";
-    if (key === "num" || key === "abc" || key === "#+=" || key === "123") return "mod";
+    if (key === "num" || key === "abc" || key === "#+=" || key === "123")
+      return "mod";
     return "";
   }
 
@@ -175,7 +178,9 @@
   }
 
   function onPointerUp(e) {
-    root.querySelectorAll(".press").forEach((n) => n.classList.remove("press"));
+    root.querySelectorAll(".press").forEach((n) => {
+      n.classList.remove("press");
+    });
     if (holding) {
       clearTimeout(holding);
       clearInterval(holding);
@@ -223,7 +228,8 @@
     if (key === "period") ch = ".";
     if (key === "backspace") ch = "Backspace";
     if (key === "enter") ch = "Enter";
-    if (layout === "alpha" && ch.length === 1 && (shifted || caps)) ch = ch.toUpperCase();
+    if (layout === "alpha" && ch.length === 1 && (shifted || caps))
+      ch = ch.toUpperCase();
 
     send({ type: "key", key: ch });
 
@@ -270,7 +276,12 @@
         else form.submit();
       } else {
         el.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }),
+          new KeyboardEvent("keydown", {
+            key: "Enter",
+            code: "Enter",
+            keyCode: 13,
+            bubbles: true,
+          }),
         );
       }
       return;
@@ -289,12 +300,17 @@
   }
 
   function setVal(el, v) {
-    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const proto =
+      el.tagName === "TEXTAREA"
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
   }
 
   function fire(el, inputType) {
-    el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType }));
+    el.dispatchEvent(
+      new InputEvent("input", { bubbles: true, composed: true, inputType }),
+    );
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
