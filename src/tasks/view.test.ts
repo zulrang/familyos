@@ -7,11 +7,14 @@ import {
   type LineageId,
   type LocalDate,
   type LocalTime,
+  parseRecurrence,
+  type Recurrence,
+  type StarAdjustment,
   type TaskDefinition,
   type TaskEvent,
   type TaskId,
 } from "./types";
-import { view } from "./view";
+import { starBalances, view } from "./view";
 
 const today = "2026-08-25" as LocalDate;
 const dad = "dad" as MemberId;
@@ -32,6 +35,12 @@ function definition(
     retiredAt: null,
     ...overrides,
   };
+}
+
+function mustParseRecurrence(raw: unknown): Recurrence {
+  const parsed = parseRecurrence(raw);
+  assert.ok(parsed);
+  return parsed;
 }
 
 describe("tasks view", () => {
@@ -151,17 +160,107 @@ describe("tasks view", () => {
     assert.deepEqual(occurrences, []);
   });
 
-  test("unsupported recurrence and open assignment do not throw", () => {
+  test("a weekly task stays pending through its window and replaces the expired occurrence", () => {
+    const task = definition({
+      id: "weekly" as TaskId,
+      recurrence: { kind: "weekly", days: ["mon"] },
+    });
+    for (const date of [
+      "2026-08-25",
+      "2026-08-26",
+      "2026-08-27",
+      "2026-08-28",
+      "2026-08-29",
+      "2026-08-30",
+    ] as LocalDate[]) {
+      const rows = view([task], [], date);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0]?.state, "pending");
+      assert.equal(rows[0]?.window, "2026-08-24");
+    }
+    const nextMonday = view([task], [], "2026-08-31" as LocalDate);
+    assert.equal(nextMonday.length, 1);
+    assert.equal(nextMonday[0]?.state, "pending");
+    assert.equal(nextMonday[0]?.window, "2026-08-31");
+    assert.ok(nextMonday.every((row) => row.window !== "2026-08-24"));
+  });
+
+  test("each selected weekly day starts a new window", () => {
+    const task = definition({
+      id: "weekly" as TaskId,
+      recurrence: { kind: "weekly", days: ["mon", "thu"] },
+    });
+    const windowsByDate = [
+      ["2026-08-24", "2026-08-24"],
+      ["2026-08-26", "2026-08-24"],
+      ["2026-08-27", "2026-08-27"],
+      ["2026-08-30", "2026-08-27"],
+      ["2026-08-31", "2026-08-31"],
+    ] as const;
+    for (const [date, expectedWindow] of windowsByDate) {
+      const [row] = view([task], [], date as LocalDate);
+      assert.equal(row?.window, expectedWindow);
+      assert.equal(row?.state, "pending");
+    }
+  });
+
+  test("a weekly rotation advances from a closed completion while stars use its definition", () => {
+    const task = definition({
+      id: "weekly-rotation" as TaskId,
+      recurrence: { kind: "weekly", days: ["mon"] },
+      assignment: { kind: "rotation", order: [dad, ellie] },
+      stars: 6,
+    });
+    const completed: TaskEvent = {
+      kind: "completed",
+      task: task.id,
+      window: "2026-08-17" as LocalDate,
+      by: dad,
+      at: "2026-08-17T12:00:00Z" as Instant,
+    };
+
+    const [row] = view([task], [completed], today);
+
+    assert.equal(row?.window, "2026-08-24");
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, ellie);
+    assert.deepEqual(starBalances([task], [completed], []), [
+      { member: dad, balance: 6 },
+    ]);
+  });
+
+  test("a once task appears only on its scheduled date", () => {
+    const task = definition({
+      id: "once" as TaskId,
+      recurrence: { kind: "once", date: today },
+    });
+    assert.deepEqual(view([task], [], addLocalDays(today, -1)), []);
+    assert.equal(view([task], [], today)[0]?.window, today);
+    assert.deepEqual(view([task], [], addLocalDays(today, 1)), []);
+  });
+
+  test("a monthly task stays open until next month's scheduled day", () => {
+    const task = definition({
+      id: "monthly" as TaskId,
+      recurrence: mustParseRecurrence({ kind: "monthly", day: 10 }),
+    });
+    assert.equal(
+      view([task], [], "2026-08-27" as LocalDate)[0]?.window,
+      "2026-08-10",
+    );
+    assert.equal(
+      view([task], [], "2026-09-09" as LocalDate)[0]?.window,
+      "2026-08-10",
+    );
+    assert.equal(
+      view([task], [], "2026-09-10" as LocalDate)[0]?.window,
+      "2026-09-10",
+    );
+  });
+
+  test("open assignments do not render", () => {
     const occurrences = view(
       [
-        definition({
-          id: "once" as TaskId,
-          recurrence: { kind: "once", date: today },
-        }),
-        definition({
-          id: "weekly" as TaskId,
-          recurrence: { kind: "weekly", days: ["mon"] },
-        }),
         definition({
           id: "open" as TaskId,
           assignment: { kind: "open" },
@@ -293,5 +392,109 @@ describe("tasks view", () => {
     ];
     const [row] = view([definition({ id: "t1" as TaskId })], events, today);
     assert.equal(row?.state, "pending");
+  });
+
+  test("star balances use each completion's exact definition across retired ids and closed windows", () => {
+    const definitions = [
+      definition({
+        id: "old" as TaskId,
+        lineage: "shared" as LineageId,
+        stars: 3,
+        retiredAt: today,
+      }),
+      definition({
+        id: "new" as TaskId,
+        lineage: "shared" as LineageId,
+        stars: 8,
+      }),
+    ];
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "old" as TaskId,
+        window: addLocalDays(today, -10),
+        by: dad,
+        at: "2026-08-15T12:00:00Z" as Instant,
+      },
+      {
+        kind: "completed",
+        task: "missing" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+    ];
+    assert.deepEqual(starBalances(definitions, events, []), [
+      { member: dad, balance: 3 },
+    ]);
+  });
+
+  test("star adjustments add to earned balances and can introduce a member", () => {
+    const ellie = "ellie" as MemberId;
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+    ];
+    const adjustments: StarAdjustment[] = [
+      {
+        id: "spend",
+        member: dad,
+        delta: -2,
+        reason: "Reward",
+        at: "2026-08-25T13:00:00Z" as Instant,
+      },
+      {
+        id: "bonus",
+        member: ellie,
+        delta: 4,
+        reason: null,
+        at: "2026-08-25T14:00:00Z" as Instant,
+      },
+    ];
+    assert.deepEqual(
+      starBalances(
+        [definition({ id: "t1" as TaskId, stars: 5 })],
+        events,
+        adjustments,
+      ),
+      [
+        { member: dad, balance: 3 },
+        { member: ellie, balance: 4 },
+      ],
+    );
+  });
+
+  test("star balances reject an unsafe accumulated value", () => {
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: addLocalDays(today, -1),
+        by: dad,
+        at: "2026-08-24T12:00:00Z" as Instant,
+      },
+    ];
+
+    assert.throws(
+      () =>
+        starBalances(
+          [definition({ id: "t1" as TaskId, stars: Number.MAX_SAFE_INTEGER })],
+          events,
+          [],
+        ),
+      new RangeError("star balance exceeds safe integer range"),
+    );
   });
 });

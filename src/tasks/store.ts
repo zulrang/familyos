@@ -6,6 +6,7 @@ import {
   type EventReceipt,
   isRecord,
   parseAssignment,
+  parseInstant,
   parseLineageId,
   parseLocalDate,
   parseLocalTime,
@@ -13,6 +14,7 @@ import {
   parseTaskEvent,
   parseTaskId,
   parseTaskType,
+  type StarAdjustment,
   type TaskDefinition,
   type TaskEvent,
 } from "./types";
@@ -195,6 +197,27 @@ function eventFromRow(row: Record<string, unknown>): TaskEvent {
   return parsed;
 }
 
+function adjustmentFromRow(row: Record<string, unknown>): StarAdjustment {
+  const id = typeof row.id === "string" && row.id ? row.id : null;
+  const member =
+    typeof row.member === "string" && row.member ? row.member : null;
+  const delta = row.delta;
+  const reason =
+    row.reason === null || typeof row.reason === "string" ? row.reason : null;
+  const at = parseInstant(row.at);
+  if (
+    !id ||
+    !member ||
+    typeof delta !== "number" ||
+    !Number.isInteger(delta) ||
+    (row.reason !== null && typeof row.reason !== "string") ||
+    !at
+  ) {
+    throw new Error("corrupt star adjustment row");
+  }
+  return { id, member, delta, reason, at };
+}
+
 export function insertDefinition(definition: TaskDefinition): void {
   tasksDatabase()
     .prepare(
@@ -232,6 +255,18 @@ export function loadEvents(): TaskEvent[] {
   return rows.map((row) => {
     if (!isRecord(row)) throw new Error("corrupt task event row");
     return eventFromRow(row);
+  });
+}
+
+export function loadStarAdjustments(): StarAdjustment[] {
+  const rows = tasksDatabase()
+    .prepare(
+      "SELECT id, member, delta, reason, at FROM star_adjustments ORDER BY rowid",
+    )
+    .all();
+  return rows.map((row) => {
+    if (!isRecord(row)) throw new Error("corrupt star adjustment row");
+    return adjustmentFromRow(row);
   });
 }
 
@@ -302,6 +337,11 @@ export function applyEvent(event: TaskEvent): EventReceipt {
 export function loadStore(): {
   definitions: TaskDefinition[];
   events: TaskEvent[];
+  adjustments: StarAdjustment[];
 } {
-  return { definitions: loadDefinitions(), events: loadEvents() };
+  return {
+    definitions: loadDefinitions(),
+    events: loadEvents(),
+    adjustments: loadStarAdjustments(),
+  };
 }
