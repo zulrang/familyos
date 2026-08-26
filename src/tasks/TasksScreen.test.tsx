@@ -51,6 +51,7 @@ function emptyView(): TasksViewRead {
       { member: "dad", done: 0, total: 0 },
       { member: "ellie", done: 0, total: 0 },
     ],
+    starBalances: [],
     today: "2026-08-25" as TasksViewRead["today"],
     generatedAt: "2026-08-25T16:00:00Z" as TasksViewRead["generatedAt"],
   };
@@ -78,6 +79,7 @@ function installFetch(store: TasksViewRead) {
           type: "chore" | "routine";
           member: string;
           time?: string;
+          stars: number;
         };
         const occ: Occurrence = {
           state: "pending",
@@ -161,6 +163,64 @@ describe("TasksScreen", () => {
       .closest("section");
     expect(ellie).toHaveTextContent("Walk dog");
     expect(ellie).toHaveTextContent("0/1");
+  });
+
+  test("the editor submits a nonnegative integer star value", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, "6");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await screen.findByText("Feed cat");
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input) === "/api/tasks" &&
+        (init?.method ?? "GET").toUpperCase() === "POST",
+    );
+    expect(createCall).toBeDefined();
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      stars: 6,
+    });
+  });
+
+  test("the editor cannot submit an unsafe integer star value", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetch(emptyView());
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, String(Number.MAX_SAFE_INTEGER + 1));
+
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.find(
+        ([input, init]) =>
+          urlOf(input) === "/api/tasks" &&
+          (init?.method ?? "GET").toUpperCase() === "POST",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("balances and star values do not render in task columns", async () => {
+    const store = emptyView();
+    store.starBalances = [{ member: "dad", balance: 99 }];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    await screen.findByRole("heading", { name: "Dad" });
+    expect(screen.queryByText("99")).not.toBeInTheDocument();
+    expect(screen.queryByText(/star|point|balance/i)).not.toBeInTheDocument();
   });
 
   test("tapping the circle marks the row done and increments progress once", async () => {

@@ -7,11 +7,12 @@ import {
   type LineageId,
   type LocalDate,
   type LocalTime,
+  type StarAdjustment,
   type TaskDefinition,
   type TaskEvent,
   type TaskId,
 } from "./types";
-import { view } from "./view";
+import { starBalances, view } from "./view";
 
 const today = "2026-08-25" as LocalDate;
 const dad = "dad" as MemberId;
@@ -187,5 +188,109 @@ describe("tasks view", () => {
     ];
     const [row] = view([definition({ id: "t1" as TaskId })], events, today);
     assert.equal(row?.state, "pending");
+  });
+
+  test("star balances use each completion's exact definition across retired ids and closed windows", () => {
+    const definitions = [
+      definition({
+        id: "old" as TaskId,
+        lineage: "shared" as LineageId,
+        stars: 3,
+        retiredAt: today,
+      }),
+      definition({
+        id: "new" as TaskId,
+        lineage: "shared" as LineageId,
+        stars: 8,
+      }),
+    ];
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "old" as TaskId,
+        window: addLocalDays(today, -10),
+        by: dad,
+        at: "2026-08-15T12:00:00Z" as Instant,
+      },
+      {
+        kind: "completed",
+        task: "missing" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+    ];
+    assert.deepEqual(starBalances(definitions, events, []), [
+      { member: dad, balance: 3 },
+    ]);
+  });
+
+  test("star adjustments add to earned balances and can introduce a member", () => {
+    const ellie = "ellie" as MemberId;
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+    ];
+    const adjustments: StarAdjustment[] = [
+      {
+        id: "spend",
+        member: dad,
+        delta: -2,
+        reason: "Reward",
+        at: "2026-08-25T13:00:00Z" as Instant,
+      },
+      {
+        id: "bonus",
+        member: ellie,
+        delta: 4,
+        reason: null,
+        at: "2026-08-25T14:00:00Z" as Instant,
+      },
+    ];
+    assert.deepEqual(
+      starBalances(
+        [definition({ id: "t1" as TaskId, stars: 5 })],
+        events,
+        adjustments,
+      ),
+      [
+        { member: dad, balance: 3 },
+        { member: ellie, balance: 4 },
+      ],
+    );
+  });
+
+  test("star balances reject an unsafe accumulated value", () => {
+    const events: TaskEvent[] = [
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: today,
+        by: dad,
+        at: "2026-08-25T12:00:00Z" as Instant,
+      },
+      {
+        kind: "completed",
+        task: "t1" as TaskId,
+        window: addLocalDays(today, -1),
+        by: dad,
+        at: "2026-08-24T12:00:00Z" as Instant,
+      },
+    ];
+
+    assert.throws(
+      () =>
+        starBalances(
+          [definition({ id: "t1" as TaskId, stars: Number.MAX_SAFE_INTEGER })],
+          events,
+          [],
+        ),
+      new RangeError("star balance exceeds safe integer range"),
+    );
   });
 });

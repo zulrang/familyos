@@ -10,7 +10,7 @@ import {
   parseLocalDate,
   type TasksViewRead,
 } from "./types";
-import { view } from "./view";
+import { starBalances, view } from "./view";
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
@@ -33,7 +33,7 @@ export async function handleGetTasks(request: Request): Promise<Response> {
     msToZonedDate(now.getTime(), household.timeZone),
   );
   if (!today) return jsonError("invalid household date", 500);
-  const { definitions, events } = loadStore();
+  const { definitions, events, adjustments } = loadStore();
   const occurrences = view(definitions, events, today);
   const progress = activeMembers(household.members).map((member) => {
     const mine = occurrences.filter((row) => row.assignee === member.id);
@@ -46,6 +46,7 @@ export async function handleGetTasks(request: Request): Promise<Response> {
   const body: TasksViewRead = {
     occurrences,
     progress,
+    starBalances: starBalances(definitions, events, adjustments),
     today,
     generatedAt: now.toISOString() as TasksViewRead["generatedAt"],
   };
