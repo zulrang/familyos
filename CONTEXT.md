@@ -129,12 +129,14 @@ Identical to a Chore in everything but the label.
 _Avoid_: habit
 
 **Task Definition**:
-The description of a Task — title, type, recurrence, and assignment. An edit
-replaces a definition with a new version rather than changing it in place.
+The description of a Task — title, type, time, stars, recurrence, and
+assignment. Title, type, time, and stars change on the current definition; a
+change to recurrence or assignment retires it and creates a new version with
+the same Lineage.
 _Avoid_: template
 
 **Lineage**:
-The stable identity of a Task across edits of its Task Definition.
+The stable identity of a Task across versions of its Task Definition.
 _Avoid_: task id
 
 **Occurrence**:
@@ -169,8 +171,8 @@ advances a Rotation.
 _Avoid_: dismiss, delete
 
 **Star**:
-The unit of reward a Task carries. Completing an Occurrence earns the Task's
-star value for the completing member. Chores and Routines earn identically.
+The unit of reward on a Task Definition. Completions earn the star value of
+the definition they belong to. Chores and Routines earn identically.
 _Avoid_: point, credit
 
 **Star Balance**:

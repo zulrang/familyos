@@ -1,7 +1,7 @@
 # Tasks — Technical Design Specification
 
 **Status:** Approved for implementation
-**Date:** 2026-08-25 (supersedes `chores-design-spec.md`, 2026-08-23)
+**Date:** 2026-08-26 (D5/D6 amended, D20 added; supersedes `chores-design-spec.md`, 2026-08-23)
 **Audience:** Implementing developer
 
 Domain terms (Task, Chore, Routine, Occurrence, Window, Rotation, Claim, Skip)
@@ -22,8 +22,9 @@ unlike Calendar and Lists, Task data is FamilyOS-owned (ADR 0006).
 - Recurring and one-time Task Definitions, each typed Chore or Routine
 - Rotation, fixed, and open assignment
 - Completion, claiming, and skipping
-- Retire-and-replace definition editing, including the Household Member
-  retirement hook
+- Definition editing: in-place for title, type, time, and stars;
+  retire-and-replace for recurrence and assignment, including the
+  Household Member retirement hook
 - The Tasks screen: per-member columns plus a Household column for open Tasks
 
 ### Explicitly out of scope
@@ -42,8 +43,7 @@ Considered and rejected or deferred. See the Decision Log (Section 3).
 - **Carryover.** A missed Task does not roll into a new Occurrence.
 - **Delta sync.** The server sends the full projection on every fetch.
 - **Conflict resolution logic.** The event key makes merges idempotent.
-- **In-place updates.** Definitions and events are append-only. The only
-  exception is `retiredAt`, a write-once field.
+  Concurrent definition edits are last-write-wins (D20).
 - **Time-of-day sections.** No Morning/Afternoon/Evening/Chores tabs; one flat
   list per column ordered by the optional time field (D14).
 
@@ -75,7 +75,7 @@ type AssignmentPolicy =
   | { kind: 'open' }                            // first member to claim
 
 type TaskDefinition = {
-  id: TaskId                   // immutable; a new id per edit
+  id: TaskId                   // immutable; a new id only when recurrence or assignment changes
   lineage: LineageId           // stable across versions; used for UI grouping
   title: string
   type: TaskType
@@ -109,16 +109,15 @@ captured at creation and stored as a future hook (Rewards will count Chores).
 SQLite via the built-in `node:sqlite` module (Node 24; zero new dependencies).
 One database file under `data/`, gitignored like all server-local state.
 
-Two append-only tables:
-
 | Table | Key | Mutability |
 |---|---|---|
-| `definitions` | `id` | Append-only. `retiredAt` is set exactly once, from null to a date. |
+| `definitions` | `id` | `id`, `lineage`, `recurrence`, and `assignment` never change. `title`, `type`, `time`, and `stars` may be overwritten. `retiredAt` is set exactly once, from null to a date. |
 | `events` | `(task, window, kind)` unique | Append-only. Never updated or deleted. |
 | `star_adjustments` | `id` | Append-only. Empty in v1; Rewards appends redemptions and corrections. |
 
 Enforce the unique event key and invariant 2 as SQL constraints; enforce the
-write-once `retiredAt` transition in the single writer.
+write-once `retiredAt` transition and in-place column updates in the single
+writer.
 
 ### 2.3 Windows
 
@@ -185,6 +184,10 @@ including events against closed windows and retired ids. The work counts,
 consistent with §5.3. Their **Star Balance** = earned stars + the sum of their
 `star_adjustments` deltas.
 
+An in-place star change overwrites that definition, so existing completions
+on that id are revalued. A retire-and-replace freezes the old row's stars;
+completions on the retired id keep the old value.
+
 No balance is ever stored. Both types earn identically; a Routine may carry
 stars just like a Chore (D14 stands: the types differ in label only).
 
@@ -199,6 +202,7 @@ stale-write semantics as D5 and costs a family nothing.
 These decisions are final. Each rejected alternative caused a concrete
 problem. Do not reintroduce the alternatives. D1–D9 carry over from the
 original chore spec; D10–D18 were settled in the 2026-08-25 design session.
+D5 and D6 were amended, and D20 added, on 2026-08-26.
 
 | # | Decision | Rejected alternative | Reason |
 |---|---|---|---|
@@ -206,8 +210,8 @@ original chore spec; D10–D18 were settled in the 2026-08-25 design session.
 | D2 | Window semantics for missed Tasks. An Occurrence stays open until the next Window starts, then becomes `expired`. | Expire-and-recreate | Recreation stores synthetic rows that are not derivable from definitions. That breaks the pure projection. Window semantics produce the same visible result. |
 | D3 | Verification is optional metadata on a completion. | A `verified` workflow state after `done` | A required verification state doubles the workflow. Completion is trust-based. |
 | D4 | Rotation advances on completion only. Assignee = `order[completedCount % order.length]`. | Calendar rotation (assignee as a pure function of the date) | The family wants fairness by turns taken, not by dates elapsed. |
-| D5 | Definitions are immutable. An edit retires the old row and inserts a new row with the same `lineage` and a new `id`. | Mutable "active version" definitions | Mutable definitions require the server to reject writes against stale windows after an edit. Immutable definitions make stale writes valid and inert. |
-| D6 | An edit resets the rotation fold. The edit flow copies the old `order` and pre-rotates it by the old completion count. | Folding the rotation count across `lineage` | Cross-version folds require reasoning about `order` changes mid-rotation. Scoping the fold to one immutable `id` keeps it trivial. |
+| D5 | Recurrence and assignment are immutable: a change retires the old row and inserts a new row with the same `lineage` and a new `id`. Title, type, time, and stars overwrite the current row. | Every field change is retire-and-replace (2026-08-25 D5); fully mutable definitions including recurrence and assignment | A new `id` is only needed when Windows or whose turn it is would change. A title change on the same `id` leaves a stale completion live and counting. |
+| D6 | A retire-and-replace of a rotation copies the old `order` and pre-rotates it by the old completion count. An in-place save does not touch the fold. | Folding the rotation count across `lineage`; pre-rotating on every save | Cross-version folds require reasoning about `order` changes mid-rotation. Scoping the fold to one immutable `id` keeps it trivial. A rename must not skip a turn. |
 | D7 | `skipped` does not advance the rotation. | Skips advance the turn | Ad hoc adjustment is easy for a family. Keep the fold on `completed` only. If a Task needs skip-advancement, edit the definition. |
 | D8 | Full projection on every fetch. | Delta sync | The dataset is tens of rows. Full sends delete a class of consistency bugs. |
 | D9 | The server accepts every syntactically valid event. The projection decides relevance. | Server-side window-freshness validation | Rejecting late events loses real facts. A late completion still advances the rotation correctly. |
@@ -221,6 +225,7 @@ original chore spec; D10–D18 were settled in the 2026-08-25 design session.
 | D17 | Retiring a Household Member auto-performs the standard retire-and-replace edit on affected definitions: rotations drop the member (pre-rotated per §4.3), fixed Tasks are retired and surfaced for recreation. | Blocking retirement on manual edits; projection silently skipping retired members | Reuses the one edit flow that exists and keeps the projection pure and ignorant of member state. |
 | D18 | FamilyOS-owned store in `node:sqlite`. | Google Tasks as the store; JSON files like Household Configuration | Rotation, windows, and append-only events do not map onto tasklist rows. The invariants want real unique constraints and transactions; `node:sqlite` provides them with zero new dependencies. See ADR 0006. |
 | D19 | Stars are baked into the domain now: a star value on each Task Definition, captured in the editor; balances derived from completions plus an append-only `star_adjustments` log with no v1 writers. | A materialized balance column; a star-entry row per completion | A stored balance drifts from facts, and per-completion entries duplicate what `completed` events already derive (D1). Only non-derivable facts — redemptions, corrections — get rows. Rewards later reads the same store instead of forcing a schema migration. |
+| D20 | Concurrent definition saves are last-write-wins. No edit versions, no merge. | A retire-and-replace must read-and-merge the latest title/stars so a concurrent rename cannot be wiped | This is a fridge on the LAN, not a collaborative editor. |
 
 ---
 
@@ -256,21 +261,33 @@ Include the server timestamp of the projection in the response.
 ### 4.3 Definition editing
 
 Creating and editing Tasks happens in the Tasks surface itself (Section 6),
-not in Settings. An edit is one transaction:
+not in Settings. One editor, one save. Compare the submitted recurrence and
+assignment to the current definition.
+
+If neither recurrence nor assignment changed, overwrite `title`, `type`,
+`time`, and `stars` on the current row. Leave `id`, `lineage`, `recurrence`,
+`assignment`, and `retiredAt` alone.
+
+If recurrence or assignment changed, the save is one retire-and-replace
+transaction. Do not mutate the old row's title, type, time, or stars.
 
 1. Set `retiredAt = today` on the old definition.
-2. Insert a new definition: same `lineage`, new `id`, new field values.
-3. If the assignment is a rotation: copy the old `order`, rotate it left by
-   `count(completed events for old id) mod order.length`, and store the
+2. Insert a new definition: same `lineage`, new `id`, submitted field values
+   (including the new title, type, time, and stars).
+3. If the new assignment is a rotation: copy the old `order`, rotate it left
+   by `count(completed events for old id) mod order.length`, and store the
    rotated array as the new `order`.
 
 Step 3 makes the rotation reset invisible to users. The correct person stays
 on turn.
 
+Two Displays saving the same Task: last write wins (D20).
+
 ### 4.4 Household Member retirement hook
 
-When Settings retires a member, the server applies the Section 4.3 edit to
-every active definition referencing that member, in the same operation:
+When Settings retires a member, the server applies the Section 4.3
+retire-and-replace to every active definition referencing that member, in the
+same operation:
 
 - `rotation`: new definition with the member removed from the pre-rotated
   `order`. If the order would become empty, retire the definition instead.
@@ -316,12 +333,16 @@ These are facts about the design, not edge cases to fix.
 
 1. **Duplicate submission.** A Display retries a batch. The unique key makes
    the retry a no-op. The server reports success.
-2. **Event against a retired definition.** Someone edited the Task while
-   another Display had a stale view. The server accepts the event. The
-   projection ignores retired ids, so the event is inert. This is correct:
-   the pre-rotation in the edit flow (Section 4.3) already accounted for the
-   turn.
-3. **Event against a closed window.** A completion syncs after the window
+2. **Event against a retired definition.** Someone changed recurrence or
+   assignment while another Display had a stale view. The server accepts the
+   event. The projection ignores retired ids, so the event is inert. This is
+   correct: the pre-rotation in the retire-and-replace flow (Section 4.3)
+   already accounted for the turn.
+3. **Event against the same id after an in-place save.** Someone renamed the
+   Task or changed its stars while another Display still showed the old
+   title. The server accepts the event. The projection includes it. Same
+   TaskId, still live.
+4. **Event against a closed window.** A completion syncs after the window
    rolled over. The server accepts the event. The event advances the rotation
    count. The projection never displays it. The work counts; the calendar has
    moved on.
@@ -348,7 +369,7 @@ Components: `MemberColumn` (without `points` and without `TimeOfDayTabs`),
 - **Skip.** A row action offering preset reasons — Away, Sick, Not needed —
   plus optional free text. Nothing is required; a skip may carry no reason.
 - **Create/edit.** FAB opens the Task editor: title, type (Chore/Routine),
-  recurrence, assignment, optional time, and star value (default 0). Editing
+  recurrence, assignment, optional time, and star value (default 0). Saving
   an existing Task runs the Section 4.3 flow. Type has no visual effect in v1
   (D14), and the star value is captured but rendered nowhere (D19).
 - **No points pill, no tabs, no expired rows, no star display.**
@@ -377,12 +398,15 @@ Write tests for each scenario. All references are to sections above.
 
 ### Editing and retirement
 
-8. Editing a Task retires the old definition and creates a new one with the
-   same lineage. The old definition's `retiredAt` is set. (§4.3)
-9. After an edit of a rotation Task with [A, B, C] and 1 completion, the new
-   definition's order is [B, C, A], and the assignee is B. (§4.3, step 3)
-10. A completion submitted against the old (retired) id after an edit is
-    accepted and does not appear in the projection. (§5.3, case 2)
+8. Changing recurrence or assignment retires the old definition and creates a
+   new one with the same lineage. The old definition's `retiredAt` is set.
+   (§4.3)
+9. After a retire-and-replace of a rotation Task with [A, B, C] and 1
+   completion, the new definition's order is [B, C, A], and the assignee is
+   B. (§4.3, step 3)
+10. A completion submitted against the old (retired) id after a
+    retire-and-replace is accepted and does not appear in the projection.
+    (§5.3, case 2)
 11. Retiring member B from a rotation [A, B, C] with 1 completion yields a
     new definition with order [C, A] and the same lineage. (§4.4)
 12. Retiring a member with a fixed Task retires that definition and surfaces
@@ -391,7 +415,7 @@ Write tests for each scenario. All references are to sections above.
 ### Sync and attribution
 
 13. A completion submitted against a closed window is accepted, advances the
-    rotation count, and does not render. (§5.3, case 3)
+    rotation count, and does not render. (§5.3, case 4)
 14. Two Displays submitting the same completion converge to one fact
     regardless of order. (§2.5, inv. 1)
 15. `GET` view returns the full projection, per-member done/total counts, and
@@ -408,3 +432,13 @@ Write tests for each scenario. All references are to sections above.
     balance = earned + adjustments. (§2.6)
 19. The editor persists a nonnegative star value; omitting it stores 0.
     (§2.5 inv. 7, §6)
+20. Changing only title, type, time, or stars overwrites the current
+    definition. `id`, `lineage`, and `retiredAt` are unchanged. (§4.3)
+21. A completion submitted against the same id after a title-only save is
+    accepted and appears in the projection. (§5.3, case 3)
+22. Changing stars in place revalues existing completions on that id.
+    Changing stars as part of a retire-and-replace leaves completions on the
+    retired id at the old star value. (§2.6)
+23. A save that changes title and assignment is one retire-and-replace. The
+    new definition carries the new title. The old row's title is not mutated.
+    (§4.3)
