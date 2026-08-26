@@ -116,6 +116,39 @@ describe("slice import boundaries", () => {
     }
   });
 
+  test("tasks cannot import Calendar", () => {
+    const hits = scanFile(
+      "src/tasks/TasksScreen.tsx",
+      `import { CalendarScreen } from "@/calendar/CalendarScreen";`,
+    );
+    assert.equal(hits.length, 1);
+  });
+
+  test("tasks cannot import Lists", () => {
+    const hits = scanFile(
+      "src/tasks/TasksScreen.tsx",
+      `import { ListsScreen } from "@/lists/ListsScreen";`,
+    );
+    assert.equal(hits.length, 1);
+  });
+
+  test("tasks cannot import Displays", () => {
+    const hits = scanFile(
+      "src/tasks/tasks-http.ts",
+      `import { handlePair } from "@/displays/pairing-http";`,
+    );
+    assert.equal(hits.length, 1);
+  });
+
+  test("tasks may import members and settings", () => {
+    const hits = scanFile(
+      "src/tasks/tasks-http.ts",
+      `import { activeMembers } from "@/members/members";
+import { readHousehold } from "@/settings/settings";`,
+    );
+    assert.equal(hits.length, 0);
+  });
+
   test("the Next app source tree has no forbidden imports", () => {
     assert.deepEqual(checkTree("src"), []);
   });

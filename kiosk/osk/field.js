@@ -22,7 +22,8 @@ function isTextField(el) {
   if (el.getAttribute("inputmode") === "none") return false;
 
   const editable = el.closest("[contenteditable]");
-  if (editable && editable.getAttribute("contenteditable") !== "false") return true;
+  if (editable && editable.getAttribute("contenteditable") !== "false")
+    return true;
 
   const tag = el.tagName;
   if (tag === "TEXTAREA") return true;
@@ -43,4 +44,5 @@ function prefersNumeric(el) {
   );
 }
 
-if (typeof module !== "undefined") module.exports = { isTextField, prefersNumeric };
+if (typeof module !== "undefined")
+  module.exports = { isTextField, prefersNumeric };

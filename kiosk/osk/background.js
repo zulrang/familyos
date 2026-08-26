@@ -17,7 +17,11 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === "hide") {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-      chrome.tabs.sendMessage(tabId, { type: "render", visible: false }, { frameId: 0 });
+      chrome.tabs.sendMessage(
+        tabId,
+        { type: "render", visible: false },
+        { frameId: 0 },
+      );
     }, 180);
     return;
   }

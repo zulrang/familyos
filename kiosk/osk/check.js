@@ -10,7 +10,8 @@ function el(tag, attrs = {}) {
     type: attrs.type,
     getAttribute: (name) => attrs[name] ?? null,
     closest: (sel) => {
-      if (sel === "[contenteditable]" && attrs.contenteditable != null) return node;
+      if (sel === "[contenteditable]" && attrs.contenteditable != null)
+        return node;
       return null;
     },
   };
