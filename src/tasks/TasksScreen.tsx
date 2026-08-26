@@ -66,9 +66,14 @@ const EMPTY_DRAFT: Draft = {
   time: "",
 };
 
-function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
-  if (occ.state === "done" || occ.assignee === null) return view;
-  const by = occ.assignee;
+export function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
+  const current = view.occurrences.find(
+    (row) => row.task === occ.task && row.window === occ.window,
+  );
+  if (!current || current.state === "done" || current.assignee === null) {
+    return view;
+  }
+  const by = current.assignee;
   return {
     ...view,
     occurrences: view.occurrences.map((row) =>

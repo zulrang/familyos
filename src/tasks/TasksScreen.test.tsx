@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
-import { TasksScreen } from "./TasksScreen";
+import { markDone, TasksScreen } from "./TasksScreen";
 import type { Instant, Occurrence, TasksViewRead } from "./types";
 
 afterEach(() => {
@@ -201,5 +201,33 @@ describe("TasksScreen", () => {
       );
     });
     expect(screen.getByRole("checkbox", { name: "Dishes" })).toBeChecked();
+  });
+
+  test("reapplying a stale optimistic completion does not increment progress twice", () => {
+    const store = emptyView();
+    const occurrence: Occurrence = {
+      state: "pending",
+      task: "t1" as Occurrence["task"],
+      window: store.today,
+      title: "Dishes",
+      type: "chore",
+      lineage: "lin-1" as Occurrence["lineage"],
+      time: null,
+      assignee: "dad",
+    };
+    store.occurrences = [occurrence];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+
+    const afterFirstTap = markDone(store, occurrence);
+    const afterSecondTap = markDone(afterFirstTap, occurrence);
+
+    expect(afterSecondTap.progress).toContainEqual({
+      member: "dad",
+      done: 1,
+      total: 1,
+    });
   });
 });
