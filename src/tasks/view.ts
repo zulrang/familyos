@@ -105,7 +105,10 @@ export function view(
   const out: Occurrence[] = [];
   for (const definition of definitions) {
     if (definition.retiredAt !== null) continue;
-    if (definition.recurrence.kind !== "daily") {
+    if (
+      definition.recurrence.kind !== "daily" ||
+      definition.assignment.kind === "open"
+    ) {
       continue;
     }
     const completedCount = completedCounts.get(definition.id) ?? 0;
