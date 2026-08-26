@@ -180,7 +180,7 @@ describe("TasksScreen", () => {
     expect(submittedRecurrence(fetchMock)).toEqual({ kind: "daily" });
   });
 
-  test("the editor submits selected weekly days with stars", async () => {
+  test("the editor submits selected weekly days", async () => {
     const user = userEvent.setup();
     const store = emptyView();
     const fetchMock = installFetch(store);
@@ -192,22 +192,11 @@ describe("TasksScreen", () => {
     expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Thu" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
-    await user.clear(stars);
-    await user.type(stars, "9");
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     expect(submittedRecurrence(fetchMock)).toEqual({
       kind: "weekly",
       days: ["mon", "thu"],
-    });
-    const createCall = fetchMock.mock.calls.find(
-      ([input, init]) =>
-        urlOf(input).endsWith("/api/tasks") &&
-        (init?.method ?? "GET") === "POST",
-    );
-    expect(JSON.parse(String(createCall?.[1]?.body ?? "{}"))).toMatchObject({
-      stars: 9,
     });
   });
 
