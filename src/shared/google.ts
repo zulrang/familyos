@@ -15,8 +15,8 @@ const SCOPES = [
   "https://www.googleapis.com/auth/tasks",
 ].join(" ");
 
-export function authUrl(state: string): string {
-  const { id, redirect } = googleClient();
+export function authUrl(state: string, redirect: string): string {
+  const { id } = googleClient();
   const u = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   u.searchParams.set("client_id", id);
   u.searchParams.set("redirect_uri", redirect);
@@ -77,8 +77,11 @@ async function googleAccountId(accessToken: string): Promise<string> {
   return data.sub;
 }
 
-export async function exchangeCode(code: string): Promise<void> {
-  const { id, secret, redirect } = googleClient();
+export async function exchangeCode(
+  code: string,
+  redirect: string,
+): Promise<void> {
+  const { id, secret } = googleClient();
   const cur = await readProvider();
   const tok = await tokenRequest({
     code,
