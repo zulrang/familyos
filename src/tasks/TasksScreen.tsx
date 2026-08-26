@@ -47,6 +47,7 @@ function emptyView(): TasksViewRead {
   return {
     occurrences: [],
     progress: [],
+    starBalances: [],
     today: "1970-01-01" as TasksViewRead["today"],
     generatedAt: nowInstant(),
   };
@@ -57,6 +58,7 @@ type Draft = {
   type: TaskType;
   member: string;
   time: string;
+  stars: string;
 };
 
 const EMPTY_DRAFT: Draft = {
@@ -64,6 +66,7 @@ const EMPTY_DRAFT: Draft = {
   type: "chore",
   member: "",
   time: "",
+  stars: "0",
 };
 
 export function markDone(view: TasksViewRead, occ: Occurrence): TasksViewRead {
@@ -167,7 +170,10 @@ export function TasksScreen() {
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
-    if (!title || !sheet.member) return;
+    const stars = Number(sheet.stars);
+    if (!title || !sheet.member || !Number.isInteger(stars) || stars < 0) {
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/tasks", {
@@ -178,6 +184,7 @@ export function TasksScreen() {
           type: sheet.type,
           member: sheet.member,
           ...(sheet.time ? { time: sheet.time } : {}),
+          stars,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -325,7 +332,12 @@ function CreateSheet({
   onSave: () => void;
 }) {
   const closeFromBackdrop = useRef(false);
-  const canSave = draft.title.trim().length > 0 && draft.member.length > 0;
+  const stars = Number(draft.stars);
+  const canSave =
+    draft.title.trim().length > 0 &&
+    draft.member.length > 0 &&
+    Number.isInteger(stars) &&
+    stars >= 0;
   return (
     <div
       style={{
@@ -423,6 +435,15 @@ function CreateSheet({
           aria-label="Time"
           value={draft.time}
           onChange={(e) => onChange({ ...draft, time: e.target.value })}
+        />
+        <input
+          className="fos-input"
+          type="number"
+          min="0"
+          step="1"
+          aria-label="Stars"
+          value={draft.stars}
+          onChange={(e) => onChange({ ...draft, stars: e.target.value })}
         />
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Button

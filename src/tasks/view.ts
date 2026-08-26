@@ -2,6 +2,8 @@ import {
   addLocalDays,
   type LocalDate,
   type Occurrence,
+  type StarAdjustment,
+  type StarBalance,
   type TaskDefinition,
   type TaskEvent,
   type TaskId,
@@ -103,4 +105,30 @@ export function view(
   }
   out.sort((a, b) => compareOccurrences(a, b, order));
   return out;
+}
+
+export function starBalances(
+  definitions: readonly TaskDefinition[],
+  events: readonly TaskEvent[],
+  adjustments: readonly StarAdjustment[],
+): StarBalance[] {
+  const starsByTask = new Map(
+    definitions.map((definition) => [definition.id, definition.stars]),
+  );
+  const balances = new Map<StarBalance["member"], number>();
+  for (const event of events) {
+    if (event.kind !== "completed") continue;
+    const stars = starsByTask.get(event.task);
+    if (stars === undefined) continue;
+    balances.set(event.by, (balances.get(event.by) ?? 0) + stars);
+  }
+  for (const adjustment of adjustments) {
+    balances.set(
+      adjustment.member,
+      (balances.get(adjustment.member) ?? 0) + adjustment.delta,
+    );
+  }
+  return [...balances]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([member, balance]) => ({ member, balance }));
 }
