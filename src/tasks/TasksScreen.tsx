@@ -22,6 +22,7 @@ import {
   type Occurrence,
   type TasksViewRead,
   type TaskType,
+  type Weekday,
 } from "./types";
 
 function headerDate(d: Date, timeZone: string): string {
@@ -47,24 +48,78 @@ function emptyView(): TasksViewRead {
   return {
     occurrences: [],
     progress: [],
+    starBalances: [],
     today: "1970-01-01" as TasksViewRead["today"],
     generatedAt: nowInstant(),
   };
 }
 
-type Draft = {
+type DraftFields = {
   title: string;
   type: TaskType;
+  recurrence: DraftRecurrence;
   time: string;
-  assignment: { kind: "fixed"; member: string } | { kind: "open" };
+  stars: string;
 };
 
-const EMPTY_DRAFT: Draft = {
-  title: "",
-  type: "chore",
-  time: "",
-  assignment: { kind: "fixed", member: "" },
-};
+type DraftRecurrence =
+  | { kind: "daily" }
+  | { kind: "once"; date: string }
+  | { kind: "weekly"; days: Weekday[] }
+  | { kind: "monthly"; day: string };
+
+type RecurrenceRequest =
+  | { kind: "daily" }
+  | { kind: "once"; date: string }
+  | { kind: "weekly"; days: Weekday[] }
+  | { kind: "monthly"; day: number };
+
+type DraftAssignment =
+  | { kind: "fixed"; member: string }
+  | { kind: "rotation"; order: string[] }
+  | { kind: "open" };
+
+type Draft = DraftFields & { assignment: DraftAssignment };
+
+const RECURRENCE_CHOICES = [
+  { label: "Once", value: { kind: "once", date: "" } },
+  { label: "Daily", value: { kind: "daily" } },
+  { label: "Weekly", value: { kind: "weekly", days: [] } },
+  { label: "Monthly", value: { kind: "monthly", day: "1" } },
+] satisfies { label: string; value: DraftRecurrence }[];
+
+const WEEKDAY_OPTIONS: { value: Weekday; label: string }[] = [
+  { value: "sun", label: "Sun" },
+  { value: "mon", label: "Mon" },
+  { value: "tue", label: "Tue" },
+  { value: "wed", label: "Wed" },
+  { value: "thu", label: "Thu" },
+  { value: "fri", label: "Fri" },
+  { value: "sat", label: "Sat" },
+];
+
+function parseDraftRecurrence(
+  recurrence: DraftRecurrence,
+): RecurrenceRequest | null {
+  switch (recurrence.kind) {
+    case "daily":
+      return recurrence;
+    case "once":
+      return recurrence.date ? recurrence : null;
+    case "weekly":
+      return recurrence.days.length > 0 ? recurrence : null;
+    case "monthly": {
+      const day = Number(recurrence.day);
+      return Number.isInteger(day) && day >= 1 && day <= 28
+        ? { kind: "monthly", day }
+        : null;
+    }
+    default: {
+      const _exhaustive: never = recurrence;
+      return _exhaustive;
+    }
+  }
+}
 
 type MemberAction =
   | { kind: "claim"; occurrence: Occurrence }
@@ -258,9 +313,16 @@ export function TasksScreen() {
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
+    const recurrence = parseDraftRecurrence(sheet.recurrence);
+    const stars = Number(sheet.stars);
     if (
       !title ||
-      (sheet.assignment.kind === "fixed" && !sheet.assignment.member)
+      (sheet.assignment.kind === "fixed" && !sheet.assignment.member) ||
+      (sheet.assignment.kind === "rotation" &&
+        sheet.assignment.order.length === 0) ||
+      !recurrence ||
+      !Number.isSafeInteger(stars) ||
+      stars < 0
     ) {
       return;
     }
@@ -272,9 +334,10 @@ export function TasksScreen() {
         body: JSON.stringify({
           title,
           type: sheet.type,
-          member:
-            sheet.assignment.kind === "fixed" ? sheet.assignment.member : null,
+          recurrence,
+          assignment: sheet.assignment,
           ...(sheet.time ? { time: sheet.time } : {}),
+          stars,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -410,11 +473,15 @@ export function TasksScreen() {
           label="Add task"
           onClick={() =>
             setSheet({
-              ...EMPTY_DRAFT,
+              title: "",
+              type: "chore",
+              recurrence: { kind: "daily" },
               assignment: {
                 kind: "fixed",
                 member: members[0]?.id ?? "",
               },
+              time: "",
+              stars: "0",
             })
           }
         />
@@ -465,9 +532,21 @@ function CreateSheet({
   onSave: () => void;
 }) {
   const closeFromBackdrop = useRef(false);
+  const stars = Number(draft.stars);
+  const assignmentReady =
+    draft.assignment.kind === "open" ||
+    (draft.assignment.kind === "fixed" &&
+      draft.assignment.member.length > 0) ||
+    (draft.assignment.kind === "rotation" &&
+      draft.assignment.order.length > 0);
   const canSave =
     draft.title.trim().length > 0 &&
-    (draft.assignment.kind === "open" || draft.assignment.member.length > 0);
+    assignmentReady &&
+    parseDraftRecurrence(draft.recurrence) !== null &&
+    Number.isSafeInteger(stars) &&
+    stars >= 0;
+  const weeklyDays =
+    draft.recurrence.kind === "weekly" ? draft.recurrence.days : null;
   return (
     <div
       style={{
@@ -534,6 +613,125 @@ function CreateSheet({
             </Button>
           ))}
         </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button
+            variant={
+              draft.assignment.kind === "fixed" ? "primary" : "secondary"
+            }
+            onClick={() =>
+              onChange({
+                ...draft,
+                assignment: {
+                  kind: "fixed",
+                  member:
+                    draft.assignment.kind === "fixed"
+                      ? draft.assignment.member
+                      : draft.assignment.kind === "rotation"
+                        ? (draft.assignment.order[0] ?? members[0]?.id ?? "")
+                        : (members[0]?.id ?? ""),
+                },
+              })
+            }
+            style={{ flex: 1 }}
+          >
+            Fixed
+          </Button>
+          <Button
+            variant={
+              draft.assignment.kind === "rotation" ? "primary" : "secondary"
+            }
+            onClick={() =>
+              onChange({
+                ...draft,
+                assignment: {
+                  kind: "rotation",
+                  order:
+                    draft.assignment.kind === "rotation"
+                      ? draft.assignment.order
+                      : draft.assignment.kind === "fixed"
+                        ? [draft.assignment.member]
+                        : members[0]
+                          ? [members[0].id]
+                          : [],
+                },
+              })
+            }
+            style={{ flex: 1 }}
+          >
+            Rotation
+          </Button>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {RECURRENCE_CHOICES.map(({ label, value }) => (
+            <Button
+              key={value.kind}
+              variant={
+                draft.recurrence.kind === value.kind ? "primary" : "secondary"
+              }
+              onClick={() => onChange({ ...draft, recurrence: value })}
+              style={{ flex: 1 }}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+        {draft.recurrence.kind === "once" ? (
+          <input
+            className="fos-input"
+            type="date"
+            aria-label="Date"
+            value={draft.recurrence.date}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                recurrence: { kind: "once", date: event.target.value },
+              })
+            }
+          />
+        ) : null}
+        {weeklyDays ? (
+          <div style={{ display: "flex", gap: 6 }}>
+            {WEEKDAY_OPTIONS.map(({ value, label }) => {
+              const selected = weeklyDays.includes(value);
+              return (
+                <Button
+                  key={value}
+                  variant={selected ? "primary" : "secondary"}
+                  onClick={() => {
+                    const days = selected
+                      ? weeklyDays.filter((day) => day !== value)
+                      : [...weeklyDays, value];
+                    onChange({
+                      ...draft,
+                      recurrence: { kind: "weekly", days },
+                    });
+                  }}
+                  aria-pressed={selected}
+                  style={{ flex: 1, paddingInline: 8 }}
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+        ) : null}
+        {draft.recurrence.kind === "monthly" ? (
+          <input
+            className="fos-input"
+            type="number"
+            min={1}
+            max={28}
+            step={1}
+            aria-label="Day of month"
+            value={draft.recurrence.day}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                recurrence: { kind: "monthly", day: event.target.value },
+              })
+            }
+          />
+        ) : null}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <button
             type="button"
@@ -556,19 +754,41 @@ function CreateSheet({
           </button>
           {members.map((member) => {
             const surface = memberSurface(member.color);
-            const selected =
-              draft.assignment.kind === "fixed" &&
-              draft.assignment.member === member.id;
+            const position =
+              draft.assignment.kind === "fixed"
+                ? draft.assignment.member === member.id
+                  ? 0
+                  : -1
+                : draft.assignment.kind === "rotation"
+                  ? draft.assignment.order.indexOf(member.id)
+                  : -1;
+            const selected = position >= 0;
             return (
               <button
                 key={member.id}
                 type="button"
-                onClick={() =>
+                aria-label={member.name}
+                aria-pressed={selected}
+                onClick={() => {
+                  if (draft.assignment.kind !== "rotation") {
+                    onChange({
+                      ...draft,
+                      assignment: { kind: "fixed", member: member.id },
+                    });
+                    return;
+                  }
                   onChange({
                     ...draft,
-                    assignment: { kind: "fixed", member: member.id },
-                  })
-                }
+                    assignment: {
+                      kind: "rotation",
+                      order: selected
+                        ? draft.assignment.order.filter(
+                            (id) => id !== member.id,
+                          )
+                        : [...draft.assignment.order, member.id],
+                    },
+                  });
+                }}
                 style={{
                   border: "none",
                   borderRadius: "var(--radius-pill)",
@@ -581,6 +801,17 @@ function CreateSheet({
                 }}
               >
                 {member.name}
+                {draft.assignment.kind === "rotation" && selected ? (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      marginLeft: 7,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {position + 1}
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -591,6 +822,16 @@ function CreateSheet({
           aria-label="Time"
           value={draft.time}
           onChange={(e) => onChange({ ...draft, time: e.target.value })}
+        />
+        <input
+          className="fos-input"
+          type="number"
+          min="0"
+          max={Number.MAX_SAFE_INTEGER}
+          step="1"
+          aria-label="Stars"
+          value={draft.stars}
+          onChange={(e) => onChange({ ...draft, stars: e.target.value })}
         />
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Button

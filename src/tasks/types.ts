@@ -97,9 +97,15 @@ export type MemberProgress = {
   total: number;
 };
 
+export type StarBalance = {
+  member: MemberId;
+  balance: number;
+};
+
 export type TasksViewRead = {
   occurrences: Occurrence[];
   progress: MemberProgress[];
+  starBalances: StarBalance[];
   today: LocalDate;
   generatedAt: Instant;
 };
@@ -107,8 +113,10 @@ export type TasksViewRead = {
 export type CreateTaskDraft = {
   title: string;
   type: TaskType;
+  recurrence: Recurrence;
+  assignment: AssignmentPolicy;
   time: LocalTime | null;
-  assignment: { kind: "fixed"; member: MemberId } | { kind: "open" };
+  stars: number;
 };
 
 const WEEKDAYS = new Set<string>([
@@ -302,7 +310,14 @@ export function parseEventBatch(raw: unknown): TaskEvent[] | null {
   return events;
 }
 
-const CREATE_KEYS = new Set(["title", "type", "member", "time"]);
+const CREATE_KEYS = new Set([
+  "title",
+  "type",
+  "recurrence",
+  "assignment",
+  "time",
+  "stars",
+]);
 
 export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   if (!isRecord(raw)) return null;
@@ -312,33 +327,31 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   if (typeof raw.title !== "string") return null;
   const title = raw.title.trim();
   const type = parseTaskType(raw.type);
-  if (!title || !type) return null;
-  let assignment: CreateTaskDraft["assignment"];
-  if (raw.member === null) {
-    assignment = { kind: "open" };
-  } else {
-    const member = nonEmptyString(raw.member);
-    if (!member) return null;
-    assignment = { kind: "fixed", member };
+  const recurrence = parseRecurrence(raw.recurrence);
+  const assignment = parseAssignment(raw.assignment);
+  if (!title || !type || !recurrence || !assignment) return null;
+  const stars = raw.stars === undefined ? 0 : raw.stars;
+  if (typeof stars !== "number" || !Number.isSafeInteger(stars) || stars < 0) {
+    return null;
   }
   let time: LocalTime | null = null;
   if (raw.time !== undefined && raw.time !== null && raw.time !== "") {
     time = parseLocalTime(raw.time);
     if (!time) return null;
   }
-  return { title, type, assignment, time };
+  return { title, type, recurrence, assignment, time, stars };
 }
 
-export function dailyDefinition(draft: CreateTaskDraft): TaskDefinition {
+export function createDefinition(draft: CreateTaskDraft): TaskDefinition {
   return {
     id: newTaskId(),
     lineage: newLineageId(),
     title: draft.title,
     type: draft.type,
-    recurrence: { kind: "daily" },
+    recurrence: draft.recurrence,
     assignment: draft.assignment,
     time: draft.time,
-    stars: 0,
+    stars: draft.stars,
     retiredAt: null,
   };
 }

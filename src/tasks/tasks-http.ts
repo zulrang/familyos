@@ -4,13 +4,13 @@ import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { msToZonedDate } from "@/shared/time";
 import { applyEvent, insertDefinition, loadStore } from "./store";
 import {
-  dailyDefinition,
+  createDefinition,
   parseCreateTaskDraft,
   parseEventBatch,
   parseLocalDate,
   type TasksViewRead,
 } from "./types";
-import { view } from "./view";
+import { starBalances, view } from "./view";
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
@@ -33,7 +33,7 @@ export async function handleGetTasks(request: Request): Promise<Response> {
     msToZonedDate(now.getTime(), household.timeZone),
   );
   if (!today) return jsonError("invalid household date", 500);
-  const { definitions, events } = loadStore();
+  const { definitions, events, adjustments } = loadStore();
   const occurrences = view(definitions, events, today);
   const progress = activeMembers(household.members).map((member) => {
     const mine = occurrences.filter((row) => row.assignee === member.id);
@@ -46,6 +46,7 @@ export async function handleGetTasks(request: Request): Promise<Response> {
   const body: TasksViewRead = {
     occurrences,
     progress,
+    starBalances: starBalances(definitions, events, adjustments),
     today,
     generatedAt: now.toISOString() as TasksViewRead["generatedAt"],
   };
@@ -57,14 +58,21 @@ export async function handleCreateTask(request: Request): Promise<Response> {
   if (isUnauthorized(display)) return display;
   const draft = parseCreateTaskDraft(await readJson(request));
   if (!draft) return jsonError("invalid body", 400);
-  if (draft.assignment.kind === "fixed") {
-    const household = await readHousehold();
-    const member = memberById(household.members, draft.assignment.member);
-    if (!member || member.status !== "active") {
-      return jsonError("active member required", 400);
-    }
+  const household = await readHousehold();
+  const assignedMembers =
+    draft.assignment.kind === "fixed"
+      ? [draft.assignment.member]
+      : draft.assignment.kind === "rotation"
+        ? draft.assignment.order
+        : [];
+  if (
+    assignedMembers.some(
+      (id) => memberById(household.members, id)?.status !== "active",
+    )
+  ) {
+    return jsonError("active member required", 400);
   }
-  const definition = dailyDefinition(draft);
+  const definition = createDefinition(draft);
   insertDefinition(definition);
   return Response.json({ definition });
 }

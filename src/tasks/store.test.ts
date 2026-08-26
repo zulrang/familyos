@@ -9,6 +9,7 @@ import {
   insertDefinition,
   loadDefinitions,
   loadEvents,
+  loadStarAdjustments,
   tasksDatabase,
 } from "./store";
 import type {
@@ -237,5 +238,24 @@ describe("tasks sqlite store", () => {
     assert.throws(() => {
       db.prepare("DELETE FROM star_adjustments WHERE id = ?").run("adj-1");
     }, /append-only/);
+  });
+
+  test("reads append-only star adjustments", () => {
+    tasksDatabase()
+      .prepare(
+        `INSERT INTO star_adjustments (id, member, delta, reason, at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run("adj-read", "ellie", -3, "Reward", "2026-08-25T12:00:00Z");
+    assert.deepEqual(
+      loadStarAdjustments().find((adjustment) => adjustment.id === "adj-read"),
+      {
+        id: "adj-read",
+        member: "ellie",
+        delta: -3,
+        reason: "Reward",
+        at: "2026-08-25T12:00:00Z",
+      },
+    );
   });
 });

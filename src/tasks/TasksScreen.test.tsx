@@ -52,6 +52,7 @@ function emptyView(): TasksViewRead {
       { member: "dad", done: 0, total: 0 },
       { member: "ellie", done: 0, total: 0 },
     ],
+    starBalances: [],
     today: "2026-08-25" as TasksViewRead["today"],
     generatedAt: "2026-08-25T16:00:00Z" as TasksViewRead["generatedAt"],
   };
@@ -77,9 +78,20 @@ function installFetch(store: TasksViewRead) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           title: string;
           type: "chore" | "routine";
-          member: string | null;
+          recurrence: unknown;
+          assignment:
+            | { kind: "fixed"; member: string }
+            | { kind: "rotation"; order: string[] }
+            | { kind: "open" };
           time?: string;
+          stars: number;
         };
+        const assignee =
+          body.assignment.kind === "fixed"
+            ? body.assignment.member
+            : body.assignment.kind === "rotation"
+              ? (body.assignment.order[0] ?? null)
+              : null;
         const occ: Occurrence = {
           state: "pending",
           task: `task-${store.occurrences.length + 1}` as Occurrence["task"],
@@ -89,7 +101,7 @@ function installFetch(store: TasksViewRead) {
           lineage:
             `lin-${store.occurrences.length + 1}` as Occurrence["lineage"],
           time: (body.time ?? null) as Occurrence["time"],
-          assignee: body.member,
+          assignee,
         };
         store.occurrences = [...store.occurrences, occ].sort((a, b) => {
           if (a.time && b.time)
@@ -98,9 +110,9 @@ function installFetch(store: TasksViewRead) {
           if (b.time) return 1;
           return 0;
         });
-        if (body.member) {
+        if (assignee) {
           store.progress = store.progress.map((row) =>
-            row.member === body.member ? { ...row, total: row.total + 1 } : row,
+            row.member === assignee ? { ...row, total: row.total + 1 } : row,
           );
         }
         return json({ definition: { id: occ.task } });
@@ -143,11 +155,24 @@ function installFetch(store: TasksViewRead) {
   return fetchMock;
 }
 
+function submittedRecurrence(
+  fetchMock: ReturnType<typeof installFetch>,
+): unknown {
+  const createCall = fetchMock.mock.calls.find(
+    ([input, init]) =>
+      urlOf(input).endsWith("/api/tasks") && (init?.method ?? "GET") === "POST",
+  );
+  const body = JSON.parse(String(createCall?.[1]?.body ?? "{}")) as {
+    recurrence?: unknown;
+  };
+  return body.recurrence;
+}
+
 describe("TasksScreen", () => {
   test("creating a task shows it in the assignee column the same day", async () => {
     const user = userEvent.setup();
     const store = emptyView();
-    installFetch(store);
+    const fetchMock = installFetch(store);
     render(<TasksScreen />);
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
@@ -161,12 +186,168 @@ describe("TasksScreen", () => {
       .closest("section");
     expect(ellie).toHaveTextContent("Walk dog");
     expect(ellie).toHaveTextContent("0/1");
+    expect(submittedRecurrence(fetchMock)).toEqual({ kind: "daily" });
+  });
+
+  test("the editor submits selected weekly days", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Bins");
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Mon" }));
+    await user.click(screen.getByRole("button", { name: "Thu" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "weekly",
+      days: ["mon", "thu"],
+    });
+  });
+
+  test("the editor requires and submits a date for a once task", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Change filter");
+    await user.click(screen.getByRole("button", { name: "Once" }));
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.type(screen.getByLabelText("Date"), "2026-09-01");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "once",
+      date: "2026-09-01",
+    });
+  });
+
+  test("the editor limits monthly recurrence to days 1 through 28", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Water filter");
+    await user.click(screen.getByRole("button", { name: "Monthly" }));
+    const day = screen.getByRole("spinbutton", { name: "Day of month" });
+    await user.clear(day);
+    await user.type(day, "29");
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.clear(day);
+    await user.type(day, "28");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "monthly",
+      day: 28,
+    });
+  });
+
+  test("the editor submits a nonnegative integer star value", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, "6");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    await screen.findByText("Feed cat");
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input) === "/api/tasks" &&
+        (init?.method ?? "GET").toUpperCase() === "POST",
+    );
+    expect(createCall).toBeDefined();
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      stars: 6,
+    });
+  });
+
+  test("the editor cannot submit an unsafe integer star value", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetch(emptyView());
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, String(Number.MAX_SAFE_INTEGER + 1));
+
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.find(
+        ([input, init]) =>
+          urlOf(input) === "/api/tasks" &&
+          (init?.method ?? "GET").toUpperCase() === "POST",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("balances and star values do not render in task columns", async () => {
+    const store = emptyView();
+    store.starBalances = [{ member: "dad", balance: 99 }];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    await screen.findByRole("heading", { name: "Dad" });
+    expect(screen.queryByText("99")).not.toBeInTheDocument();
+    expect(screen.queryByText(/star|point|balance/i)).not.toBeInTheDocument();
+  });
+
+  test("the editor submits recurrence, rotation order, and stars together", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Dishes rotation");
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(screen.getByRole("button", { name: "Mon" }));
+    await user.click(screen.getByRole("button", { name: "Rotation" }));
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, "4");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("Dishes rotation")).toBeInTheDocument();
+    const createCall = fetchMock.mock.calls.find(([input, init]) => {
+      return (
+        urlOf(input).endsWith("/api/tasks") &&
+        init?.method === "POST" &&
+        !urlOf(input).endsWith("/events")
+      );
+    });
+    expect(JSON.parse(String(createCall?.[1]?.body ?? "{}"))).toMatchObject({
+      recurrence: { kind: "weekly", days: ["mon"] },
+      stars: 4,
+      assignment: {
+        kind: "rotation",
+        order: ["dad", "ellie"],
+      },
+    });
   });
 
   test("the Household column appears only for an unclaimed open occurrence", async () => {
     const user = userEvent.setup();
     const store = emptyView();
-    installFetch(store);
+    const fetchMock = installFetch(store);
     render(<TasksScreen />);
 
     await screen.findByRole("button", { name: "Add task" });
@@ -176,7 +357,12 @@ describe("TasksScreen", () => {
 
     await user.click(screen.getByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Open dishes");
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Household" }));
+    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    await user.clear(stars);
+    await user.type(stars, "5");
     await user.click(screen.getByRole("button", { name: "Add" }));
 
     const household = await screen.findByRole("heading", {
@@ -184,6 +370,17 @@ describe("TasksScreen", () => {
     });
     expect(household.closest("section")).toHaveTextContent("Open dishes");
     expect(household.closest("section")).toHaveTextContent("0/1");
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") &&
+        init?.method === "POST" &&
+        !urlOf(input).endsWith("/events"),
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body ?? "{}"))).toMatchObject({
+      recurrence: { kind: "weekly", days: ["mon"] },
+      assignment: { kind: "open" },
+      stars: 5,
+    });
   });
 
   test("claiming moves an open occurrence and its count to the chosen member", async () => {
@@ -342,6 +539,51 @@ describe("TasksScreen", () => {
       );
     });
     expect(screen.getByRole("checkbox", { name: "Dishes" })).toBeChecked();
+  });
+
+  test("one tap attributes a rotation completion and keeps the done row with its completer", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "rotation" as Occurrence["task"],
+        window: store.today,
+        title: "Kitchen",
+        type: "chore",
+        lineage: "rotation-lineage" as Occurrence["lineage"],
+        time: null,
+        assignee: "ellie",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("checkbox", { name: "Kitchen" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Kitchen" })).toBeChecked();
+    });
+    const ellieColumn = screen
+      .getByRole("heading", { name: "Ellie" })
+      .closest("section");
+    expect(ellieColumn).toHaveTextContent("Kitchen");
+    expect(ellieColumn).toHaveTextContent("1/1");
+    expect(
+      screen.queryByRole("button", { name: "Dad" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Ellie" }),
+    ).not.toBeInTheDocument();
+    const eventCall = fetchMock.mock.calls.find(([input]) =>
+      urlOf(input).endsWith("/api/tasks/events"),
+    );
+    const event = JSON.parse(String(eventCall?.[1]?.body ?? "{}")).events[0];
+    expect(event.by).toBe("ellie");
   });
 
   test("reapplying a stale optimistic completion does not increment progress twice", () => {

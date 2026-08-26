@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
-import type { EventReceipt, TaskDefinition, TasksViewRead } from "./types";
+import {
+  addLocalDays,
+  type EventReceipt,
+  type TaskDefinition,
+  type TasksViewRead,
+} from "./types";
 
 describe("Tasks HTTP", () => {
   let dataRoot: string;
@@ -15,7 +20,9 @@ describe("Tasks HTTP", () => {
   let DISPLAY_COOKIE: typeof import("@/shared/pairing").DISPLAY_COOKIE;
   let handlePair: typeof import("@/displays/pairing-http").handlePair;
   let cookieHeader: string;
+  let loadDefinitions: typeof import("./store.ts").loadDefinitions;
   let loadEvents: typeof import("./store.ts").loadEvents;
+  let tasksDatabase: typeof import("./store.ts").tasksDatabase;
 
   beforeAll(async () => {
     dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-tasks-http-"));
@@ -29,7 +36,9 @@ describe("Tasks HTTP", () => {
       "@/shared/pairing"
     ));
     ({ handlePair } = await import("@/displays/pairing-http"));
-    ({ loadEvents } = await import("./store.ts"));
+    ({ loadDefinitions, loadEvents, tasksDatabase } = await import(
+      "./store.ts"
+    ));
 
     await mkdir(dataRoot, { recursive: true });
     await writeHousehold({
@@ -103,6 +112,7 @@ describe("Tasks HTTP", () => {
     assert.ok(typeof body.today === "string");
     assert.ok(typeof body.generatedAt === "string");
     assert.ok(!Number.isNaN(Date.parse(body.generatedAt)));
+    assert.ok(Array.isArray(body.starBalances));
   });
 
   test("create shows the same day; timed sorts before untimed", async () => {
@@ -112,7 +122,8 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Walk dog",
           type: "chore",
-          member: "dad",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
         }),
       }),
     );
@@ -123,7 +134,8 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Brush teeth",
           type: "routine",
-          member: "dad",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
           time: "07:00",
         }),
       }),
@@ -148,7 +160,135 @@ describe("Tasks HTTP", () => {
     assert.deepEqual(ellieProgress, { member: "ellie", done: 0, total: 0 });
   });
 
-  test("open create, claim, and completion use the first claimant", async () => {
+  test("create persists a weekly rotation with stars and defaults omitted stars to zero", async () => {
+    const omitted = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Default stars",
+          type: "chore",
+          recurrence: { kind: "monthly", day: 28 },
+          assignment: { kind: "fixed", member: "dad" },
+        }),
+      }),
+    );
+    assert.equal(omitted.status, 200);
+    const omittedBody = (await omitted.json()) as {
+      definition: TaskDefinition;
+    };
+    assert.equal(omittedBody.definition.stars, 0);
+    assert.equal(
+      loadDefinitions().find(
+        (definition) => definition.id === omittedBody.definition.id,
+      )?.stars,
+      0,
+    );
+
+    const explicit = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Earn stars",
+          type: "routine",
+          recurrence: { kind: "weekly", days: ["mon", "thu"] },
+          assignment: { kind: "rotation", order: ["ellie", "dad"] },
+          stars: 7,
+        }),
+      }),
+    );
+    assert.equal(explicit.status, 200);
+    const explicitBody = (await explicit.json()) as {
+      definition: TaskDefinition;
+    };
+    const persisted = loadDefinitions().find(
+      (definition) => definition.id === explicitBody.definition.id,
+    );
+    assert.deepEqual(persisted?.recurrence, {
+      kind: "weekly",
+      days: ["mon", "thu"],
+    });
+    assert.deepEqual(persisted?.assignment, {
+      kind: "rotation",
+      order: ["ellie", "dad"],
+    });
+    assert.equal(persisted?.stars, 7);
+  });
+
+  test("create rejects malformed and unsafe star values without breaking reads", async () => {
+    for (const stars of [-1, 1.5, "2", null, Number.MAX_SAFE_INTEGER + 1]) {
+      const before = loadDefinitions().length;
+      const response = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Invalid stars",
+            type: "chore",
+            recurrence: { kind: "daily" },
+            assignment: { kind: "fixed", member: "dad" },
+            stars,
+          }),
+        }),
+      );
+      assert.equal(response.status, 400);
+      assert.equal(loadDefinitions().length, before);
+    }
+    assert.equal(
+      (await handleGetTasks(req("http://familyos.test/api/tasks"))).status,
+      200,
+    );
+  });
+
+  test("GET exposes derived star balances without a writer route", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Star task",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+          stars: 5,
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "completed",
+              task: definition.id,
+              window: before.today,
+              by: "dad",
+              at: "2026-08-25T16:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    tasksDatabase()
+      .prepare(
+        `INSERT INTO star_adjustments (id, member, delta, reason, at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(crypto.randomUUID(), "dad", -2, "Reward", "2026-08-25T17:00:00Z");
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    assert.deepEqual(
+      after.starBalances.find((balance) => balance.member === "dad"),
+      { member: "dad", balance: 3 },
+    );
+  });
+
+  test("a starred monthly open task projects through claim and completion", async () => {
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
@@ -156,9 +296,11 @@ describe("Tasks HTTP", () => {
       req("http://familyos.test/api/tasks", {
         method: "POST",
         body: JSON.stringify({
-          title: "Open dishes",
+          title: "Wash bedding",
           type: "chore",
-          member: null,
+          recurrence: { kind: "monthly", day: 15 },
+          assignment: { kind: "open" },
+          stars: 7,
         }),
       }),
     );
@@ -166,7 +308,9 @@ describe("Tasks HTTP", () => {
     const { definition } = (await created.json()) as {
       definition: TaskDefinition;
     };
+    assert.deepEqual(definition.recurrence, { kind: "monthly", day: 15 });
     assert.deepEqual(definition.assignment, { kind: "open" });
+    assert.equal(definition.stars, 7);
 
     const unclaimed = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -177,6 +321,7 @@ describe("Tasks HTTP", () => {
     assert.equal(open?.state, "pending");
     assert.equal(open?.assignee, null);
     assert.deepEqual(unclaimed.progress, before.progress);
+    assert.ok(open);
 
     const firstClaim = await handlePostTaskEvents(
       req("http://familyos.test/api/tasks/events", {
@@ -186,7 +331,7 @@ describe("Tasks HTTP", () => {
             {
               kind: "claimed",
               task: definition.id,
-              window: unclaimed.today,
+              window: open.window,
               by: "dad",
             },
           ],
@@ -198,7 +343,7 @@ describe("Tasks HTTP", () => {
     };
     assert.equal(firstReceipt.receipts[0]?.status, "inserted");
 
-    const duplicateClaim = await handlePostTaskEvents(
+    const secondClaim = await handlePostTaskEvents(
       req("http://familyos.test/api/tasks/events", {
         method: "POST",
         body: JSON.stringify({
@@ -206,17 +351,17 @@ describe("Tasks HTTP", () => {
             {
               kind: "claimed",
               task: definition.id,
-              window: unclaimed.today,
+              window: open.window,
               by: "ellie",
             },
           ],
         }),
       }),
     );
-    const duplicateReceipt = (await duplicateClaim.json()) as {
+    const secondReceipt = (await secondClaim.json()) as {
       receipts: EventReceipt[];
     };
-    assert.equal(duplicateReceipt.receipts[0]?.status, "already-present");
+    assert.equal(secondReceipt.receipts[0]?.status, "already-present");
 
     const claimed = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -238,7 +383,7 @@ describe("Tasks HTTP", () => {
             {
               kind: "completed",
               task: definition.id,
-              window: unclaimed.today,
+              window: open.window,
               by: "dad",
               at: "2026-08-25T16:00:00Z",
             },
@@ -254,8 +399,16 @@ describe("Tasks HTTP", () => {
     );
     assert.equal(completedRow?.state, "done");
     if (completedRow?.state === "done") assert.equal(completedRow.by, "dad");
-    const dadCompleted = completed.progress.find((row) => row.member === "dad");
+    const dadCompleted = completed.progress.find(
+      (row) => row.member === "dad",
+    );
     assert.equal(dadCompleted?.done, (dadBefore?.done ?? 0) + 1);
+    const balanceBefore =
+      before.starBalances.find((row) => row.member === "dad")?.balance ?? 0;
+    assert.deepEqual(
+      completed.starBalances.find((row) => row.member === "dad"),
+      { member: "dad", balance: balanceBefore + 7 },
+    );
   });
 
   test("completion increments progress; a duplicate stores one fact", async () => {
@@ -265,7 +418,8 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Trash",
           type: "chore",
-          member: "ellie",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "ellie" },
         }),
       }),
     );
@@ -325,6 +479,95 @@ describe("Tasks HTTP", () => {
     );
   });
 
+  test("a closed-window completion advances an active-member rotation", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Dishes rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: ["dad", "ellie"] },
+        }),
+      }),
+    );
+    assert.equal(created.status, 200);
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const closedWindow = addLocalDays(before.today, -1);
+    const completed = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "completed",
+              task: definition.id,
+              window: closedWindow,
+              by: "dad",
+              at: "2026-08-25T16:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(completed.status, 200);
+    const completedBody = (await completed.json()) as {
+      receipts: EventReceipt[];
+    };
+    assert.equal(completedBody.receipts[0]?.status, "inserted");
+
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = after.occurrences.find(
+      (occurrence) => occurrence.task === definition.id,
+    );
+    assert.equal(row?.window, after.today);
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, "ellie");
+    assert.equal(
+      after.occurrences.some(
+        (occurrence) =>
+          occurrence.task === definition.id &&
+          occurrence.window === closedWindow,
+      ),
+      false,
+    );
+  });
+
+  test("rotation creation requires a nonempty active-member order", async () => {
+    const empty = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Empty rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: [] },
+        }),
+      }),
+    );
+    assert.equal(empty.status, 400);
+
+    const inactive = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Bad rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: ["dad", "ghost"] },
+        }),
+      }),
+    );
+    assert.equal(inactive.status, 400);
+  });
+
   test("a malformed batch rejects before any write", async () => {
     const before = loadEvents().length;
     const res = await handlePostTaskEvents(
@@ -355,7 +598,8 @@ describe("Tasks HTTP", () => {
         body: JSON.stringify({
           title: "Laundry",
           type: "chore",
-          member: "dad",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
         }),
       }),
     );
@@ -403,26 +647,69 @@ describe("Tasks HTTP", () => {
     assert.equal(body.error, "pairing required");
   });
 
-  test("create rejects recurrence and retired members", async () => {
-    const recurrence = await handleCreateTask(
-      req("http://familyos.test/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          title: "Nope",
-          type: "chore",
-          member: "dad",
-          recurrence: { kind: "weekly", days: ["mon"] },
+  test("create persists each recurrence kind with fixed assignment and zero stars", async () => {
+    const recurrences = [
+      { kind: "once", date: "2026-09-01" },
+      { kind: "daily" },
+      { kind: "weekly", days: ["mon", "thu"] },
+      { kind: "monthly", day: 28 },
+    ];
+    for (const recurrence of recurrences) {
+      const response = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: `${recurrence.kind} task`,
+            type: "chore",
+            recurrence,
+            assignment: { kind: "fixed", member: "dad" },
+          }),
         }),
-      }),
-    );
-    assert.equal(recurrence.status, 400);
+      );
+      assert.equal(response.status, 200);
+      const { definition } = (await response.json()) as {
+        definition: TaskDefinition;
+      };
+      assert.deepEqual(definition.recurrence, recurrence);
+      assert.deepEqual(definition.assignment, {
+        kind: "fixed",
+        member: "dad",
+      });
+      assert.equal(definition.stars, 0);
+    }
+  });
+
+  test("create rejects invalid monthly days and an empty weekly schedule", async () => {
+    for (const recurrence of [
+      { kind: "monthly", day: 29 },
+      { kind: "monthly", day: 30 },
+      { kind: "monthly", day: 31 },
+      { kind: "weekly", days: [] },
+    ]) {
+      const response = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Nope",
+            type: "chore",
+            recurrence,
+            assignment: { kind: "fixed", member: "dad" },
+          }),
+        }),
+      );
+      assert.equal(response.status, 400);
+    }
+  });
+
+  test("create rejects retired members", async () => {
     const missing = await handleCreateTask(
       req("http://familyos.test/api/tasks", {
         method: "POST",
         body: JSON.stringify({
           title: "Nope",
           type: "chore",
-          member: "ghost",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "ghost" },
         }),
       }),
     );
