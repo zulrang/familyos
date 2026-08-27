@@ -13,24 +13,45 @@ export function formatTaskTime(time: LocalTime): string {
     : `${wallHour}:${minutes} ${ampm}`;
 }
 
+const rowActionStyle = {
+  minHeight: "var(--hit-min)",
+  padding: "0 14px",
+  border: "1px solid var(--surface-grid-line)",
+  borderRadius: "var(--radius-pill)",
+  background: "var(--surface-card)",
+  color: "var(--text-title)",
+  font: "var(--type-card-meta)",
+  cursor: "pointer",
+} as const;
+
+export type TaskRowStatus =
+  | { kind: "open" }
+  | { kind: "done" }
+  | { kind: "skipped"; reason: string | null };
+
 export function TaskRow({
   label,
   time,
-  done,
+  status,
   surface,
   onComplete,
   onClaim,
+  onSkip,
   style,
 }: {
   label: string;
   time?: LocalTime | null;
-  done: boolean;
+  status: TaskRowStatus;
   surface: MemberSurface;
   onComplete: () => void;
   onClaim?: () => void;
+  onSkip?: () => void;
   style?: CSSProperties;
 }) {
+  const done = status.kind === "done";
   const ink = done ? onFillInk(surface.fill) : surface.ink;
+  const caption =
+    status.kind === "skipped" ? (status.reason ?? "Skipped") : null;
   return (
     <div
       style={{
@@ -41,6 +62,7 @@ export function TaskRow({
         borderRadius: "var(--radius-list-row)",
         background: done ? surface.fill : surface.soft,
         color: ink,
+        opacity: status.kind === "skipped" ? 0.55 : 1,
         transition: "background var(--dur-fast) var(--ease-standard)",
         ...style,
       }}
@@ -68,30 +90,41 @@ export function TaskRow({
             {formatTaskTime(time)}
           </span>
         ) : null}
+        {caption ? (
+          <span
+            style={{
+              font: "var(--fw-semibold) var(--fs-caption)/1.2 var(--font-sans)",
+              color: done ? ink : "var(--text-muted)",
+              marginTop: 2,
+            }}
+          >
+            {caption}
+          </span>
+        ) : null}
       </span>
       {onClaim ? (
         <button
           type="button"
           aria-label={`Claim ${label}`}
           onClick={onClaim}
-          style={{
-            marginLeft: "auto",
-            minHeight: "var(--hit-min)",
-            padding: "0 14px",
-            border: "1px solid var(--surface-grid-line)",
-            borderRadius: "var(--radius-pill)",
-            background: "var(--surface-card)",
-            color: "var(--text-title)",
-            font: "var(--type-card-meta)",
-            cursor: "pointer",
-          }}
+          style={{ marginLeft: "auto", ...rowActionStyle }}
         >
           Claim
         </button>
       ) : null}
+      {onSkip ? (
+        <button
+          type="button"
+          aria-label={`Skip ${label}`}
+          onClick={onSkip}
+          style={{ marginLeft: onClaim ? 0 : "auto", ...rowActionStyle }}
+        >
+          Skip
+        </button>
+      ) : null}
       <label
         style={{
-          marginLeft: onClaim ? 0 : "auto",
+          marginLeft: onClaim || onSkip ? 0 : "auto",
           width: 26,
           height: 26,
           flex: "0 0 auto",
