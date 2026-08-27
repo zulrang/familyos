@@ -45,7 +45,11 @@ export async function listCalendars(): Promise<GoogleCalendar[]> {
   }));
 }
 
-type GDate = { dateTime?: string; date?: string; timeZone?: string };
+type GDate = {
+  dateTime?: string | null;
+  date?: string | null;
+  timeZone?: string | null;
+};
 type GEvent = {
   id?: string;
   etag?: string;
@@ -156,6 +160,18 @@ function gBody(
   } else {
     start = googleDateTime(w.startMs, timeZone);
     end = googleDateTime(w.endMs, timeZone);
+  }
+  // ponytail: Google PATCH merges EventDateTime; leftover dateTime on an
+  // all-day write 400s "Invalid start time." Null the unused field (insert
+  // has no prior resource to merge).
+  if (mode === "update") {
+    if (w.allDay) {
+      start.dateTime = null;
+      end.dateTime = null;
+    } else {
+      start.date = null;
+      end.date = null;
+    }
   }
   const body: Record<string, unknown> = {
     summary: w.title,

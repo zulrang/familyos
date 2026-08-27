@@ -22,10 +22,10 @@ const recorded = vi.hoisted(() => {
 
 recorded.install(createRecordedCalendarGfetch());
 
-vi.mock("@/shared/google", () => ({
-  AuthError: class AuthError extends Error {},
-  gfetch: recorded.gfetch,
-}));
+vi.mock("@/shared/google", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/google")>();
+  return { ...actual, gfetch: recorded.gfetch };
+});
 
 test("CalendarGateway Google adapter satisfies contract (recorded)", async () => {
   const { googleCalendarGateway } = await import("./calendar-gateway.ts");

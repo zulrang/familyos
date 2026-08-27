@@ -7,6 +7,8 @@
  *
  * ponytail: all-day overlap uses the calendar TZ from timed writes (else
  * America/New_York). Live Google uses the calendar's own zone.
+ * PATCH merges start/end like live Google and 400s "Invalid start time."
+ * when both date and dateTime remain.
  */
 
 import { fromDateOnly } from "@/calendar/calendar";
@@ -14,7 +16,11 @@ import { zonedDateTimeToMs } from "@/shared/time";
 
 const CAL_ORIGIN = "https://www.googleapis.com/calendar/v3";
 
-type GDate = { dateTime?: string; date?: string; timeZone?: string };
+type GDate = {
+  dateTime?: string | null;
+  date?: string | null;
+  timeZone?: string | null;
+};
 
 type Stored = {
   id: string;
@@ -36,6 +42,40 @@ function json(data: unknown, status = 200): Response {
 
 function empty(status: number): Response {
   return new Response(null, { status });
+}
+
+function mergeDate(cur: GDate, patch: GDate): GDate {
+  const out: GDate = { ...cur };
+  for (const key of ["date", "dateTime", "timeZone"] as const) {
+    if (!Object.hasOwn(patch, key)) continue;
+    const v = patch[key];
+    if (v == null || v === "") delete out[key];
+    else out[key] = v;
+  }
+  return out;
+}
+
+function mixedDateTime(d: GDate): boolean {
+  return Boolean(d.date && d.dateTime);
+}
+
+function invalidStartTime(): Response {
+  return json(
+    {
+      error: {
+        errors: [
+          {
+            domain: "global",
+            reason: "invalid",
+            message: "Invalid start time.",
+          },
+        ],
+        code: 400,
+        message: "Invalid start time.",
+      },
+    },
+    400,
+  );
 }
 
 function parseIncoming(
@@ -188,13 +228,19 @@ export function createRecordedCalendarGfetch(): (
       if (!cur) return empty(404);
       const match = ifMatch(init);
       if (match != null && match !== cur.etag) return empty(412);
-      const start = parseIncoming(body.start, calendarTz);
-      const end = parseIncoming(body.end, calendarTz);
-      if (start) {
+      if (body.start) {
+        const merged = mergeDate(cur.start, body.start);
+        if (mixedDateTime(merged)) return invalidStartTime();
+        const start = parseIncoming(merged, calendarTz);
+        if (!start) return empty(400);
         cur.start = start.g;
         cur.startMs = start.ms;
       }
-      if (end) {
+      if (body.end) {
+        const merged = mergeDate(cur.end, body.end);
+        if (mixedDateTime(merged)) return invalidStartTime();
+        const end = parseIncoming(merged, calendarTz);
+        if (!end) return empty(400);
         cur.end = end.g;
         cur.endMs = end.ms;
       }

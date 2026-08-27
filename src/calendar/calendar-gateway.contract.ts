@@ -132,6 +132,42 @@ export async function assertCalendarGatewayContract(
   assert.deepEqual(found?.participantIds, ["ellie"]);
   assert.equal(found?.expectedVersion, updated.expectedVersion);
 
+  const allDayPiano = await gateway.updateEvent(
+    CAL,
+    piano.id,
+    {
+      title: "Piano day",
+      allDay: true,
+      startMs: fromDateOnly("2026-08-19", TZ),
+      endMs: fromDateOnly("2026-08-20", TZ),
+      participantIds: ["ellie"],
+    },
+    "this",
+    TZ,
+    updated.expectedVersion,
+  );
+  assert.equal(allDayPiano.allDay, true);
+  assert.equal(allDayPiano.startMs, fromDateOnly("2026-08-19", TZ));
+  assert.equal(allDayPiano.endMs, fromDateOnly("2026-08-20", TZ));
+
+  const timedAgain = await gateway.updateEvent(
+    CAL,
+    piano.id,
+    {
+      title: "Piano recital",
+      allDay: false,
+      startMs: pianoStart,
+      endMs: pianoEnd,
+      participantIds: ["ellie"],
+    },
+    "this",
+    TZ,
+    allDayPiano.expectedVersion,
+  );
+  assert.equal(timedAgain.allDay, false);
+  assert.equal(timedAgain.startMs, pianoStart);
+  assert.equal(timedAgain.endMs, pianoEnd);
+
   await assert.rejects(
     () =>
       gateway.updateEvent(
