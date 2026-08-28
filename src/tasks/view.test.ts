@@ -403,6 +403,21 @@ describe("tasks view", () => {
     assert.equal(row?.assignee, ellie);
   });
 
+  test("a skip of a claimed open occurrence is unassigned", () => {
+    const task = "open-skip-claim" as TaskId;
+    const [row] = view(
+      [definition({ id: task, assignment: { kind: "open" } })],
+      [
+        { kind: "claimed", task, window: today, by: ellie },
+        { kind: "skipped", task, window: today, reason: "Away" },
+      ],
+      today,
+    );
+    assert.equal(row?.state, "skipped");
+    assert.equal(row?.assignee, null);
+    if (row?.state === "skipped") assert.equal(row.reason, "Away");
+  });
+
   test("a skip with no reason is a skipped occurrence", () => {
     const task = "skip-none" as TaskId;
     const [row] = view(
