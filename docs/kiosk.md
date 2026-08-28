@@ -47,7 +47,9 @@ pnpm build && pnpm start
 ```
 
 `pnpm start` binds `0.0.0.0:3000` so the Pi can reach it. `pnpm dev` is `:3001`
-and is not the kiosk origin. Reload Chromium after the switch.
+and is not the kiosk origin. Reload Chromium after the switch. On the household
+Mac, `./scripts/macos-server install` keeps production up across logins;
+`./scripts/macos-server update` pulls `main`, rebuilds, and restarts.
 
 Pi Chromium also ships `--force-renderer-accessibility` (screen-reader tree on every tap). `/etc/chromium.d/familyos-perf` strips that and raises raster threads. Repo copy: `kiosk/chromium.d/familyos-perf`.
 

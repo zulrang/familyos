@@ -29,7 +29,7 @@ pnpm dev
 
 Open [http://localhost:3001](http://localhost:3001) → pair the Display → **Settings** → sign in → pick the family calendar.
 
-`pnpm start` is production on **3000**; `pnpm dev` is development on **3001**, so both can run. For a panel on the LAN, `pnpm build && pnpm start` (binds `0.0.0.0:3000`). `pnpm dev` over Wi-Fi makes taps feel late.
+`pnpm start` is production on **3000**; `pnpm dev` is development on **3001**, so both can run. For a panel on the LAN, `pnpm build && pnpm start` (binds `0.0.0.0:3000`). `pnpm dev` over Wi-Fi makes taps feel late. On the household Mac, `./scripts/macos-server install` keeps `:3000` up across logins; `./scripts/macos-server update` pulls `main`, rebuilds, and restarts.
 
 ## Touchscreen
 

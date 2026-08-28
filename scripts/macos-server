@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# Household Mac: KeepAlive production on :3000, and one-shot pull/rebuild/restart.
+# ponytail: nvm.sh at start (this Mac's node lives there); bake PATH into the
+# plist if we ever run as a LaunchDaemon without a user profile.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LABEL="com.familyos.server"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+DOMAIN="gui/$(id -u)"
+LOG_OUT="$HOME/Library/Logs/familyos-server.log"
+LOG_ERR="$HOME/Library/Logs/familyos-server.err.log"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/macos-server <command>
+
+  install    Write a LaunchAgent and start production on :3000 (survives login)
+  uninstall  Stop and remove the LaunchAgent
+  update     Checkout main, pull, rebuild, restart
+  restart    Restart the running agent (no git / build)
+  run        Start pnpm start (used by launchd; not a daily command)
+  --check    Self-test (plist XML, nvm/node/pnpm)
+
+Logs: ~/Library/Logs/familyos-server.log
+EOF
+}
+
+die() {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
+
+require_darwin() {
+  [[ "$(uname -s)" == Darwin ]] || die "macos-server is for the household Mac."
+}
+
+load_node() {
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+    set +eu
+    # shellcheck disable=SC1091
+    . "$NVM_DIR/nvm.sh"
+    nvm use default >/dev/null 2>&1 || nvm use node >/dev/null 2>&1 || true
+    set -eu
+  fi
+  export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
+  command -v node >/dev/null || die "node not found (install Node 24 via nvm)."
+  command -v pnpm >/dev/null || die "pnpm not found (corepack enable && corepack prepare pnpm@10.33.2 --activate)."
+}
+
+xml_escape() {
+  local s=$1
+  s=${s//&/&amp;}
+  s=${s//</&lt;}
+  s=${s//>/&gt;}
+  s=${s//\"/&quot;}
+  printf '%s' "$s"
+}
+
+write_plist() {
+  local dest=$1
+  local root_xml log_out_xml log_err_xml script_xml
+  root_xml=$(xml_escape "$ROOT")
+  log_out_xml=$(xml_escape "$LOG_OUT")
+  log_err_xml=$(xml_escape "$LOG_ERR")
+  script_xml=$(xml_escape "$ROOT/scripts/macos-server")
+  mkdir -p "$(dirname "$dest")" "$(dirname "$LOG_OUT")"
+  cat >"$dest" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LABEL}</string>
+  <key>WorkingDirectory</key>
+  <string>${root_xml}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${script_xml}</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>${log_out_xml}</string>
+  <key>StandardErrorPath</key>
+  <string>${log_err_xml}</string>
+</dict>
+</plist>
+EOF
+}
+
+agent_loaded() {
+  launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1
+}
+
+stop_agent() {
+  if agent_loaded; then
+    launchctl bootout "${DOMAIN}/${LABEL}"
+  fi
+}
+
+start_agent() {
+  [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
+  agent_loaded && launchctl bootout "${DOMAIN}/${LABEL}"
+  launchctl bootstrap "$DOMAIN" "$PLIST"
+  launchctl enable "${DOMAIN}/${LABEL}"
+}
+
+port_listening() {
+  lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1
+}
+
+assert_port_free() {
+  port_listening || return 0
+  die "Port 3000 is already in use. Stop that process, then retry."
+}
+
+wait_for_port() {
+  local i
+  for i in $(seq 1 30); do
+    if port_listening; then
+      echo "FamilyOS listening on :3000"
+      return 0
+    fi
+    sleep 1
+  done
+  die "Timed out waiting for :3000. See ${LOG_ERR}"
+}
+
+cmd_run() {
+  load_node
+  cd "$ROOT"
+  exec pnpm start
+}
+
+cmd_install() {
+  require_darwin
+  load_node
+  agent_loaded || assert_port_free
+  if [[ ! -d "$ROOT/.next" ]]; then
+    echo "No production build yet; running pnpm build"
+    (cd "$ROOT" && pnpm build)
+  fi
+  write_plist "$PLIST"
+  plutil -lint "$PLIST" >/dev/null
+  start_agent
+  wait_for_port
+}
+
+cmd_uninstall() {
+  require_darwin
+  stop_agent || true
+  rm -f "$PLIST"
+  echo "Removed ${LABEL}"
+}
+
+cmd_restart() {
+  require_darwin
+  [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
+  if agent_loaded; then
+    launchctl kickstart -k "${DOMAIN}/${LABEL}"
+  else
+    assert_port_free
+    start_agent
+  fi
+  wait_for_port
+}
+
+cmd_update() {
+  require_darwin
+  load_node
+  cd "$ROOT"
+
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git checkout: ${ROOT}"
+  if [[ -n "$(git status --porcelain)" ]]; then
+    die "Working tree is dirty. Commit or stash, then retry update."
+  fi
+
+  git fetch origin main
+  git checkout main
+  git pull --ff-only origin main
+
+  # next build must not race next start writing the same .next
+  stop_agent || true
+  assert_port_free
+  pnpm install --frozen-lockfile
+  pnpm build
+  if [[ -f "$PLIST" ]]; then
+    start_agent
+    wait_for_port
+  else
+    echo "Built. Install the LaunchAgent with: $0 install"
+  fi
+}
+
+cmd_check() {
+  require_darwin
+  load_node
+  node -v >/dev/null
+  pnpm -v >/dev/null
+  local tmp
+  tmp=$(mktemp -t familyos-plist)
+  write_plist "$tmp"
+  plutil -lint "$tmp" >/dev/null
+  grep -q "<string>${LABEL}</string>" "$tmp"
+  grep -q "<key>KeepAlive</key>" "$tmp"
+  grep -q "<string>run</string>" "$tmp"
+  rm -f "$tmp"
+  [[ "$(xml_escape 'a&b<c>')" == 'a&amp;b&lt;c&gt;' ]]
+  echo "macos-server --check: ok"
+}
+
+case "${1:-}" in
+  run) cmd_run ;;
+  install) cmd_install ;;
+  uninstall) cmd_uninstall ;;
+  update) cmd_update ;;
+  restart) cmd_restart ;;
+  --check) cmd_check ;;
+  -h | --help | help | "")
+    usage
+    [[ -n "${1:-}" ]] || exit 2
+    ;;
+  *)
+    usage >&2
+    die "Unknown command: $1"
+    ;;
+esac
