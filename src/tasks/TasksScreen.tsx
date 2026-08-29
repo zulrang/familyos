@@ -237,13 +237,25 @@ export function skipOccurrence(
   if (!current || current.state === "done" || current.state === "skipped") {
     return view;
   }
+  const unassign = current.state === "claimed";
+  const priorAssignee = unassign ? current.assignee : null;
   return {
     ...view,
     occurrences: view.occurrences.map((row) =>
       row.task === occ.task && row.window === occ.window
-        ? { ...row, state: "skipped" as const, reason }
+        ? {
+            ...row,
+            state: "skipped" as const,
+            reason,
+            ...(unassign ? { assignee: null } : {}),
+          }
         : row,
     ),
+    progress: priorAssignee
+      ? view.progress.map((row) =>
+          row.member === priorAssignee ? { ...row, total: row.total - 1 } : row,
+        )
+      : view.progress,
   };
 }
 

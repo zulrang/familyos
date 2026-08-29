@@ -671,6 +671,69 @@ describe("TasksScreen", () => {
     ]);
   });
 
+  test("skipping a claimed open occurrence unassigns it and drops the claimant's total", () => {
+    const store = emptyView();
+    const occurrence: Occurrence = {
+      state: "claimed",
+      task: "open-skip" as Occurrence["task"],
+      window: store.today,
+      title: "Walk dog",
+      type: "chore",
+      lineage: "lin-open-skip" as Occurrence["lineage"],
+      time: null,
+      assignee: "dad",
+      by: "dad",
+    };
+    store.occurrences = [occurrence];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+
+    const skipped = skipOccurrence(store, occurrence, null);
+
+    expect(skipped.occurrences[0]).toMatchObject({
+      state: "skipped",
+      assignee: null,
+      reason: null,
+    });
+    expect(skipped.progress).toEqual([
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 0 },
+    ]);
+  });
+
+  test("skipping a pending assigned occurrence keeps its assignee and total", () => {
+    const store = emptyView();
+    const occurrence: Occurrence = {
+      state: "pending",
+      task: "fixed-skip" as Occurrence["task"],
+      window: store.today,
+      title: "Dishes",
+      type: "chore",
+      lineage: "lin-fixed-skip" as Occurrence["lineage"],
+      time: null,
+      assignee: "ellie",
+    };
+    store.occurrences = [occurrence];
+    store.progress = [
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ];
+
+    const skipped = skipOccurrence(store, occurrence, "Away");
+
+    expect(skipped.occurrences[0]).toMatchObject({
+      state: "skipped",
+      assignee: "ellie",
+      reason: "Away",
+    });
+    expect(skipped.progress).toEqual([
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ]);
+  });
+
   test("skipping with no reason shows the skipped row", async () => {
     const user = userEvent.setup();
     const store = emptyView();
