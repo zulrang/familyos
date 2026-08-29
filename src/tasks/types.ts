@@ -429,6 +429,19 @@ export function rotateRotationOrder<T>(
   return [...order.slice(shift), ...order.slice(0, shift)] as NonEmpty<T>;
 }
 
+function replacementRotation(
+  current: NonEmpty<MemberId>,
+  submitted: NonEmpty<MemberId>,
+  completedCount: number,
+): NonEmpty<MemberId> {
+  const preRotated = rotateRotationOrder(current, completedCount);
+  if (sameItems(current, submitted)) return preRotated;
+  const remaining = preRotated.filter((id) => submitted.includes(id));
+  const added = submitted.filter((id) => !current.includes(id));
+  const [first, ...rest] = [...remaining, ...added];
+  return first === undefined ? submitted : [first, ...rest];
+}
+
 export function planDefinitionSave(input: {
   current: TaskDefinition;
   draft: CreateTaskDraft;
@@ -454,7 +467,11 @@ export function planDefinitionSave(input: {
     current.assignment.kind === "rotation"
       ? {
           kind: "rotation" as const,
-          order: rotateRotationOrder(current.assignment.order, completedCount),
+          order: replacementRotation(
+            current.assignment.order,
+            draft.assignment.order,
+            completedCount,
+          ),
         }
       : draft.assignment;
   return {

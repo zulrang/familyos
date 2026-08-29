@@ -282,6 +282,69 @@ describe("tasks sqlite store", () => {
     assert.equal(row?.assignee, ellie);
   });
 
+  test("adding a member to a rotation keeps them and the person on turn", () => {
+    const dad = "dad" as MemberId;
+    const ellie = "ellie" as MemberId;
+    const luke = "luke" as MemberId;
+    const def = definition({
+      assignment: { kind: "rotation", order: [dad, ellie, luke] },
+    });
+    insertDefinition(def);
+    applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-24" as LocalDate,
+      by: dad,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    const saved = saveDefinition({
+      id: def.id,
+      draft: draftFrom(def, {
+        assignment: {
+          kind: "rotation",
+          order: [dad, ellie, luke, "mia" as MemberId],
+        },
+      }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.deepEqual(saved.assignment, {
+      kind: "rotation",
+      order: [ellie, luke, dad, "mia"],
+    });
+    const [row] = view([saved], [], "2026-08-25" as LocalDate);
+    assert.equal(row?.assignee, ellie);
+  });
+
+  test("removing a rotation member drops them from the pre-rotated order", () => {
+    const dad = "dad" as MemberId;
+    const ellie = "ellie" as MemberId;
+    const luke = "luke" as MemberId;
+    const def = definition({
+      assignment: { kind: "rotation", order: [dad, ellie, luke] },
+    });
+    insertDefinition(def);
+    applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-24" as LocalDate,
+      by: dad,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    const saved = saveDefinition({
+      id: def.id,
+      draft: draftFrom(def, {
+        assignment: { kind: "rotation", order: [dad, luke] },
+      }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.deepEqual(saved.assignment, {
+      kind: "rotation",
+      order: [luke, dad],
+    });
+    const [row] = view([saved], [], "2026-08-25" as LocalDate);
+    assert.equal(row?.assignee, luke);
+  });
+
   test("a title-only save does not mint a new id or rotate the order", () => {
     const dad = "dad" as MemberId;
     const ellie = "ellie" as MemberId;
