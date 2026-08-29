@@ -36,6 +36,8 @@ require_darwin() {
 }
 
 load_node() {
+  # Homebrew/system first so launchd has git/lsof; nvm then prepends Node.
+  export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
     set +eu
@@ -44,7 +46,6 @@ load_node() {
     nvm use default >/dev/null 2>&1 || nvm use node >/dev/null 2>&1 || true
     set -eu
   fi
-  export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
   command -v node >/dev/null || die "node not found (install Node 24 via nvm)."
   command -v pnpm >/dev/null || die "pnpm not found (corepack enable && corepack prepare pnpm@10.33.2 --activate)."
 }
@@ -133,6 +134,7 @@ wait_for_port() {
     fi
     sleep 1
   done
+  stop_agent || true
   die "Timed out waiting for :3000. See ${LOG_ERR}"
 }
 
@@ -146,7 +148,8 @@ cmd_install() {
   require_darwin
   load_node
   agent_loaded || assert_port_free
-  if [[ ! -d "$ROOT/.next" ]]; then
+  # next dev also creates .next/; BUILD_ID is from next build
+  if [[ ! -f "$ROOT/.next/BUILD_ID" ]]; then
     echo "No production build yet; running pnpm build"
     (cd "$ROOT" && pnpm build)
   fi
@@ -216,6 +219,9 @@ cmd_check() {
   grep -q "<string>run</string>" "$tmp"
   rm -f "$tmp"
   [[ "$(xml_escape 'a&b<c>')" == 'a&amp;b&lt;c&gt;' ]]
+  if [[ -n "${NVM_BIN:-}" ]]; then
+    [[ "$(command -v node)" == "$NVM_BIN/node" ]]
+  fi
   echo "macos-server --check: ok"
 }
 
