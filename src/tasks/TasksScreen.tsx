@@ -237,8 +237,8 @@ export function skipOccurrence(
   if (!current || current.state === "done" || current.state === "skipped") {
     return view;
   }
-  const claimed = current.state === "claimed";
-  const priorAssignee = claimed ? current.assignee : null;
+  const unassign = current.state === "claimed";
+  const priorAssignee = unassign ? current.assignee : null;
   return {
     ...view,
     occurrences: view.occurrences.map((row) =>
@@ -247,15 +247,15 @@ export function skipOccurrence(
             ...row,
             state: "skipped" as const,
             reason,
-            assignee: claimed ? null : row.assignee,
+            ...(unassign ? { assignee: null } : {}),
           }
         : row,
     ),
-    progress: view.progress.map((row) =>
-      priorAssignee !== null && row.member === priorAssignee
-        ? { ...row, total: row.total - 1 }
-        : row,
-    ),
+    progress: priorAssignee
+      ? view.progress.map((row) =>
+          row.member === priorAssignee ? { ...row, total: row.total - 1 } : row,
+        )
+      : view.progress,
   };
 }
 

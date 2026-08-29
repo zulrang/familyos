@@ -677,7 +677,7 @@ describe("TasksScreen", () => {
       state: "claimed",
       task: "open-skip" as Occurrence["task"],
       window: store.today,
-      title: "Feed cat",
+      title: "Walk dog",
       type: "chore",
       lineage: "lin-open-skip" as Occurrence["lineage"],
       time: null,
@@ -690,12 +690,12 @@ describe("TasksScreen", () => {
       { member: "ellie", done: 0, total: 0 },
     ];
 
-    const skipped = skipOccurrence(store, occurrence, "Away");
+    const skipped = skipOccurrence(store, occurrence, null);
 
     expect(skipped.occurrences[0]).toMatchObject({
       state: "skipped",
       assignee: null,
-      reason: "Away",
+      reason: null,
     });
     expect(skipped.progress).toEqual([
       { member: "dad", done: 0, total: 0 },
@@ -703,34 +703,34 @@ describe("TasksScreen", () => {
     ]);
   });
 
-  test("skipping a pending assigned occurrence keeps the assignee and total", () => {
+  test("skipping a pending assigned occurrence keeps its assignee and total", () => {
     const store = emptyView();
     const occurrence: Occurrence = {
       state: "pending",
       task: "fixed-skip" as Occurrence["task"],
       window: store.today,
-      title: "Walk dog",
+      title: "Dishes",
       type: "chore",
       lineage: "lin-fixed-skip" as Occurrence["lineage"],
       time: null,
-      assignee: "dad",
+      assignee: "ellie",
     };
     store.occurrences = [occurrence];
     store.progress = [
-      { member: "dad", done: 0, total: 1 },
-      { member: "ellie", done: 0, total: 0 },
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
     ];
 
-    const skipped = skipOccurrence(store, occurrence, null);
+    const skipped = skipOccurrence(store, occurrence, "Away");
 
     expect(skipped.occurrences[0]).toMatchObject({
       state: "skipped",
-      assignee: "dad",
-      reason: null,
+      assignee: "ellie",
+      reason: "Away",
     });
     expect(skipped.progress).toEqual([
-      { member: "dad", done: 0, total: 1 },
-      { member: "ellie", done: 0, total: 0 },
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
     ]);
   });
 
