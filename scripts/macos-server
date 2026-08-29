@@ -36,6 +36,10 @@ require_darwin() {
   [[ "$(uname -s)" == Darwin ]] || die "macos-server is for the household Mac."
 }
 
+require_not_root() {
+  [[ "$(id -u)" -ne 0 ]] || die "Do not use sudo. nvm and this LaunchAgent belong to the household Mac user."
+}
+
 # SSH/Cursor is Background — no gui/ namespace. Console Terminal is Aqua.
 launchd_domain() {
   local mgr
@@ -130,13 +134,31 @@ stop_agent() {
   done
 }
 
+wait_unloaded() {
+  local domain=$1 i
+  for i in $(seq 1 20); do
+    launchctl print "${domain}/${LABEL}" >/dev/null 2>&1 || return 0
+    sleep 0.25
+  done
+  return 1
+}
+
 start_agent() {
-  local domain
+  local domain st
   [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
   domain=$(launchd_domain)
   stop_agent
-  launchctl bootstrap "$domain" "$PLIST"
-  launchctl enable "${domain}/${LABEL}"
+  wait_unloaded "$domain" || die "Could not unload ${LABEL}. Try: launchctl bootout ${domain}/${LABEL}"
+  if ! launchctl bootstrap "$domain" "$PLIST"; then
+    st=$?
+    # 5 = already loaded (bootout lost the race)
+    if [[ $st -eq 5 ]]; then
+      launchctl kickstart -k "${domain}/${LABEL}"
+    else
+      exit "$st"
+    fi
+  fi
+  launchctl enable "${domain}/${LABEL}" 2>/dev/null || true
 }
 
 port_listening() {
@@ -169,6 +191,7 @@ cmd_run() {
 
 cmd_install() {
   require_darwin
+  require_not_root
   load_node
   agent_loaded || assert_port_free
   # next dev also creates .next/; BUILD_ID is from next build
@@ -184,6 +207,7 @@ cmd_install() {
 
 cmd_uninstall() {
   require_darwin
+  require_not_root
   stop_agent || true
   rm -f "$PLIST"
   echo "Removed ${LABEL}"
@@ -191,6 +215,7 @@ cmd_uninstall() {
 
 cmd_restart() {
   require_darwin
+  require_not_root
   [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
   if agent_loaded; then
     launchctl kickstart -k "$(launchd_domain)/${LABEL}"
@@ -203,6 +228,7 @@ cmd_restart() {
 
 cmd_update() {
   require_darwin
+  require_not_root
   load_node
   cd "$ROOT"
 

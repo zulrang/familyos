@@ -99,7 +99,8 @@ That writes `~/Library/LaunchAgents/com.familyos.server.plist`, starts
 (auto-login is enough; a logged-out session does not run LaunchAgents).
 Install works over SSH and from Cursor: those sessions have no Aqua
 `gui/` domain, so the agent loads in `user/` with a Background session.
-Logs: `~/Library/Logs/familyos-server.log`.
+Do not use `sudo` — nvm lives in the Mac user's home, and a root
+bootstrap cannot start Node. Logs: `~/Library/Logs/familyos-server.log`.
 
 To pull latest `main`, rebuild, and restart — one command:
 
