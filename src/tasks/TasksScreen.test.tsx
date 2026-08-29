@@ -1,10 +1,21 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
-import { claimOccurrence, markDone, TasksScreen } from "./TasksScreen";
+import {
+  claimOccurrence,
+  markDone,
+  skipOccurrence,
+  TasksScreen,
+} from "./TasksScreen";
 import type { Occurrence, TasksViewRead } from "./types";
 
 afterEach(() => {
@@ -120,10 +131,11 @@ function installFetch(store: TasksViewRead) {
       if (method === "POST" && url.endsWith("/api/tasks/events")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           events: {
-            kind: "claimed" | "completed";
+            kind: "claimed" | "completed" | "skipped";
             task: string;
             window: string;
-            by: string;
+            by?: string;
+            reason?: string | null;
           }[];
         };
         const event = body.events[0];
@@ -133,14 +145,21 @@ function installFetch(store: TasksViewRead) {
         const already =
           event?.kind === "claimed"
             ? current?.state === "claimed"
-            : current?.state === "done";
+            : event?.kind === "skipped"
+              ? current?.state === "skipped"
+              : current?.state === "done";
         if (event?.kind === "claimed" && current && !already) {
-          const next = claimOccurrence(store, current, event.by);
+          const next = claimOccurrence(store, current, event.by ?? "");
           store.occurrences = next.occurrences;
           store.progress = next.progress;
         }
         if (event?.kind === "completed" && current && !already) {
           const next = markDone(store, current, event.by);
+          store.occurrences = next.occurrences;
+          store.progress = next.progress;
+        }
+        if (event?.kind === "skipped" && current && !already) {
+          const next = skipOccurrence(store, current, event.reason ?? null);
           store.occurrences = next.occurrences;
           store.progress = next.progress;
         }
@@ -650,5 +669,195 @@ describe("TasksScreen", () => {
       { member: "dad", done: 0, total: 0 },
       { member: "ellie", done: 1, total: 1 },
     ]);
+  });
+
+  test("skipping a claimed open occurrence unassigns it and drops the claimant's total", () => {
+    const store = emptyView();
+    const occurrence: Occurrence = {
+      state: "claimed",
+      task: "open-skip" as Occurrence["task"],
+      window: store.today,
+      title: "Walk dog",
+      type: "chore",
+      lineage: "lin-open-skip" as Occurrence["lineage"],
+      time: null,
+      assignee: "dad",
+      by: "dad",
+    };
+    store.occurrences = [occurrence];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+
+    const skipped = skipOccurrence(store, occurrence, null);
+
+    expect(skipped.occurrences[0]).toMatchObject({
+      state: "skipped",
+      assignee: null,
+      reason: null,
+    });
+    expect(skipped.progress).toEqual([
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 0 },
+    ]);
+  });
+
+  test("skipping a pending assigned occurrence keeps its assignee and total", () => {
+    const store = emptyView();
+    const occurrence: Occurrence = {
+      state: "pending",
+      task: "fixed-skip" as Occurrence["task"],
+      window: store.today,
+      title: "Dishes",
+      type: "chore",
+      lineage: "lin-fixed-skip" as Occurrence["lineage"],
+      time: null,
+      assignee: "ellie",
+    };
+    store.occurrences = [occurrence];
+    store.progress = [
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ];
+
+    const skipped = skipOccurrence(store, occurrence, "Away");
+
+    expect(skipped.occurrences[0]).toMatchObject({
+      state: "skipped",
+      assignee: "ellie",
+      reason: "Away",
+    });
+    expect(skipped.progress).toEqual([
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ]);
+  });
+
+  test("skipping with no reason shows the skipped row", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "skip-none" as Occurrence["task"],
+        window: store.today,
+        title: "Walk dog",
+        type: "chore",
+        lineage: "lin-skip-none" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Skip Walk dog" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Skip task" });
+    await user.click(within(dialog).getByRole("button", { name: "Skip" }));
+
+    expect(await screen.findByText("Skipped")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Walk dog" }),
+    ).not.toBeChecked();
+    expect(dialog).not.toBeInTheDocument();
+    const skipRequest = fetchMock.mock.calls.find(([, init]) =>
+      String(init?.body).includes('"kind":"skipped"'),
+    );
+    expect(JSON.parse(String(skipRequest?.[1]?.body)).events[0]).toMatchObject({
+      kind: "skipped",
+      task: "skip-none",
+      reason: null,
+    });
+  });
+
+  test("skipping with a preset reason shows that reason", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "skip-away" as Occurrence["task"],
+        window: store.today,
+        title: "Dishes",
+        type: "chore",
+        lineage: "lin-skip-away" as Occurrence["lineage"],
+        time: null,
+        assignee: "ellie",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 0 },
+      { member: "ellie", done: 0, total: 1 },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Skip Dishes" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Skip task" });
+    expect(within(dialog).getByRole("button", { name: "Away" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Sick" })).toBeVisible();
+    expect(
+      within(dialog).getByRole("button", { name: "Not needed" }),
+    ).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Away" }));
+
+    expect(await screen.findByText("Away")).toBeInTheDocument();
+    expect(screen.queryByText("Skipped")).not.toBeInTheDocument();
+    expect(dialog).not.toBeInTheDocument();
+    const skipRequest = fetchMock.mock.calls.find(([, init]) =>
+      String(init?.body).includes('"kind":"skipped"'),
+    );
+    expect(JSON.parse(String(skipRequest?.[1]?.body)).events[0]).toMatchObject({
+      kind: "skipped",
+      reason: "Away",
+    });
+  });
+
+  test("free text is stored when entered and never required", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "skip-note" as Occurrence["task"],
+        window: store.today,
+        title: "Trash",
+        type: "chore",
+        lineage: "lin-skip-note" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 1 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Skip Trash" }));
+    const dialog = screen.getByRole("dialog", { name: "Skip task" });
+    const note = within(dialog).getByPlaceholderText("Reason (optional)");
+    expect(note).not.toHaveAttribute("required");
+    await user.type(note, "kid at grandma's");
+    await user.click(within(dialog).getByRole("button", { name: "Skip" }));
+
+    expect(await screen.findByText("kid at grandma's")).toBeInTheDocument();
+    const skipRequest = fetchMock.mock.calls.find(([, init]) =>
+      String(init?.body).includes('"kind":"skipped"'),
+    );
+    expect(JSON.parse(String(skipRequest?.[1]?.body)).events[0]).toMatchObject({
+      kind: "skipped",
+      reason: "kid at grandma's",
+    });
   });
 });

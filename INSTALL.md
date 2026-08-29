@@ -86,6 +86,29 @@ pnpm build && pnpm start
 
 `pnpm start` binds `0.0.0.0:3000`. Point the kiosk at that origin.
 
+### Always-on Mac (LaunchAgent)
+
+On the household Mac, keep production on **3000** across logins:
+
+```bash
+./scripts/macos-server install
+```
+
+That writes `~/Library/LaunchAgents/com.familyos.server.plist`, starts
+`pnpm start` now, and starts it again whenever this Mac user logs in
+(auto-login is enough; a logged-out session does not run LaunchAgents).
+Logs: `~/Library/Logs/familyos-server.log`.
+
+To pull latest `main`, rebuild, and restart — one command:
+
+```bash
+./scripts/macos-server update
+```
+
+`update` refuses a dirty working tree, checks out `main`, fast-forwards,
+stops the agent so `next build` does not race `next start`, then brings
+`:3000` back. Development stays on **3001**.
+
 ## 4. Wall kiosk (optional)
 
 The intended appliance is a Raspberry Pi 5 running [FullPageOS](https://github.com/guysoft/FullPageOS): X11, matchbox, Chromium `--kiosk`. The Pi does **not** host the Next app. Chromium loads whatever URL is in `/boot/firmware/fullpageos.txt`.

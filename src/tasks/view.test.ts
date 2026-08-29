@@ -403,6 +403,28 @@ describe("tasks view", () => {
     assert.equal(row?.assignee, ellie);
   });
 
+  test("a skip with no reason is a skipped occurrence", () => {
+    const task = "skip-none" as TaskId;
+    const [row] = view(
+      [definition({ id: task })],
+      [{ kind: "skipped", task, window: today, reason: null }],
+      today,
+    );
+    assert.equal(row?.state, "skipped");
+    if (row?.state === "skipped") assert.equal(row.reason, null);
+  });
+
+  test("a skip keeps its preset reason", () => {
+    const task = "skip-away" as TaskId;
+    const [row] = view(
+      [definition({ id: task })],
+      [{ kind: "skipped", task, window: today, reason: "Away" }],
+      today,
+    );
+    assert.equal(row?.state, "skipped");
+    if (row?.state === "skipped") assert.equal(row.reason, "Away");
+  });
+
   test("a skip does not advance a rotation", () => {
     const task = "rotation-skip" as TaskId;
     const [row] = view(

@@ -287,11 +287,13 @@ export function parseTaskEvent(raw: unknown): TaskEvent | null {
       ) {
         return null;
       }
+      const reason =
+        typeof raw.reason === "string" ? raw.reason.trim() || null : null;
       return {
         kind: "skipped",
         task,
         window,
-        reason: typeof raw.reason === "string" ? raw.reason : null,
+        reason,
       };
     }
     default:

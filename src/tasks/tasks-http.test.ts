@@ -538,6 +538,180 @@ describe("Tasks HTTP", () => {
     );
   });
 
+  test("a skip with no reason is a skipped occurrence", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Skip me",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const skipped = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "skipped",
+              task: definition.id,
+              window: before.today,
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(skipped.status, 200);
+    const skippedBody = (await skipped.json()) as { receipts: EventReceipt[] };
+    assert.equal(skippedBody.receipts[0]?.status, "inserted");
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = after.occurrences.find((occ) => occ.task === definition.id);
+    assert.equal(row?.state, "skipped");
+    if (row?.state === "skipped") assert.equal(row.reason, null);
+  });
+
+  test("a skip with a preset reason keeps that reason", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Away skip",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "ellie" },
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const skipped = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "skipped",
+              task: definition.id,
+              window: before.today,
+              reason: "Away",
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(skipped.status, 200);
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = after.occurrences.find((occ) => occ.task === definition.id);
+    assert.equal(row?.state, "skipped");
+    if (row?.state === "skipped") assert.equal(row.reason, "Away");
+  });
+
+  test("an empty skip reason is stored as no reason", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Empty reason skip",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const skipped = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "skipped",
+              task: definition.id,
+              window: before.today,
+              reason: "   ",
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(skipped.status, 200);
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = after.occurrences.find((occ) => occ.task === definition.id);
+    assert.equal(row?.state, "skipped");
+    if (row?.state === "skipped") assert.equal(row.reason, null);
+  });
+
+  test("a skip does not change the next window's rotation assignee", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Skip rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: ["dad", "ellie"] },
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    assert.equal(
+      before.occurrences.find((occ) => occ.task === definition.id)?.assignee,
+      "dad",
+    );
+    const skipped = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "skipped",
+              task: definition.id,
+              window: addLocalDays(before.today, -1),
+              reason: "Sick",
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(skipped.status, 200);
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = after.occurrences.find((occ) => occ.task === definition.id);
+    assert.equal(row?.window, after.today);
+    assert.equal(row?.state, "pending");
+    assert.equal(row?.assignee, "dad");
+  });
+
   test("rotation creation requires a nonempty active-member order", async () => {
     const empty = await handleCreateTask(
       req("http://familyos.test/api/tasks", {

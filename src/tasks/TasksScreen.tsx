@@ -16,7 +16,7 @@ import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
 import { MemberColumn } from "./MemberColumn";
-import { TaskRow } from "./TaskRow";
+import { TaskRow, type TaskRowStatus } from "./TaskRow";
 import {
   nowInstant,
   type Occurrence,
@@ -125,6 +125,29 @@ type MemberAction =
   | { kind: "claim"; occurrence: Occurrence }
   | { kind: "complete"; occurrence: Occurrence };
 
+const SKIP_PRESETS = ["Away", "Sick", "Not needed"] as const;
+
+function rowStatus(row: Occurrence): TaskRowStatus {
+  switch (row.state) {
+    case "done":
+      return { kind: "done" };
+    case "skipped":
+      return { kind: "skipped", reason: row.reason };
+    case "pending":
+    case "claimed":
+    case "expired":
+      return { kind: "open" };
+    default: {
+      const _exhaustive: never = row;
+      return _exhaustive;
+    }
+  }
+}
+
+function canSkip(row: Occurrence): boolean {
+  return row.state === "pending" || row.state === "claimed";
+}
+
 const HOUSEHOLD_SURFACE: MemberSurface = {
   fill: "#dcebf6",
   soft: "#eef4f8",
@@ -203,12 +226,47 @@ export function claimOccurrence(
   };
 }
 
+export function skipOccurrence(
+  view: TasksViewRead,
+  occ: Occurrence,
+  reason: string | null,
+): TasksViewRead {
+  const current = view.occurrences.find(
+    (row) => row.task === occ.task && row.window === occ.window,
+  );
+  if (!current || current.state === "done" || current.state === "skipped") {
+    return view;
+  }
+  const unassign = current.state === "claimed";
+  const priorAssignee = unassign ? current.assignee : null;
+  return {
+    ...view,
+    occurrences: view.occurrences.map((row) =>
+      row.task === occ.task && row.window === occ.window
+        ? {
+            ...row,
+            state: "skipped" as const,
+            reason,
+            ...(unassign ? { assignee: null } : {}),
+          }
+        : row,
+    ),
+    progress: priorAssignee
+      ? view.progress.map((row) =>
+          row.member === priorAssignee ? { ...row, total: row.total - 1 } : row,
+        )
+      : view.progress,
+  };
+}
+
 export function TasksScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
   const [sheet, setSheet] = useState<Draft | null>(null);
   const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
+  const [skipping, setSkipping] = useState<Occurrence | null>(null);
+  const [skipNote, setSkipNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -310,6 +368,36 @@ export function TasksScreen() {
     }
   }
 
+  async function skip(occ: Occurrence, reason: string | null) {
+    setSkipping(null);
+    setSkipNote("");
+    setTasks((cur) => skipOccurrence(cur, occ, reason));
+    try {
+      const res = await fetch("/api/tasks/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "skipped",
+              task: occ.task,
+              window: occ.window,
+              reason,
+            },
+          ],
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) {
+        setError("Could not skip task.");
+      }
+      await load();
+    } catch {
+      setError("Could not skip task.");
+      await load();
+    }
+  }
+
   async function createTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
@@ -356,7 +444,9 @@ export function TasksScreen() {
     members.map((member) => [member.id, memberSurface(member.color)]),
   );
   const householdRows = tasks.occurrences.filter(
-    (row) => row.state === "pending" && row.assignee === null,
+    (row) =>
+      row.assignee === null &&
+      (row.state === "pending" || row.state === "skipped"),
   );
   const columnCount = members.length + (householdRows.length > 0 ? 1 : 0);
 
@@ -438,9 +528,17 @@ export function TasksScreen() {
                     key={`${row.task}:${row.window}`}
                     label={row.title}
                     time={row.time}
-                    done={row.state === "done"}
+                    status={rowStatus(row)}
                     surface={surface}
                     onComplete={() => complete(row)}
+                    onSkip={
+                      canSkip(row)
+                        ? () => {
+                            setSkipNote("");
+                            setSkipping(row);
+                          }
+                        : undefined
+                    }
                   />
                 ))}
               </MemberColumn>
@@ -458,9 +556,19 @@ export function TasksScreen() {
                   key={`${row.task}:${row.window}`}
                   label={row.title}
                   time={row.time}
-                  done={false}
+                  status={rowStatus(row)}
                   surface={HOUSEHOLD_SURFACE}
-                  onClaim={() => claim(row)}
+                  onClaim={
+                    row.state === "pending" ? () => claim(row) : undefined
+                  }
+                  onSkip={
+                    canSkip(row)
+                      ? () => {
+                          setSkipNote("");
+                          setSkipping(row);
+                        }
+                      : undefined
+                  }
                   onComplete={() => complete(row)}
                 />
               ))}
@@ -509,6 +617,20 @@ export function TasksScreen() {
             } else {
               complete(action.occurrence, member.id).catch(() => {});
             }
+          }}
+        />
+      ) : null}
+      {skipping ? (
+        <SkipSheet
+          title={skipping.title}
+          note={skipNote}
+          onNote={setSkipNote}
+          onClose={() => {
+            setSkipping(null);
+            setSkipNote("");
+          }}
+          onSkip={(reason) => {
+            skip(skipping, reason).catch(() => {});
           }}
         />
       ) : null}
@@ -929,6 +1051,110 @@ function MemberPicker({
               </button>
             );
           })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SkipSheet({
+  title,
+  note,
+  onNote,
+  onClose,
+  onSkip,
+}: {
+  title: string;
+  note: string;
+  onNote: (note: string) => void;
+  onClose: () => void;
+  onSkip: (reason: string | null) => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 9,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        style={{
+          position: "absolute",
+          inset: 0,
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+        }}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-skip-title"
+        style={{
+          position: "relative",
+          width: 360,
+          maxWidth: "calc(100% - 48px)",
+          background: "var(--surface-screen)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "var(--shadow-panel)",
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h2
+            id="task-skip-title"
+            style={{ font: "var(--type-section)", flex: 1 }}
+          >
+            Skip task
+          </h2>
+          <IconButton icon="x" label="Close" onClick={onClose} />
+        </div>
+        <div
+          style={{ font: "var(--type-card-meta)", color: "var(--text-muted)" }}
+        >
+          {title}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {SKIP_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => onSkip(preset)}
+              style={{
+                border: "none",
+                borderRadius: "var(--radius-pill)",
+                padding: "8px 14px",
+                minHeight: "var(--hit-min)",
+                background: HOUSEHOLD_SURFACE.soft,
+                color: HOUSEHOLD_SURFACE.ink,
+                font: "var(--type-card-meta)",
+                cursor: "pointer",
+              }}
+            >
+              {preset}
+            </button>
+          ))}
+        </div>
+        <input
+          className="fos-input"
+          placeholder="Reason (optional)"
+          value={note}
+          onChange={(event) => onNote(event.target.value)}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Button variant="primary" onClick={() => onSkip(note.trim() || null)}>
+            Skip
+          </Button>
         </div>
       </div>
     </div>
