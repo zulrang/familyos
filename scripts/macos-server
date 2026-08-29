@@ -2,12 +2,13 @@
 # Household Mac: KeepAlive production on :3000, and one-shot pull/rebuild/restart.
 # ponytail: nvm.sh at start (this Mac's node lives there); bake PATH into the
 # plist if we ever run as a LaunchDaemon without a user profile.
+# ponytail: user/ domain from SSH (gui/ returns 125 without Aqua). Background is
+# the parent of every login type; LaunchDaemon if we ever need no-login boot.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LABEL="com.familyos.server"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-DOMAIN="gui/$(id -u)"
 LOG_OUT="$HOME/Library/Logs/familyos-server.log"
 LOG_ERR="$HOME/Library/Logs/familyos-server.err.log"
 
@@ -33,6 +34,16 @@ die() {
 
 require_darwin() {
   [[ "$(uname -s)" == Darwin ]] || die "macos-server is for the household Mac."
+}
+
+# SSH/Cursor is Background — no gui/ namespace. Console Terminal is Aqua.
+launchd_domain() {
+  local mgr
+  mgr=$(launchctl managername 2>/dev/null || true)
+  case "$mgr" in
+    Aqua) printf 'gui/%s' "$(id -u)" ;;
+    *) printf 'user/%s' "$(id -u)" ;;
+  esac
 }
 
 load_node() {
@@ -90,6 +101,12 @@ write_plist() {
   <integer>10</integer>
   <key>ProcessType</key>
   <string>Background</string>
+  <key>LimitLoadToSessionType</key>
+  <array>
+    <string>Aqua</string>
+    <string>Background</string>
+    <string>StandardIO</string>
+  </array>
   <key>StandardOutPath</key>
   <string>${log_out_xml}</string>
   <key>StandardErrorPath</key>
@@ -100,20 +117,26 @@ EOF
 }
 
 agent_loaded() {
-  launchctl print "${DOMAIN}/${LABEL}" >/dev/null 2>&1
+  local domain
+  domain=$(launchd_domain)
+  launchctl print "${domain}/${LABEL}" >/dev/null 2>&1
 }
 
 stop_agent() {
-  if agent_loaded; then
-    launchctl bootout "${DOMAIN}/${LABEL}"
-  fi
+  local uid target
+  uid=$(id -u)
+  for target in "gui/${uid}/${LABEL}" "user/${uid}/${LABEL}"; do
+    launchctl bootout "$target" 2>/dev/null || true
+  done
 }
 
 start_agent() {
+  local domain
   [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
-  agent_loaded && launchctl bootout "${DOMAIN}/${LABEL}"
-  launchctl bootstrap "$DOMAIN" "$PLIST"
-  launchctl enable "${DOMAIN}/${LABEL}"
+  domain=$(launchd_domain)
+  stop_agent
+  launchctl bootstrap "$domain" "$PLIST"
+  launchctl enable "${domain}/${LABEL}"
 }
 
 port_listening() {
@@ -170,7 +193,7 @@ cmd_restart() {
   require_darwin
   [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
   if agent_loaded; then
-    launchctl kickstart -k "${DOMAIN}/${LABEL}"
+    launchctl kickstart -k "$(launchd_domain)/${LABEL}"
   else
     assert_port_free
     start_agent
@@ -210,19 +233,22 @@ cmd_check() {
   load_node
   node -v >/dev/null
   pnpm -v >/dev/null
-  local tmp
+  local tmp domain
   tmp=$(mktemp -t familyos-plist)
   write_plist "$tmp"
   plutil -lint "$tmp" >/dev/null
   grep -q "<string>${LABEL}</string>" "$tmp"
   grep -q "<key>KeepAlive</key>" "$tmp"
   grep -q "<string>run</string>" "$tmp"
+  grep -q "<string>Background</string>" "$tmp"
   rm -f "$tmp"
   [[ "$(xml_escape 'a&b<c>')" == 'a&amp;b&lt;c&gt;' ]]
+  domain=$(launchd_domain)
+  [[ "$domain" == gui/* || "$domain" == user/* ]]
   if [[ -n "${NVM_BIN:-}" ]]; then
     [[ "$(command -v node)" == "$NVM_BIN/node" ]]
   fi
-  echo "macos-server --check: ok"
+  echo "macos-server --check: ok (${domain})"
 }
 
 case "${1:-}" in

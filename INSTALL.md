@@ -97,6 +97,8 @@ On the household Mac, keep production on **3000** across logins:
 That writes `~/Library/LaunchAgents/com.familyos.server.plist`, starts
 `pnpm start` now, and starts it again whenever this Mac user logs in
 (auto-login is enough; a logged-out session does not run LaunchAgents).
+Install works over SSH and from Cursor: those sessions have no Aqua
+`gui/` domain, so the agent loads in `user/` with a Background session.
 Logs: `~/Library/Logs/familyos-server.log`.
 
 To pull latest `main`, rebuild, and restart — one command:
