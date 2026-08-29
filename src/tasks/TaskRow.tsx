@@ -37,6 +37,7 @@ export function TaskRow({
   onComplete,
   onClaim,
   onSkip,
+  onEdit,
   style,
 }: {
   label: string;
@@ -46,12 +47,20 @@ export function TaskRow({
   onComplete: () => void;
   onClaim?: () => void;
   onSkip?: () => void;
+  onEdit?: () => void;
   style?: CSSProperties;
 }) {
   const done = status.kind === "done";
   const ink = done ? onFillInk(surface.fill) : surface.ink;
   const caption =
     status.kind === "skipped" ? (status.reason ?? "Skipped") : null;
+  const titleStyle = {
+    font: "var(--type-card-meta)",
+    color: done ? ink : "var(--text-title)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  } as const;
   return (
     <div
       style={{
@@ -68,17 +77,27 @@ export function TaskRow({
       }}
     >
       <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <span
-          style={{
-            font: "var(--type-card-meta)",
-            color: done ? ink : "var(--text-title)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {label}
-        </span>
+        {onEdit ? (
+          <button
+            type="button"
+            aria-label={`Edit ${label}`}
+            onClick={onEdit}
+            style={{
+              border: "none",
+              background: "none",
+              padding: 0,
+              margin: 0,
+              ...titleStyle,
+              textAlign: "left",
+              cursor: "pointer",
+              maxWidth: "100%",
+            }}
+          >
+            {label}
+          </button>
+        ) : (
+          <span style={titleStyle}>{label}</span>
+        )}
         {time ? (
           <span
             style={{
