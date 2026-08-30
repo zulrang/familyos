@@ -86,6 +86,9 @@ function installFetch(
           expiresAt: Date.now() + 10 * 60 * 1000,
         });
       }
+      if (method === "POST" && url.endsWith("/api/settings/update")) {
+        return json({ ok: true }, 202);
+      }
       if (method === "PATCH" && url.endsWith("/api/settings")) {
         const body = JSON.parse(String(init?.body ?? "{}"));
         if (options?.patch) return options.patch(body);
@@ -213,6 +216,61 @@ describe("Settings pairing code", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Pair Display" })).toBeNull();
     expect(screen.queryByText("ABC234")).toBeNull();
+  });
+});
+
+describe("Settings server update", () => {
+  test("Update starts a Household server update", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetch(publicSettings([ada]));
+    render(<SettingsScreen />);
+    await screen.findByDisplayValue("Ada");
+
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(
+      await screen.findByText(
+        "Update started. This Display will go offline until the server is back.",
+      ),
+    ).toBeInTheDocument();
+    const posts = fetchMock.mock.calls.filter((call) => {
+      const url = urlOf(call[0]);
+      const method = (call[1]?.method ?? "GET").toUpperCase();
+      return method === "POST" && url.endsWith("/api/settings/update");
+    });
+    expect(posts).toHaveLength(1);
+  });
+
+  test("a failed update is reported without claiming it started", async () => {
+    const user = userEvent.setup();
+    const settings = publicSettings([ada]);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/displays")) {
+          return json({ displays: [], currentDisplayId: "d1" });
+        }
+        if (method === "POST" && url.endsWith("/api/settings/update")) {
+          return json({ error: "Could not start update." }, 500);
+        }
+        return json({ error: `unhandled ${method} ${url}` }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SettingsScreen />);
+    await screen.findByDisplayValue("Ada");
+
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(
+      await screen.findByText("Could not start update."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Update started/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update" })).toBeEnabled();
   });
 });
 
