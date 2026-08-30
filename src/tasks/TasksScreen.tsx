@@ -24,6 +24,7 @@ import {
   type TaskType,
   type Weekday,
 } from "./types";
+import { occurrencesForColumn } from "./view";
 
 function headerDate(d: Date, timeZone: string): string {
   return d.toLocaleDateString("en-US", {
@@ -512,8 +513,8 @@ export function TasksScreen() {
               done: 0,
               total: 0,
             };
-            const rows = tasks.occurrences.filter(
-              (row) => row.assignee === member.id,
+            const rows = occurrencesForColumn(
+              tasks.occurrences.filter((row) => row.assignee === member.id),
             );
             return (
               <MemberColumn

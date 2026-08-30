@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
-import { type MemberSurface, checkInkOnFill, onFillInk } from "@/members/members";
+import {
+  checkInkOnFill,
+  type MemberSurface,
+  onFillInk,
+} from "@/members/members";
 import { Icon } from "@/shared/ui/Icon";
 import type { LocalTime } from "./types";
 
@@ -63,7 +67,7 @@ export function TaskRow({
         borderRadius: "var(--radius-list-row)",
         background: done ? surface.fill : surface.soft,
         color: ink,
-        opacity: status.kind === "skipped" ? 0.55 : 1,
+        opacity: status.kind === "open" ? 1 : 0.55,
         transition: "background var(--dur-fast) var(--ease-standard)",
         ...style,
       }}

@@ -156,11 +156,18 @@ function windowStarts(recurrence: Recurrence, today: LocalDate): WindowStarts {
   }
 }
 
+function isCompleted(row: Occurrence): boolean {
+  return row.state === "done";
+}
+
 function compareOccurrences(
   a: Occurrence,
   b: Occurrence,
   order: ReadonlyMap<TaskId, number>,
 ): number {
+  if (isCompleted(a) !== isCompleted(b)) {
+    return isCompleted(a) ? 1 : -1;
+  }
   if (a.time && b.time) {
     if (a.time < b.time) return -1;
     if (a.time > b.time) return 1;
@@ -170,6 +177,28 @@ function compareOccurrences(
     return 1;
   }
   return (order.get(a.task) ?? 0) - (order.get(b.task) ?? 0);
+}
+
+function sortOccurrences(
+  rows: readonly Occurrence[],
+  order: ReadonlyMap<TaskId, number>,
+): Occurrence[] {
+  return rows.slice().sort((a, b) => compareOccurrences(a, b, order));
+}
+
+/**
+ * Remaining Occurrences first (timed, then untimed), then completed in that
+ * same order. Current position is the creation-order fallback, so an
+ * optimistic complete matches the projection before reload.
+ */
+export function occurrencesForColumn(
+  rows: readonly Occurrence[],
+): Occurrence[] {
+  const order = new Map<TaskId, number>();
+  rows.forEach((row, index) => {
+    order.set(row.task, index);
+  });
+  return sortOccurrences(rows, order);
 }
 
 export function view(
@@ -213,8 +242,7 @@ export function view(
       );
     }
   }
-  out.sort((a, b) => compareOccurrences(a, b, order));
-  return out;
+  return sortOccurrences(out, order);
 }
 
 export function starBalances(
