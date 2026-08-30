@@ -12,6 +12,7 @@ import {
   memberSurface,
   migrateRoster,
   onFillInk,
+  checkInkOnFill,
   parseMemberColor,
   parseRoster,
   resolveMembers,
@@ -264,5 +265,15 @@ describe("Household Members", () => {
     assert.equal(onFillInk("#5b9bd5"), "#1f2a33");
     assert.equal(onFillInk("#1a2744"), "#ffffff");
     assert.equal(onFillInk("#000000"), "#ffffff");
+  });
+
+  test("check ink on fill uses palette ink for legacy tones", () => {
+    assert.equal(checkInkOnFill(memberSurface("#a9d8d2")), "#2c5d58");
+    assert.equal(checkInkOnFill(memberSurface("#c8e5cd")), "#3a6144");
+  });
+
+  test("check ink on fill uses contrast ink for custom colors", () => {
+    assert.equal(checkInkOnFill(memberSurface("#4a90d9")), "#1f2a33");
+    assert.equal(checkInkOnFill(memberSurface("#1a2744")), "#ffffff");
   });
 });
