@@ -7,6 +7,7 @@ import {
   type LineageId,
   type LocalDate,
   type LocalTime,
+  type Occurrence,
   parseRecurrence,
   type Recurrence,
   type StarAdjustment,
@@ -14,7 +15,7 @@ import {
   type TaskEvent,
   type TaskId,
 } from "./types";
-import { starBalances, view } from "./view";
+import { occurrencesForColumn, starBalances, view } from "./view";
 
 const today = "2026-08-25" as LocalDate;
 const dad = "dad" as MemberId;
@@ -163,6 +164,56 @@ describe("tasks view", () => {
       ["Late", "Untimed", "Early"],
     );
     assert.equal(occurrences[2]?.state, "done");
+  });
+
+  test("a just-completed later row sorts among already-done rows", () => {
+    const at = "2026-08-25T16:00:00Z" as Instant;
+    const fields = {
+      window: today,
+      type: "chore" as const,
+      lineage: "lin-1" as LineageId,
+      assignee: dad,
+    };
+    const rows: Occurrence[] = [
+      {
+        ...fields,
+        task: "dinner" as TaskId,
+        title: "Dinner",
+        time: "18:00" as LocalTime,
+        state: "done",
+        by: dad,
+        at,
+      },
+      {
+        ...fields,
+        task: "walk" as TaskId,
+        title: "Walk dog",
+        time: null,
+        state: "pending",
+      },
+      {
+        ...fields,
+        task: "brush" as TaskId,
+        title: "Brush teeth",
+        time: "07:00" as LocalTime,
+        state: "done",
+        by: dad,
+        at,
+      },
+      {
+        ...fields,
+        task: "lunch" as TaskId,
+        title: "Lunch",
+        time: "08:00" as LocalTime,
+        state: "done",
+        by: dad,
+        at,
+      },
+    ];
+    assert.deepEqual(
+      occurrencesForColumn(rows).map((row) => row.title),
+      ["Walk dog", "Brush teeth", "Lunch", "Dinner"],
+    );
   });
 
   test("a completed event shows done", () => {

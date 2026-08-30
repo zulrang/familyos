@@ -179,17 +179,26 @@ function compareOccurrences(
   return (order.get(a.task) ?? 0) - (order.get(b.task) ?? 0);
 }
 
-/** Remaining Occurrences first; completed rows follow, preserving relative order. */
+function sortOccurrences(
+  rows: readonly Occurrence[],
+  order: ReadonlyMap<TaskId, number>,
+): Occurrence[] {
+  return rows.slice().sort((a, b) => compareOccurrences(a, b, order));
+}
+
+/**
+ * Remaining Occurrences first (timed, then untimed), then completed in that
+ * same order. Current position is the creation-order fallback, so an
+ * optimistic complete matches the projection before reload.
+ */
 export function occurrencesForColumn(
   rows: readonly Occurrence[],
 ): Occurrence[] {
-  const remaining: Occurrence[] = [];
-  const completed: Occurrence[] = [];
-  for (const row of rows) {
-    if (isCompleted(row)) completed.push(row);
-    else remaining.push(row);
-  }
-  return [...remaining, ...completed];
+  const order = new Map<TaskId, number>();
+  rows.forEach((row, index) => {
+    order.set(row.task, index);
+  });
+  return sortOccurrences(rows, order);
 }
 
 export function view(
@@ -233,8 +242,7 @@ export function view(
       );
     }
   }
-  out.sort((a, b) => compareOccurrences(a, b, order));
-  return out;
+  return sortOccurrences(out, order);
 }
 
 export function starBalances(

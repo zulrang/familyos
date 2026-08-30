@@ -578,6 +578,72 @@ describe("TasksScreen", () => {
     expect(after[1]?.closest("div")).toHaveStyle({ opacity: "0.55" });
   });
 
+  test("completing a later task lands it after already-done morning rows", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "t-dinner" as Occurrence["task"],
+        window: store.today,
+        title: "Dinner",
+        type: "chore",
+        lineage: "lin-dinner" as Occurrence["lineage"],
+        time: "18:00" as Occurrence["time"],
+        assignee: "dad",
+      },
+      {
+        state: "pending",
+        task: "t-walk" as Occurrence["task"],
+        window: store.today,
+        title: "Walk dog",
+        type: "chore",
+        lineage: "lin-walk" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+      },
+      {
+        state: "done",
+        task: "t-brush" as Occurrence["task"],
+        window: store.today,
+        title: "Brush teeth",
+        type: "routine",
+        lineage: "lin-brush" as Occurrence["lineage"],
+        time: "07:00" as Occurrence["time"],
+        assignee: "dad",
+        by: "dad",
+        at: store.generatedAt,
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 1, total: 3 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    const dad = (await screen.findByRole("heading", { name: "Dad" })).closest(
+      "section",
+    );
+    expect(dad).not.toBeNull();
+    expect(
+      within(dad as HTMLElement)
+        .getAllByRole("checkbox")
+        .map((el) => el.getAttribute("aria-label")),
+    ).toEqual(["Dinner", "Walk dog", "Brush teeth"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Dinner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Dinner" })).toBeChecked();
+    });
+
+    expect(
+      within(dad as HTMLElement)
+        .getAllByRole("checkbox")
+        .map((el) => el.getAttribute("aria-label")),
+    ).toEqual(["Walk dog", "Brush teeth", "Dinner"]);
+  });
+
   test("tapping the circle marks the row done and increments progress once", async () => {
     const user = userEvent.setup();
     const store = emptyView();
