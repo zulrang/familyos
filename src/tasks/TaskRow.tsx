@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
-import { type MemberSurface, checkInkOnFill, onFillInk } from "@/members/members";
+import {
+  checkInkOnFill,
+  type MemberSurface,
+  onFillInk,
+} from "@/members/members";
 import { Icon } from "@/shared/ui/Icon";
 import type { LocalTime } from "./types";
 
