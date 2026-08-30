@@ -50,6 +50,7 @@ export function TaskRow({
 }) {
   const done = status.kind === "done";
   const ink = done ? onFillInk(surface.fill) : surface.ink;
+  const checkInk = done ? surface.ink : "transparent";
   const caption =
     status.kind === "skipped" ? (status.reason ?? "Skipped") : null;
   return (
@@ -132,7 +133,7 @@ export function TaskRow({
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          color: done ? ink : "transparent",
+          color: checkInk,
         }}
       >
         <input
@@ -154,7 +155,7 @@ export function TaskRow({
               ? "1px solid transparent"
               : "1px solid var(--check-idle-border)",
             background: done ? surface.fill : "var(--check-idle)",
-            boxShadow: done ? `inset 0 0 0 1px ${ink}` : "none",
+            boxShadow: done ? `inset 0 0 0 1px ${surface.ink}` : "none",
             transition: "background var(--dur-fast) var(--ease-standard)",
           }}
         />
