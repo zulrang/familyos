@@ -247,6 +247,12 @@ export function onFillInk(fill: MemberColor): MemberColor {
     : ON_FILL_LIGHT;
 }
 
+/** Done-state check on a Member Color fill. Palette inks are tuned for fill; custom colors use contrast. */
+export function checkInkOnFill(surface: MemberSurface): MemberColor {
+  if (legacyToneForColor(surface.fill) != null) return surface.ink;
+  return onFillInk(surface.fill);
+}
+
 function contrast(a: MemberColor, b: MemberColor): number {
   const la = relativeLuminance(a);
   const lb = relativeLuminance(b);
