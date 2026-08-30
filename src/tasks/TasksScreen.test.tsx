@@ -520,6 +520,64 @@ describe("TasksScreen", () => {
     expect(String(completionRequest?.[1]?.body)).toContain('"by":"dad"');
   });
 
+  test("completing a task greys it out and moves it below remaining work", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "t-early" as Occurrence["task"],
+        window: store.today,
+        title: "Brush teeth",
+        type: "routine",
+        lineage: "lin-1" as Occurrence["lineage"],
+        time: "07:00" as Occurrence["time"],
+        assignee: "dad",
+      },
+      {
+        state: "pending",
+        task: "t-late" as Occurrence["task"],
+        window: store.today,
+        title: "Walk dog",
+        type: "chore",
+        lineage: "lin-2" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 2 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    const dad = (await screen.findByRole("heading", { name: "Dad" })).closest(
+      "section",
+    );
+    expect(dad).not.toBeNull();
+    expect(
+      within(dad as HTMLElement)
+        .getAllByRole("checkbox")
+        .map((el) => el.getAttribute("aria-label")),
+    ).toEqual(["Brush teeth", "Walk dog"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Brush teeth" }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", { name: "Brush teeth" }),
+      ).toBeChecked();
+    });
+
+    const after = within(dad as HTMLElement).getAllByRole("checkbox");
+    expect(after.map((el) => el.getAttribute("aria-label"))).toEqual([
+      "Walk dog",
+      "Brush teeth",
+    ]);
+    expect(after[0]?.closest("div")).toHaveStyle({ opacity: "1" });
+    expect(after[1]?.closest("div")).toHaveStyle({ opacity: "0.55" });
+  });
+
   test("tapping the circle marks the row done and increments progress once", async () => {
     const user = userEvent.setup();
     const store = emptyView();

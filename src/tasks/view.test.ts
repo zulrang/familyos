@@ -133,6 +133,38 @@ describe("tasks view", () => {
     );
   });
 
+  test("completed occurrences sort after remaining work", () => {
+    const completed: TaskEvent = {
+      kind: "completed",
+      task: "t-early" as TaskId,
+      window: today,
+      by: dad,
+      at: "2026-08-25T12:00:00Z" as Instant,
+    };
+    const occurrences = view(
+      [
+        definition({
+          id: "t-early" as TaskId,
+          title: "Early",
+          time: "07:00" as LocalTime,
+        }),
+        definition({
+          id: "t-late" as TaskId,
+          title: "Late",
+          time: "18:00" as LocalTime,
+        }),
+        definition({ id: "u1" as TaskId, title: "Untimed" }),
+      ],
+      [completed],
+      today,
+    );
+    assert.deepEqual(
+      occurrences.map((row) => row.title),
+      ["Late", "Untimed", "Early"],
+    );
+    assert.equal(occurrences[2]?.state, "done");
+  });
+
   test("a completed event shows done", () => {
     const completed: TaskEvent = {
       kind: "completed",

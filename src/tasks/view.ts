@@ -156,11 +156,18 @@ function windowStarts(recurrence: Recurrence, today: LocalDate): WindowStarts {
   }
 }
 
+function isCompleted(row: Occurrence): boolean {
+  return row.state === "done";
+}
+
 function compareOccurrences(
   a: Occurrence,
   b: Occurrence,
   order: ReadonlyMap<TaskId, number>,
 ): number {
+  if (isCompleted(a) !== isCompleted(b)) {
+    return isCompleted(a) ? 1 : -1;
+  }
   if (a.time && b.time) {
     if (a.time < b.time) return -1;
     if (a.time > b.time) return 1;
@@ -170,6 +177,19 @@ function compareOccurrences(
     return 1;
   }
   return (order.get(a.task) ?? 0) - (order.get(b.task) ?? 0);
+}
+
+/** Remaining Occurrences first; completed rows follow, preserving relative order. */
+export function occurrencesForColumn(
+  rows: readonly Occurrence[],
+): Occurrence[] {
+  const remaining: Occurrence[] = [];
+  const completed: Occurrence[] = [];
+  for (const row of rows) {
+    if (isCompleted(row)) completed.push(row);
+    else remaining.push(row);
+  }
+  return [...remaining, ...completed];
 }
 
 export function view(

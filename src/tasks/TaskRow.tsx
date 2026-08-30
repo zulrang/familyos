@@ -63,7 +63,7 @@ export function TaskRow({
         borderRadius: "var(--radius-list-row)",
         background: done ? surface.fill : surface.soft,
         color: ink,
-        opacity: status.kind === "skipped" ? 0.55 : 1,
+        opacity: status.kind === "open" ? 1 : 0.55,
         transition: "background var(--dur-fast) var(--ease-standard)",
         ...style,
       }}
