@@ -153,6 +153,7 @@ const HOUSEHOLD_SURFACE: MemberSurface = {
   fill: "#dcebf6",
   soft: "#eef4f8",
   ink: "#425466",
+  muted: memberSurface("#dcebf6").muted,
 };
 
 export function markDone(

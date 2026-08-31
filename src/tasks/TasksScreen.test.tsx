@@ -575,7 +575,10 @@ describe("TasksScreen", () => {
       "Brush teeth",
     ]);
     expect(after[0]?.closest("div")).toHaveStyle({ opacity: "1" });
-    expect(after[1]?.closest("div")).toHaveStyle({ opacity: "0.55" });
+    expect(after[1]?.closest("div")).toHaveStyle({
+      opacity: "0.25",
+      background: "#b6d3d3",
+    });
   });
 
   test("completing a later task lands it after already-done morning rows", async () => {

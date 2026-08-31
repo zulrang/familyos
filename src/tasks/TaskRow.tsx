@@ -65,9 +65,9 @@ export function TaskRow({
         gap: 10,
         padding: "var(--pad-list-row)",
         borderRadius: "var(--radius-list-row)",
-        background: done ? surface.fill : surface.soft,
+        background: done ? surface.muted : surface.soft,
         color: ink,
-        opacity: status.kind === "open" ? 1 : 0.55,
+        opacity: status.kind === "open" ? 1 : 0.25,
         transition: "background var(--dur-fast) var(--ease-standard)",
         ...style,
       }}

@@ -197,14 +197,17 @@ export function legacyToneForColor(color: MemberColor): LegacyTone | null {
   return COLOR_TO_LEGACY_TONE[color] ?? null;
 }
 
-/** Wall fill / soft / ink for a Member Color. Palette hexes keep design tokens. */
+/** Wall fill / soft / ink / muted for a Member Color. Palette hexes keep design tokens. */
 export type MemberSurface = {
   fill: MemberColor;
   soft: MemberColor;
   ink: MemberColor;
+  muted: MemberColor;
 };
 
-const LEGACY_SURFACES: Record<LegacyTone, MemberSurface> = {
+type SurfaceBase = Omit<MemberSurface, "muted">;
+
+const LEGACY_SURFACES: Record<LegacyTone, SurfaceBase> = {
   teal: { fill: "#a9d8d2", soft: "#d6ece9", ink: "#2c5d58" },
   blush: { fill: "#f6c9c5", soft: "#fbe3e1", ink: "#7d413d" },
   lilac: { fill: "#dccfea", soft: "#efe8f5", ink: "#54406b" },
@@ -212,6 +215,10 @@ const LEGACY_SURFACES: Record<LegacyTone, MemberSurface> = {
   coral: { fill: "#f9c0bc", soft: "#fce0de", ink: "#8a4340" },
   sand: { fill: "#f7e3c8", soft: "#fbf1e3", ink: "#7a5a2c" },
 };
+
+/** Mix fill toward this gray so done chips lose chroma without a CSS filter. */
+const MUTED_NEUTRAL = "#c5cdd4";
+const MUTED_MIX = 0.45;
 
 function hexByte(color: MemberColor, i: number): number {
   return Number.parseInt(color.slice(1 + i * 2, 3 + i * 2), 16);
@@ -225,16 +232,20 @@ function mixHex(a: MemberColor, b: MemberColor, t: number): MemberColor {
   return `#${mix(0)}${mix(1)}${mix(2)}`;
 }
 
+function withMuted(base: SurfaceBase): MemberSurface {
+  return { ...base, muted: mixHex(base.fill, MUTED_NEUTRAL, MUTED_MIX) };
+}
+
 export function memberSurface(color: MemberColor): MemberSurface {
   const tone = legacyToneForColor(color);
-  if (tone) return LEGACY_SURFACES[tone];
+  if (tone) return withMuted(LEGACY_SURFACES[tone]);
   // ponytail: linear sRGB mix; switch to relative luminance if a custom fill
   // fails contrast on the wall.
-  return {
+  return withMuted({
     fill: color,
     soft: mixHex(color, "#ffffff", 0.55),
     ink: mixHex(color, "#1f2a33", 0.72),
-  };
+  });
 }
 
 /** Text on a Member Color fill. `MemberSurface.ink` is for `soft`, not fill. */
