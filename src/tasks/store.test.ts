@@ -6,20 +6,25 @@ import { afterAll, beforeAll, describe, test } from "vitest";
 import type { MemberId } from "@/members/members";
 import {
   applyEvent,
+  applyTasksSchema,
   insertDefinition,
   loadDefinitions,
   loadEvents,
   loadStarAdjustments,
+  saveDefinition,
   tasksDatabase,
 } from "./store";
 import type {
+  CreateTaskDraft,
   Instant,
   LineageId,
   LocalDate,
+  LocalTime,
   TaskDefinition,
   TaskEvent,
   TaskId,
 } from "./types";
+import { starBalances, view } from "./view";
 
 describe("tasks sqlite store", () => {
   let dataRoot: string;
@@ -48,7 +53,28 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("all three tables exist and user_version is 1", () => {
+  function save(input: Parameters<typeof saveDefinition>[0]) {
+    const saved = saveDefinition(input);
+    assert.ok(saved);
+    return saved;
+  }
+
+  function draftFrom(
+    def: TaskDefinition,
+    overrides: Partial<CreateTaskDraft> = {},
+  ): CreateTaskDraft {
+    return {
+      title: def.title,
+      type: def.type,
+      recurrence: def.recurrence,
+      assignment: def.assignment,
+      time: def.time,
+      stars: def.stars,
+      ...overrides,
+    };
+  }
+
+  test("all three tables exist and user_version is 2", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -64,7 +90,353 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 1);
+    assert.equal(version.user_version, 2);
+  });
+
+  test("schema apply replaces the walking-skeleton trigger on an existing database", () => {
+    const db = tasksDatabase();
+    db.exec(`
+DROP TRIGGER IF EXISTS definitions_update_guard;
+CREATE TRIGGER definitions_retired_once
+BEFORE UPDATE ON definitions
+BEGIN
+  SELECT RAISE(ABORT, 'definitions are immutable except retiredAt')
+  WHERE
+    NEW.creation_order IS NOT OLD.creation_order
+    OR NEW.id IS NOT OLD.id
+    OR NEW.lineage IS NOT OLD.lineage
+    OR NEW.title IS NOT OLD.title
+    OR NEW.type IS NOT OLD.type
+    OR NEW.recurrence IS NOT OLD.recurrence
+    OR NEW.assignment IS NOT OLD.assignment
+    OR NEW.time IS NOT OLD.time
+    OR NEW.stars IS NOT OLD.stars
+    OR OLD.retired_at IS NOT NULL
+    OR NEW.retired_at IS NULL;
+END;
+`);
+    const def = definition({ title: "Dishes" });
+    insertDefinition(def);
+    assert.throws(() => {
+      saveDefinition({
+        id: def.id,
+        draft: draftFrom(def, { title: "Trash" }),
+        today: "2026-08-25" as LocalDate,
+      });
+    }, /immutable except retiredAt/);
+    applyTasksSchema();
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, { title: "Trash" }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.equal(saved.id, def.id);
+    assert.equal(saved.title, "Trash");
+  });
+
+  test("changing only title, type, time, or stars overwrites the current definition", () => {
+    const def = definition({
+      title: "Dishes",
+      type: "chore",
+      time: null,
+      stars: 1,
+    });
+    insertDefinition(def);
+    const saved = save({
+      id: def.id,
+      draft: {
+        title: "Trash",
+        type: "routine",
+        recurrence: def.recurrence,
+        assignment: def.assignment,
+        time: "07:00" as LocalTime,
+        stars: 4,
+      },
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.equal(saved.id, def.id);
+    assert.equal(saved.lineage, def.lineage);
+    assert.equal(saved.retiredAt, null);
+    assert.equal(saved.title, "Trash");
+    assert.equal(saved.type, "routine");
+    assert.equal(saved.time, "07:00");
+    assert.equal(saved.stars, 4);
+    const stored = loadDefinitions().filter(
+      (row) => row.lineage === def.lineage,
+    );
+    assert.equal(stored.length, 1);
+    assert.deepEqual(stored[0], saved);
+  });
+
+  test("changing recurrence or assignment retires the old definition and inserts a new one", () => {
+    const def = definition();
+    insertDefinition(def);
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, { recurrence: { kind: "weekly", days: ["mon"] } }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.notEqual(saved.id, def.id);
+    assert.equal(saved.lineage, def.lineage);
+    assert.equal(saved.retiredAt, null);
+    assert.deepEqual(saved.recurrence, { kind: "weekly", days: ["mon"] });
+    const old = loadDefinitions().find((row) => row.id === def.id);
+    assert.equal(old?.retiredAt, "2026-08-25");
+    assert.equal(old?.title, def.title);
+  });
+
+  test("a title-and-assignment save is one replace that leaves the old title alone", () => {
+    const def = definition({ title: "Dishes" });
+    insertDefinition(def);
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, {
+        title: "Kitchen",
+        assignment: { kind: "fixed", member: "ellie" as MemberId },
+      }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.notEqual(saved.id, def.id);
+    assert.equal(saved.title, "Kitchen");
+    assert.deepEqual(saved.assignment, {
+      kind: "fixed",
+      member: "ellie",
+    });
+    const old = loadDefinitions().find((row) => row.id === def.id);
+    assert.equal(old?.title, "Dishes");
+    assert.equal(old?.retiredAt, "2026-08-25");
+    assert.equal(
+      loadDefinitions().filter((row) => row.lineage === def.lineage).length,
+      2,
+    );
+  });
+
+  test("retire-and-replace of a rotation pre-rotates the old order by its completions", () => {
+    const dad = "dad" as MemberId;
+    const ellie = "ellie" as MemberId;
+    const luke = "luke" as MemberId;
+    const def = definition({
+      assignment: { kind: "rotation", order: [dad, ellie, luke] },
+    });
+    insertDefinition(def);
+    assert.equal(
+      applyEvent({
+        kind: "completed",
+        task: def.id,
+        window: "2026-08-24" as LocalDate,
+        by: dad,
+        at: "2026-08-24T12:00:00Z" as Instant,
+      }).status,
+      "inserted",
+    );
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, { recurrence: { kind: "weekly", days: ["mon"] } }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.deepEqual(saved.assignment, {
+      kind: "rotation",
+      order: [ellie, luke, dad],
+    });
+    const [row] = view([saved], [], "2026-08-25" as LocalDate);
+    assert.equal(row?.assignee, ellie);
+  });
+
+  test("adding a member to a rotation keeps them and the person on turn", () => {
+    const dad = "dad" as MemberId;
+    const ellie = "ellie" as MemberId;
+    const luke = "luke" as MemberId;
+    const def = definition({
+      assignment: { kind: "rotation", order: [dad, ellie, luke] },
+    });
+    insertDefinition(def);
+    applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-24" as LocalDate,
+      by: dad,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, {
+        assignment: {
+          kind: "rotation",
+          order: [dad, ellie, luke, "mia" as MemberId],
+        },
+      }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.deepEqual(saved.assignment, {
+      kind: "rotation",
+      order: [ellie, luke, dad, "mia"],
+    });
+    const [row] = view([saved], [], "2026-08-25" as LocalDate);
+    assert.equal(row?.assignee, ellie);
+  });
+
+  test("removing a rotation member drops them from the pre-rotated order", () => {
+    const dad = "dad" as MemberId;
+    const ellie = "ellie" as MemberId;
+    const luke = "luke" as MemberId;
+    const def = definition({
+      assignment: { kind: "rotation", order: [dad, ellie, luke] },
+    });
+    insertDefinition(def);
+    applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-24" as LocalDate,
+      by: dad,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, {
+        assignment: { kind: "rotation", order: [dad, luke] },
+      }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.deepEqual(saved.assignment, {
+      kind: "rotation",
+      order: [luke, dad],
+    });
+    const [row] = view([saved], [], "2026-08-25" as LocalDate);
+    assert.equal(row?.assignee, luke);
+  });
+
+  test("a title-only save does not mint a new id or rotate the order", () => {
+    const dad = "dad" as MemberId;
+    const ellie = "ellie" as MemberId;
+    const luke = "luke" as MemberId;
+    const def = definition({
+      assignment: { kind: "rotation", order: [dad, ellie, luke] },
+    });
+    insertDefinition(def);
+    applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-24" as LocalDate,
+      by: dad,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, { title: "Kitchen" }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.equal(saved.id, def.id);
+    assert.deepEqual(saved.assignment, {
+      kind: "rotation",
+      order: [dad, ellie, luke],
+    });
+    const events = loadEvents().filter((event) => event.task === def.id);
+    const [row] = view([saved], events, "2026-08-25" as LocalDate);
+    assert.equal(row?.assignee, ellie);
+  });
+
+  test("a completion against a retired id is accepted and stays out of the projection", () => {
+    const def = definition();
+    insertDefinition(def);
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, { assignment: { kind: "open" } }),
+      today: "2026-08-25" as LocalDate,
+    });
+    const receipt = applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-25" as LocalDate,
+      by: "dad" as MemberId,
+      at: "2026-08-25T12:00:00Z" as Instant,
+    });
+    assert.equal(receipt.status, "inserted");
+    const today = "2026-08-25" as LocalDate;
+    const occurrences = view(loadDefinitions(), loadEvents(), today);
+    assert.equal(
+      occurrences.some((row) => row.task === def.id),
+      false,
+    );
+    assert.equal(
+      occurrences.find((row) => row.task === saved.id)?.state,
+      "pending",
+    );
+  });
+
+  test("a completion against the same id after a title-only save appears in the projection", () => {
+    const def = definition({ title: "Dishes" });
+    insertDefinition(def);
+    const saved = save({
+      id: def.id,
+      draft: draftFrom(def, { title: "Trash" }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.equal(saved.id, def.id);
+    const receipt = applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-25" as LocalDate,
+      by: "dad" as MemberId,
+      at: "2026-08-25T12:00:00Z" as Instant,
+    });
+    assert.equal(receipt.status, "inserted");
+    const mine = view(
+      loadDefinitions(),
+      loadEvents(),
+      "2026-08-25" as LocalDate,
+    ).find((occurrence) => occurrence.task === def.id);
+    assert.equal(mine?.state, "done");
+    assert.equal(mine?.title, "Trash");
+  });
+
+  test("in-place stars revalue that id; a replace freezes the retired row", () => {
+    const def = definition({ stars: 3 });
+    insertDefinition(def);
+    applyEvent({
+      kind: "completed",
+      task: def.id,
+      window: "2026-08-24" as LocalDate,
+      by: "dad" as MemberId,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    save({
+      id: def.id,
+      draft: draftFrom(def, { stars: 8 }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.deepEqual(starBalances(loadDefinitions(), loadEvents(), []), [
+      { member: "dad", balance: 8 },
+    ]);
+
+    const other = definition({ stars: 3, title: "Bins" });
+    insertDefinition(other);
+    applyEvent({
+      kind: "completed",
+      task: other.id,
+      window: "2026-08-24" as LocalDate,
+      by: "ellie" as MemberId,
+      at: "2026-08-24T12:00:00Z" as Instant,
+    });
+    const replaced = save({
+      id: other.id,
+      draft: draftFrom(other, {
+        stars: 9,
+        assignment: { kind: "open" },
+      }),
+      today: "2026-08-25" as LocalDate,
+    });
+    assert.notEqual(replaced.id, other.id);
+    assert.equal(
+      loadDefinitions().find((row) => row.id === other.id)?.stars,
+      3,
+    );
+    assert.equal(replaced.stars, 9);
+    assert.equal(
+      starBalances(loadDefinitions(), loadEvents(), []).find(
+        (row) => row.member === "ellie",
+      )?.balance,
+      3,
+    );
   });
 
   test("persists full recurrence and assignment unions", () => {
@@ -172,13 +544,31 @@ describe("tasks sqlite store", () => {
         "2026-08-26",
         def.id,
       );
-    }, /immutable except retiredAt/);
+    }, /retired definition is frozen/);
     assert.throws(() => {
       db.prepare("UPDATE definitions SET title = ? WHERE id = ?").run(
         "Trash",
         def.id,
       );
-    }, /immutable except retiredAt/);
+    }, /retired definition is frozen/);
+  });
+
+  test("recurrence and assignment cannot be overwritten in place", () => {
+    const def = definition();
+    insertDefinition(def);
+    const db = tasksDatabase();
+    assert.throws(() => {
+      db.prepare("UPDATE definitions SET recurrence = ? WHERE id = ?").run(
+        JSON.stringify({ kind: "weekly", days: ["mon"] }),
+        def.id,
+      );
+    }, /immutable/);
+    assert.throws(() => {
+      db.prepare("UPDATE definitions SET assignment = ? WHERE id = ?").run(
+        JSON.stringify({ kind: "open" }),
+        def.id,
+      );
+    }, /immutable/);
   });
 
   test("stars are nonnegative", () => {
