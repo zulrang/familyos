@@ -16,7 +16,7 @@ import {
   skipOccurrence,
   TasksScreen,
 } from "./TasksScreen";
-import type { Occurrence, TasksViewRead } from "./types";
+import type { Occurrence, TaskDefinition, TasksViewRead } from "./types";
 
 afterEach(() => {
   cleanup();
@@ -64,6 +64,7 @@ function emptyView(): TasksViewRead {
       { member: "ellie", done: 0, total: 0 },
     ],
     starBalances: [],
+    definitions: [],
     today: "2026-08-25" as TasksViewRead["today"],
     generatedAt: "2026-08-25T16:00:00Z" as TasksViewRead["generatedAt"],
   };
@@ -89,11 +90,8 @@ function installFetch(store: TasksViewRead) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           title: string;
           type: "chore" | "routine";
-          recurrence: unknown;
-          assignment:
-            | { kind: "fixed"; member: string }
-            | { kind: "rotation"; order: string[] }
-            | { kind: "open" };
+          recurrence: TaskDefinition["recurrence"];
+          assignment: TaskDefinition["assignment"];
           time?: string;
           stars: number;
         };
@@ -126,7 +124,110 @@ function installFetch(store: TasksViewRead) {
             row.member === assignee ? { ...row, total: row.total + 1 } : row,
           );
         }
+        store.definitions = [
+          ...store.definitions,
+          {
+            id: occ.task,
+            lineage: occ.lineage,
+            title: body.title,
+            type: body.type,
+            recurrence: body.recurrence,
+            assignment: body.assignment,
+            time: occ.time,
+            stars: body.stars,
+            retiredAt: null,
+          },
+        ];
         return json({ definition: { id: occ.task } });
+      }
+      if (
+        method === "PUT" &&
+        url.endsWith("/api/tasks") &&
+        !url.includes("/events")
+      ) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          id: string;
+          title: string;
+          type: "chore" | "routine";
+          recurrence: TaskDefinition["recurrence"];
+          assignment: TaskDefinition["assignment"];
+          time?: string;
+          stars: number;
+        };
+        const current = store.definitions.find((row) => row.id === body.id);
+        if (!current) return json({ error: "task not found" }, 404);
+        const scheduleChanged =
+          JSON.stringify(current.recurrence) !==
+            JSON.stringify(body.recurrence) ||
+          JSON.stringify(current.assignment) !==
+            JSON.stringify(body.assignment);
+        const time = (body.time ?? null) as Occurrence["time"];
+        const assignee =
+          body.assignment.kind === "fixed"
+            ? body.assignment.member
+            : body.assignment.kind === "rotation"
+              ? (body.assignment.order[0] ?? null)
+              : null;
+        if (!scheduleChanged) {
+          store.definitions = store.definitions.map((row) =>
+            row.id === body.id
+              ? {
+                  ...row,
+                  title: body.title,
+                  type: body.type,
+                  time,
+                  stars: body.stars,
+                }
+              : row,
+          );
+          store.occurrences = store.occurrences.map((row) =>
+            row.task === body.id
+              ? { ...row, title: body.title, type: body.type, time }
+              : row,
+          );
+          return json({
+            definition: store.definitions.find((row) => row.id === body.id),
+          });
+        }
+        const replacement: TaskDefinition = {
+          id: `task-${store.definitions.length + 1}` as TaskDefinition["id"],
+          lineage: current.lineage,
+          title: body.title,
+          type: body.type,
+          recurrence: body.recurrence,
+          assignment: body.assignment,
+          time,
+          stars: body.stars,
+          retiredAt: null,
+        };
+        store.definitions = [
+          ...store.definitions.filter((row) => row.id !== body.id),
+          replacement,
+        ];
+        store.occurrences = store.occurrences.map((row) => {
+          if (row.task !== body.id) return row;
+          const prior = row.assignee;
+          if (prior && prior !== assignee) {
+            store.progress = store.progress.map((progress) => {
+              if (progress.member === prior) {
+                return { ...progress, total: progress.total - 1 };
+              }
+              if (assignee && progress.member === assignee) {
+                return { ...progress, total: progress.total + 1 };
+              }
+              return progress;
+            });
+          }
+          return {
+            ...row,
+            task: replacement.id,
+            title: body.title,
+            type: body.type,
+            time,
+            assignee,
+          };
+        });
+        return json({ definition: replacement });
       }
       if (method === "POST" && url.endsWith("/api/tasks/events")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
@@ -985,6 +1086,102 @@ describe("TasksScreen", () => {
     expect(JSON.parse(String(skipRequest?.[1]?.body)).events[0]).toMatchObject({
       kind: "skipped",
       reason: "kid at grandma's",
+    });
+  });
+
+  function seedFixed(store: TasksViewRead, title: string, member: string) {
+    const definition: TaskDefinition = {
+      id: "edit-me" as TaskDefinition["id"],
+      lineage: "lin-edit" as TaskDefinition["lineage"],
+      title,
+      type: "chore",
+      recurrence: { kind: "daily" },
+      assignment: { kind: "fixed", member },
+      time: null,
+      stars: 0,
+      retiredAt: null,
+    };
+    store.definitions = [definition];
+    store.occurrences = [
+      {
+        state: "pending",
+        task: definition.id,
+        window: store.today,
+        title,
+        type: "chore",
+        lineage: definition.lineage,
+        time: null,
+        assignee: member,
+      },
+    ];
+    store.progress = store.progress.map((row) =>
+      row.member === member ? { ...row, total: row.total + 1 } : row,
+    );
+    return definition;
+  }
+
+  test("editing only the title overwrites the row without minting a new task", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = seedFixed(store, "Dishes", "dad");
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit Dishes" }),
+    );
+    const title = screen.getByPlaceholderText("Title");
+    await user.clear(title);
+    await user.type(title, "Trash");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Trash")).toBeInTheDocument();
+    expect(screen.queryByText("Dishes")).not.toBeInTheDocument();
+    const saveCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") &&
+        (init?.method ?? "GET").toUpperCase() === "PUT",
+    );
+    expect(JSON.parse(String(saveCall?.[1]?.body ?? "{}"))).toMatchObject({
+      id: definition.id,
+      title: "Trash",
+      recurrence: { kind: "daily" },
+      assignment: { kind: "fixed", member: "dad" },
+    });
+  });
+
+  test("editing assignment retires the old task and shows the new title on the new assignee", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = seedFixed(store, "Dishes", "dad");
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit Dishes" }),
+    );
+    const title = screen.getByPlaceholderText("Title");
+    await user.clear(title);
+    await user.type(title, "Kitchen");
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Kitchen")).toBeInTheDocument();
+    const ellie = screen
+      .getByRole("heading", { name: "Ellie" })
+      .closest("section");
+    expect(ellie).toHaveTextContent("Kitchen");
+    const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
+    expect(dad).not.toHaveTextContent("Kitchen");
+    const saveCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") &&
+        (init?.method ?? "GET").toUpperCase() === "PUT",
+    );
+    expect(JSON.parse(String(saveCall?.[1]?.body ?? "{}"))).toMatchObject({
+      id: definition.id,
+      title: "Kitchen",
+      assignment: { kind: "fixed", member: "ellie" },
     });
   });
 });

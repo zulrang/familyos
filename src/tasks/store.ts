@@ -3,8 +3,11 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataDir } from "@/shared/data-path";
 import {
+  type CreateTaskDraft,
   type EventReceipt,
   isRecord,
+  type LocalDate,
+  newTaskId,
   parseAssignment,
   parseInstant,
   parseLineageId,
@@ -14,9 +17,11 @@ import {
   parseTaskEvent,
   parseTaskId,
   parseTaskType,
+  planDefinitionSave,
   type StarAdjustment,
   type TaskDefinition,
   type TaskEvent,
+  type TaskId,
 } from "./types";
 
 const SCHEMA = `
@@ -95,25 +100,31 @@ BEGIN
   SELECT RAISE(ABORT, 'definitions cannot be deleted');
 END;
 
-CREATE TRIGGER IF NOT EXISTS definitions_retired_once
+DROP TRIGGER IF EXISTS definitions_retired_once;
+DROP TRIGGER IF EXISTS definitions_update_guard;
+CREATE TRIGGER IF NOT EXISTS definitions_update_guard
 BEFORE UPDATE ON definitions
 BEGIN
-  SELECT RAISE(ABORT, 'definitions are immutable except retiredAt')
+  SELECT RAISE(ABORT, 'id, lineage, recurrence, and assignment are immutable')
   WHERE
     NEW.creation_order IS NOT OLD.creation_order
     OR NEW.id IS NOT OLD.id
     OR NEW.lineage IS NOT OLD.lineage
-    OR NEW.title IS NOT OLD.title
-    OR NEW.type IS NOT OLD.type
     OR NEW.recurrence IS NOT OLD.recurrence
-    OR NEW.assignment IS NOT OLD.assignment
-    OR NEW.time IS NOT OLD.time
-    OR NEW.stars IS NOT OLD.stars
-    OR OLD.retired_at IS NOT NULL
-    OR NEW.retired_at IS NULL;
+    OR NEW.assignment IS NOT OLD.assignment;
+  SELECT RAISE(ABORT, 'retired definition is frozen')
+  WHERE OLD.retired_at IS NOT NULL;
+  SELECT RAISE(ABORT, 'retire must not change details')
+  WHERE NEW.retired_at IS NOT NULL
+    AND (
+      NEW.title IS NOT OLD.title
+      OR NEW.type IS NOT OLD.type
+      OR NEW.time IS NOT OLD.time
+      OR NEW.stars IS NOT OLD.stars
+    );
 END;
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 `;
 
 type Cached = { dir: string; db: DatabaseSync };
@@ -129,6 +140,10 @@ export function tasksDatabase(): DatabaseSync {
   db.exec(SCHEMA);
   cached = { dir, db };
   return db;
+}
+
+export function applyTasksSchema(): void {
+  tasksDatabase().exec(SCHEMA);
 }
 
 function parseJson(raw: unknown): unknown {
@@ -236,6 +251,64 @@ export function insertDefinition(definition: TaskDefinition): void {
       definition.stars,
       definition.retiredAt,
     );
+}
+
+function definitionById(id: TaskId): TaskDefinition | null {
+  const row = tasksDatabase()
+    .prepare("SELECT * FROM definitions WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  if (!isRecord(row)) throw new Error("corrupt task definition row");
+  return definitionFromRow(row);
+}
+
+function completedCount(id: TaskId): number {
+  const row = tasksDatabase()
+    .prepare(
+      "SELECT COUNT(*) AS n FROM events WHERE task = ? AND kind = 'completed'",
+    )
+    .get(id);
+  return isRecord(row) && typeof row.n === "number" ? row.n : 0;
+}
+
+export function saveDefinition(input: {
+  id: TaskId;
+  draft: CreateTaskDraft;
+  today: LocalDate;
+}): TaskDefinition | null {
+  const current = definitionById(input.id);
+  if (!current || current.retiredAt !== null) {
+    return null;
+  }
+  const plan = planDefinitionSave({
+    current,
+    draft: input.draft,
+    today: input.today,
+    nextId: newTaskId(),
+    completedCount: completedCount(current.id),
+  });
+  const db = tasksDatabase();
+  if (plan.kind === "in-place") {
+    db.prepare(
+      `UPDATE definitions SET title = ?, type = ?, time = ?, stars = ? WHERE id = ?`,
+    ).run(plan.title, plan.type, plan.time, plan.stars, current.id);
+    const saved = definitionById(current.id);
+    if (!saved) return null;
+    return saved;
+  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("UPDATE definitions SET retired_at = ? WHERE id = ?").run(
+      plan.retiredAt,
+      current.id,
+    );
+    insertDefinition(plan.replacement);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return plan.replacement;
 }
 
 export function loadDefinitions(): TaskDefinition[] {
