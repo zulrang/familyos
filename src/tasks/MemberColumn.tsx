@@ -8,6 +8,7 @@ export function MemberColumn({
   done,
   total,
   children,
+  action,
   style,
 }: {
   name: string;
@@ -15,6 +16,7 @@ export function MemberColumn({
   done: number;
   total: number;
   children?: ReactNode;
+  action?: ReactNode;
   style?: CSSProperties;
 }) {
   const ratio = total === 0 ? 0 : done / total;
@@ -72,6 +74,7 @@ export function MemberColumn({
             }}
           />
         </div>
+        {action}
       </div>
       <div
         style={{

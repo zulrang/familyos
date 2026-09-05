@@ -565,6 +565,27 @@ export function TasksScreen() {
                 surface={surface}
                 done={progress.done}
                 total={progress.total}
+                action={
+                  memberAction?.kind === "claim" ? (
+                    <Button
+                      icon="user-plus"
+                      variant="primary"
+                      style={{
+                        minHeight: 48,
+                        justifyContent: "center",
+                        height: "auto",
+                        padding: "10px 12px",
+                      }}
+                      onClick={() => {
+                        const occurrence = memberAction.occurrence;
+                        setMemberAction(null);
+                        claim(occurrence, member.id).catch(() => {});
+                      }}
+                    >
+                      Claim for {member.name}
+                    </Button>
+                  ) : undefined
+                }
               >
                 {rows.map((row) => (
                   <TaskRow
@@ -601,18 +622,16 @@ export function TasksScreen() {
                   time={row.time}
                   status={rowStatus(row)}
                   surface={HOUSEHOLD_SURFACE}
+                  onCancelClaim={
+                    memberAction?.kind === "claim" &&
+                    memberAction.occurrence.task === row.task &&
+                    memberAction.occurrence.window === row.window
+                      ? () => setMemberAction(null)
+                      : undefined
+                  }
                   onClaim={
                     row.state === "pending" ? () => claim(row) : undefined
                   }
-                  onSkip={
-                    canSkip(row)
-                      ? () => {
-                          setSkipNote("");
-                          setSkipping(row);
-                        }
-                      : undefined
-                  }
-                  onComplete={() => complete(row)}
                 />
               ))}
             </MemberColumn>
@@ -647,7 +666,7 @@ export function TasksScreen() {
           onSave={createTask}
         />
       ) : null}
-      {memberAction ? (
+      {memberAction?.kind === "complete" ? (
         <MemberPicker
           action={memberAction.kind}
           members={members}
@@ -655,11 +674,7 @@ export function TasksScreen() {
           onPick={(member) => {
             const action = memberAction;
             setMemberAction(null);
-            if (action.kind === "claim") {
-              claim(action.occurrence, member.id).catch(() => {});
-            } else {
-              complete(action.occurrence, member.id).catch(() => {});
-            }
+            complete(action.occurrence, member.id).catch(() => {});
           }}
         />
       ) : null}

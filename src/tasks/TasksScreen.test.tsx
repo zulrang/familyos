@@ -477,11 +477,20 @@ describe("TasksScreen", () => {
     await user.click(
       await screen.findByRole("button", { name: "Claim Open dishes" }),
     );
-    const picker = screen.getByRole("dialog", { name: "Claim task" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Former" }),
+      screen.getByRole("button", { name: "Cancel claiming Open dishes" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Claim Open dishes" }),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Dad" }));
+    expect(
+      screen.getByRole("button", { name: "Claim for Dad" }).closest("section"),
+    ).toHaveTextContent("Dad");
+    expect(
+      screen.queryByRole("button", { name: "Claim for Former" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Claim for Dad" }));
 
     await waitFor(() => {
       expect(
@@ -491,14 +500,16 @@ describe("TasksScreen", () => {
     const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
     expect(dad).toHaveTextContent("Open dishes");
     expect(dad).toHaveTextContent("0/1");
-    expect(picker).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Claim for Dad" }),
+    ).not.toBeInTheDocument();
     const claimRequest = fetchMock.mock.calls.find(([, init]) =>
       String(init?.body).includes('"kind":"claimed"'),
     );
     expect(String(claimRequest?.[1]?.body)).toContain('"by":"dad"');
   });
 
-  test("completing an unclaimed open occurrence requires a member pick", async () => {
+  test("an unclaimed Household task offers only Claim", async () => {
     const user = userEvent.setup();
     const store = emptyView();
     store.occurrences = [
@@ -513,27 +524,34 @@ describe("TasksScreen", () => {
         assignee: null,
       },
     ];
-    const fetchMock = installFetch(store);
+    installFetch(store);
     render(<TasksScreen />);
 
-    await user.click(await screen.findByRole("checkbox", { name: "Feed cat" }));
-    expect(
-      screen.getByRole("dialog", { name: "Complete task" }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Ellie" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("checkbox", { name: "Feed cat" })).toBeChecked();
-    });
-    const ellie = screen
-      .getByRole("heading", { name: "Ellie" })
+    const claim = await screen.findByRole("button", { name: "Claim Feed cat" });
+    expect(claim).toBeVisible();
+    const household = screen
+      .getByRole("heading", { name: "Household" })
       .closest("section");
-    expect(ellie).toHaveTextContent("Feed cat");
-    expect(ellie).toHaveTextContent("1/1");
-    const completionRequest = fetchMock.mock.calls.find(([, init]) =>
-      String(init?.body).includes('"kind":"completed"'),
+    expect(household).not.toBeNull();
+    if (!household) throw new Error("Missing Household column");
+    expect(within(household).getAllByRole("button")).toEqual([claim]);
+    expect(within(household).queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.click(claim);
+    await user.click(
+      screen.getByRole("button", { name: "Cancel claiming Feed cat" }),
     );
-    expect(String(completionRequest?.[1]?.body)).toContain('"by":"ellie"');
+    expect(
+      screen.queryByRole("button", { name: "Claim for Ellie" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Claim Feed cat" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Claim Feed cat" }));
+    await user.click(screen.getByRole("button", { name: "Claim for Ellie" }));
+    expect(
+      await screen.findByRole("checkbox", { name: "Feed cat" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Skip Feed cat" })).toBeVisible();
   });
 
   test("completing a claimed occurrence uses the claimant without a picker", async () => {
