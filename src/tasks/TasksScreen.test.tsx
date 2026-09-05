@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -8,8 +9,9 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
+import { TaskCelebration } from "./TaskCelebration";
 import {
   claimOccurrence,
   markDone,
@@ -17,6 +19,16 @@ import {
   TasksScreen,
 } from "./TasksScreen";
 import type { Occurrence, TasksViewRead } from "./types";
+
+// jsdom does not implement the native modal dialog methods.
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -506,7 +518,9 @@ describe("TasksScreen", () => {
       await screen.findByRole("checkbox", { name: "Take bins out" }),
     );
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /Who/ }),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByRole("checkbox", { name: "Take bins out" }),
@@ -986,5 +1000,89 @@ describe("TasksScreen", () => {
       kind: "skipped",
       reason: "kid at grandma's",
     });
+  });
+});
+
+describe("daily completion celebration", () => {
+  function dailyTasks() {
+    const store = emptyView();
+    store.occurrences = ["Dishes", "Laundry"].map((title, index) => ({
+      state: "pending",
+      task: `daily-${index}` as Occurrence["task"],
+      lineage: `daily-${index}` as Occurrence["lineage"],
+      window: store.today,
+      title,
+      type: "chore",
+      time: null,
+      assignee: "dad",
+    }));
+    store.progress = [{ member: "dad", done: 0, total: 2 }];
+    return store;
+  }
+
+  test("celebrates only the last confirmed task and can be dismissed", async () => {
+    const user = userEvent.setup();
+    installFetch(dailyTasks());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("checkbox", { name: "Dishes" }));
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Laundry" }));
+    expect(
+      await screen.findByRole("dialog", { name: "All done!" }),
+    ).toHaveTextContent("You did it, Dad!");
+    await user.click(
+      screen.getByRole("button", { name: "Dismiss celebration" }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("automatically dismisses after the fanfare", () => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    render(
+      <TaskCelebration
+        member={{ id: "dad", name: "Dad", status: "active", color: "#a9d8d2" }}
+        onDismiss={dismiss}
+      />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(6500);
+    });
+    expect(dismiss).toHaveBeenCalledOnce();
+  });
+
+  test("opening an already completed day does not celebrate", async () => {
+    const store = dailyTasks();
+    for (const row of store.occurrences)
+      Object.assign(store, markDone(store, row));
+    installFetch(store);
+    render(<TasksScreen />);
+    await screen.findByText("Laundry");
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a failed final completion does not celebrate", async () => {
+    const store = dailyTasks();
+    Object.assign(store, markDone(store, store.occurrences[0]));
+    const fetchMock = installFetch(store);
+    const successfulFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (init?.method === "POST") return json({ error: "Unavailable" }, 500);
+      if (!successfulFetch) throw new Error("Missing fetch fixture");
+      return successfulFetch(input, init);
+    });
+    const user = userEvent.setup();
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("checkbox", { name: "Laundry" }));
+    await screen.findByRole("checkbox", { name: "Laundry" });
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
   });
 });

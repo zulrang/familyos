@@ -16,6 +16,7 @@ import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
 import { MemberColumn } from "./MemberColumn";
+import { TaskCelebration } from "./TaskCelebration";
 import { TaskRow, type TaskRowStatus } from "./TaskRow";
 import {
   nowInstant,
@@ -271,6 +272,12 @@ export function TasksScreen() {
   const [skipNote, setSkipNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [celebration, setCelebration] = useState<{
+    member: ActiveMember;
+    date: TasksViewRead["today"];
+  } | null>(null);
+  const celebrated = useRef(new Set<string>());
+  const dismissCelebration = useCallback(() => setCelebration(null), []);
 
   const load = useCallback(async () => {
     const sRes = await fetch("/api/settings");
@@ -287,8 +294,10 @@ export function TasksScreen() {
       setError("Could not load tasks.");
       return;
     }
-    setTasks((await res.json()) as TasksViewRead);
+    const view = (await res.json()) as TasksViewRead;
+    setTasks(view);
     setError(null);
+    return view;
   }, []);
 
   useEffect(() => {
@@ -331,7 +340,31 @@ export function TasksScreen() {
       if (!res.ok) {
         setError("Could not complete task.");
       }
-      await load();
+      const confirmed = await load();
+      const person = members.find((candidate) => candidate.id === member);
+      const progress = confirmed?.progress.find((row) => row.member === member);
+      const receipt = `${confirmed?.today}:${member}`;
+      if (
+        res.ok &&
+        confirmed &&
+        person &&
+        confirmed.today === tasks.today &&
+        occ.state !== "done" &&
+        confirmed.occurrences.some(
+          (row) =>
+            row.task === occ.task &&
+            row.window === occ.window &&
+            row.state === "done" &&
+            row.by === member,
+        ) &&
+        progress &&
+        progress.total > 0 &&
+        progress.done === progress.total &&
+        !celebrated.current.has(receipt)
+      ) {
+        celebrated.current.add(receipt);
+        setCelebration({ member: person, date: confirmed.today });
+      }
     } catch {
       setError("Could not complete task.");
       await load();
@@ -467,6 +500,13 @@ export function TasksScreen() {
         title={settings ? headerDate(now, settings.timeZone) : ""}
         time={settings ? <LiveClock timeZone={settings.timeZone} /> : null}
       />
+      {celebration ? (
+        <TaskCelebration
+          key={`${celebration.date}:${celebration.member.id}`}
+          member={celebration.member}
+          onDismiss={dismissCelebration}
+        />
+      ) : null}
       {error ? (
         <div
           style={{
