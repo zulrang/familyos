@@ -200,6 +200,48 @@ function submittedRecurrence(
 }
 
 describe("TasksScreen", () => {
+  test("Stars requests a numeric keyboard and replaces its value when tapped", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    const stars = screen.getByRole("textbox", { name: "Stars" });
+    expect(stars).toHaveAttribute("inputmode", "numeric");
+    await user.click(stars);
+    await user.keyboard("12");
+    expect(stars).toHaveValue("12");
+    await user.click(stars);
+    await user.keyboard("5");
+    expect(stars).toHaveValue("5");
+  });
+
+  test("the editor reserves space for the kiosk keyboard and restores it when removed", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    const dialog = screen.getByRole("dialog", { name: "New task" });
+    expect(within(dialog).getByLabelText("Task title")).toBeVisible();
+    const keyboard = document.createElement("div");
+    keyboard.id = "familyos-osk";
+    keyboard.getBoundingClientRect = () =>
+      new DOMRect(0, window.innerHeight - 300, 1024, 300);
+    try {
+      document.documentElement.appendChild(keyboard);
+      await waitFor(() =>
+        expect(dialog.parentElement).toHaveStyle("--editor-bottom: 300px"),
+      );
+      expect(
+        within(dialog).getByRole("button", { name: "Cancel" }),
+      ).toBeVisible();
+    } finally {
+      keyboard.remove();
+    }
+    await waitFor(() =>
+      expect(dialog.parentElement).toHaveStyle("--editor-bottom: 0px"),
+    );
+  });
+
   test("creating a task shows it in the assignee column the same day", async () => {
     const user = userEvent.setup();
     const store = emptyView();
@@ -290,7 +332,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "6");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -315,7 +357,7 @@ describe("TasksScreen", () => {
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
     await user.click(screen.getByRole("button", { name: "Ellie" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, String(Number.MAX_SAFE_INTEGER + 1));
 
@@ -352,7 +394,7 @@ describe("TasksScreen", () => {
     await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Rotation" }));
     await user.click(screen.getByRole("button", { name: "Ellie" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "4");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -391,7 +433,7 @@ describe("TasksScreen", () => {
     await user.click(screen.getByRole("button", { name: "Weekly" }));
     await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Household" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "5");
     await user.click(screen.getByRole("button", { name: "Add" }));

@@ -6,10 +6,10 @@
     ["num", "comma", "space", "period", "enter"],
   ];
   const NUMERIC = [
-    "1234567890".split(""),
-    "-/:;()$&@".split(""),
-    ["#+=", ".", ",", "?", "!", "'", "backspace"],
-    ["abc", "space", "enter"],
+    ["1", "2", "3", "backspace"],
+    ["4", "5", "6", "#+="],
+    ["7", "8", "9", "abc"],
+    ["-", "0", ".", "enter"],
   ];
   const SYMBOLS = [
     "[]{}#%^*+=".split(""),
