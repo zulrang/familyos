@@ -91,6 +91,9 @@ Other rail destinations are stubs.
   `docs/design/tasks-design-spec.md`.
 
 **Decision: v1 is Calendar + Lists + Settings + stubs**
+- Subsequent scope: Photos now uses the Google Photos Ambient API with its
+  own device OAuth connection and one selected household album. See
+  `docs/photos.md` for setup, permissions, refresh limits, and storage.
 - Choice: Pairing, a rolling 5-day family calendar, selected Household Lists,
   and Settings (Google login, source selection, members, Displays). Tasks,
   Rewards, Meals, Recipes, Photos, and Sleep render a “not yet implemented”
@@ -214,7 +217,7 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Member Colors are presentation. They are unique only among Active Members and
   may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
-- Unimplemented rail items stay stubs. Do not invent a visual language for Rewards, Meals, Recipes, Photos, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant.
+- Unimplemented rail items stay stubs. Do not invent a visual language for Rewards, Meals, Recipes, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant. Photos setup and slideshow behavior are documented in `docs/photos.md`.
 - Task data is FamilyOS-owned and append-only (ADR 0006), except Star Balance
   which is a mutable integer (ADR 0007). Do not store Tasks in Google Tasks,
   materialize occurrence rows, derive Star Balance from completions, add a

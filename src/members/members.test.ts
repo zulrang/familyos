@@ -7,12 +7,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {
   activeMembers,
+  checkInkOnFill,
   MAX_ACTIVE_MEMBERS,
   memberById,
   memberSurface,
   migrateRoster,
   onFillInk,
-  checkInkOnFill,
   parseMemberColor,
   parseRoster,
   resolveMembers,

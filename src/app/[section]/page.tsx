@@ -8,7 +8,8 @@ const STUBS: Set<string> = new Set(
       id !== "calendar" &&
       id !== "settings" &&
       id !== "lists" &&
-      id !== "tasks",
+      id !== "tasks" &&
+      id !== "photos",
   ),
 );
 

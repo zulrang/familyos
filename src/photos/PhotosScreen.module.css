@@ -1,0 +1,74 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface-screen);
+}
+
+.empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  overflow: auto;
+  color: var(--text-body);
+}
+
+.empty h2 {
+  font: var(--type-section);
+}
+.empty p {
+  max-width: 560px;
+}
+.empty a {
+  color: var(--brand-blue);
+  padding: 10px;
+}
+.code {
+  font-size: 32px;
+  letter-spacing: 4px;
+}
+.actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.actions button {
+  min-height: 48px;
+}
+.viewer {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  margin: 8px 24px 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface-card);
+}
+.photo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.imageError {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--surface-card);
+  padding: 24px;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px 24px;
+}
