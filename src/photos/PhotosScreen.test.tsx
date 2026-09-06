@@ -22,25 +22,24 @@ function respond(status: PhotosStatus) {
   vi.stubGlobal("fetch", async () => Response.json(status));
 }
 
-test("connect displays the Google code and verification link", async () => {
+test("connect displays the Google Photos picker link", async () => {
   respond({ state: "disconnected" });
   render(<PhotosScreen />);
   const connect = await screen.findByRole("button", {
     name: "Connect Google Photos",
   });
   respond({
-    state: "authorizing",
-    userCode: "ABCD-EFGH",
-    verificationUrl: "https://www.google.com/device",
-    expiresAt: Date.now() + 1800_000,
+    state: "selecting",
+    pickerUrl: "https://photos.google.com/picker",
     pollAfterMs: 5000,
   });
   fireEvent.click(connect);
-  expect(await screen.findByText("ABCD-EFGH")).toBeVisible();
   expect(
-    screen.getByRole("link", { name: "Open Google sign-in" }),
-  ).toHaveAttribute("href", "https://www.google.com/device");
-  expect(screen.getByText("Waiting for authorization…")).toBeVisible();
+    await screen.findByText("Choose photos in Google Photos"),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: "Choose photos in Google Photos" }),
+  ).toHaveAttribute("href", "https://photos.google.com/picker");
 });
 
 test("slideshow advances, pauses, wraps and opens album settings", async () => {
@@ -51,7 +50,7 @@ test("slideshow advances, pauses, wraps and opens album settings", async () => {
   respond({
     state: "ready",
     sourceName: "Family",
-    settingsUrl: "https://photos.google.com/device",
+    pickerUrl: "https://photos.google.com/picker",
     photos,
     pollAfterMs: 600_000,
   });
@@ -82,8 +81,8 @@ test("slideshow advances, pauses, wraps and opens album settings", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Photo settings" }));
   expect(
-    screen.getByRole("link", { name: "Choose album in Google Photos" }),
-  ).toHaveAttribute("href", "https://photos.google.com/device");
+    screen.getByRole("link", { name: "Choose photos in Google Photos" }),
+  ).toHaveAttribute("href", "https://photos.google.com/picker");
   expect(screen.queryByRole("img", { name: "Family" })).not.toBeInTheDocument();
 });
 
@@ -91,7 +90,7 @@ test("empty selections do not enable slideshow controls", async () => {
   respond({
     state: "ready",
     sourceName: "Family",
-    settingsUrl: "https://photos.google.com/device",
+    pickerUrl: "https://photos.google.com/picker",
     photos: [],
     pollAfterMs: 600_000,
   });
@@ -104,7 +103,7 @@ test("disconnect removes the slideshow and returns to Connect", async () => {
   respond({
     state: "ready",
     sourceName: "Family",
-    settingsUrl: "https://photos.google.com/device",
+    pickerUrl: "https://photos.google.com/picker",
     photos: [{ id: "1", src: "/api/photos/image?id=1" }],
     pollAfterMs: 600_000,
   });

@@ -11,11 +11,11 @@ import {
 
 const MESSAGES: Record<string, string> = {
   invalid_client:
-    "Google Photos credentials need a TVs and Limited Input devices OAuth client.",
+    "Google account authorization is unavailable. Sign in again in Settings.",
   invalid_scope:
-    "Google has not enabled the Photos Ambient permission for this OAuth client. Check the project's Ambient API access.",
+    "Google Photos Picker permission was not granted. Sign out and sign in again in Settings.",
   PERMISSION_DENIED:
-    "Google denied Ambient API access. Check the project's partner access and Google Photos permission.",
+    "Google Photos access expired. Disconnect Photos and choose the photos again.",
   access_denied:
     "Google Photos access was declined. Connect again to try another account.",
   expired_token: "The sign-in code expired. Connect Google Photos again.",
@@ -25,8 +25,6 @@ const MESSAGES: Record<string, string> = {
     "Google Photos credentials changed. Disconnect Photos, then connect again.",
   RESOURCE_EXHAUSTED:
     "Google Photos is temporarily at its request limit. Try again later.",
-  device_creation_pending:
-    "Google Photos setup is unfinished. Retry to continue.",
   photo_unavailable:
     "This photo is unavailable. The slideshow will refresh automatically.",
 };

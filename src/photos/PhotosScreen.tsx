@@ -167,15 +167,15 @@ export function PhotosScreen() {
       )}
       {status?.state === "unconfigured" && (
         <div className={styles.empty}>
-          <h2>Connect Google Photos</h2>
-          <p>Google Photos setup is needed on the household server.</p>
+          <h2>Sign in to Google Photos</h2>
+          <p>Sign in with Google in Settings before choosing photos.</p>
         </div>
       )}
       {status?.state === "disconnected" && (
         <div className={styles.empty}>
           <h2>Family photos, together</h2>
           <p>
-            Connect Google Photos and choose one album for all household
+            Connect Google Photos and choose the photos for all household
             displays.
           </p>
           <Button
@@ -187,38 +187,18 @@ export function PhotosScreen() {
           </Button>
         </div>
       )}
-      {status?.state === "authorizing" && (
-        <div className={styles.empty}>
-          <h2>Connect Google Photos</h2>
-          <p>Scan with a phone, then enter this code.</p>
-          <QrCode
-            value={status.verificationUrl}
-            label="Open Google Photos sign-in"
-          />
-          <strong className={styles.code}>{status.userCode}</strong>
-          <a href={status.verificationUrl} target="_blank" rel="noreferrer">
-            Open Google sign-in
-          </a>
-          <output>Waiting for authorization…</output>
-          <Button disabled={busy} onClick={() => void update("disconnect")}>
-            Cancel
-          </Button>
-        </div>
-      )}
       {selection && (
         <div className={styles.empty}>
-          <h2>{ready ? ready.sourceName : "Choose one album"}</h2>
+          <h2>{ready ? ready.sourceName : "Choose photos"}</h2>
           <p>
-            Select exactly one album in Google Photos to share with FamilyOS.
+            Select photos to display in FamilyOS. Search for the album by name
+            in Google Photos, then tap Done.
           </p>
-          <QrCode
-            value={selection.settingsUrl}
-            label="Choose a Google Photos album"
-          />
-          <a href={selection.settingsUrl} target="_blank" rel="noreferrer">
-            Choose album in Google Photos
+          <QrCode value={selection.pickerUrl} label="Choose Google Photos" />
+          <a href={selection.pickerUrl} target="_blank" rel="noreferrer">
+            Choose photos in Google Photos
           </a>
-          {!ready && <output>Waiting for one album selection…</output>}
+          {!ready && <output>Waiting for photo selection…</output>}
           <Button
             disabled={busy}
             onClick={() => {

@@ -1,16 +1,6 @@
-import {
-  googleUrl,
-  type PhotoTokens,
-  parseDevice,
-  parsePhotos,
-  positiveNumber,
-  record,
-  requiredString,
-} from "./photos";
+import { gfetch, throwIfGoogleFailed } from "@/shared/google";
 
-const API = "https://photosambient.googleapis.com/v1";
-export const PHOTOS_SCOPE =
-  "https://www.googleapis.com/auth/photosambient.mediaitems";
+const API = "https://photospicker.googleapis.com/v1";
 
 export class PhotosError extends Error {
   constructor(
@@ -21,175 +11,133 @@ export class PhotosError extends Error {
   }
 }
 
-export function photosClient() {
-  const id = process.env.GOOGLE_PHOTOS_CLIENT_ID;
-  const secret = process.env.GOOGLE_PHOTOS_CLIENT_SECRET;
-  return id && secret ? { id, secret } : null;
-}
-
-async function jsonResponse(response: Response) {
-  const raw = record(await response.json());
-  if (!response.ok) {
-    const code =
-      typeof raw.error === "string"
-        ? raw.error
-        : typeof raw.error === "object" && raw.error
-          ? record(raw.error).status
-          : undefined;
-    throw new PhotosError(
-      typeof code === "string" ? code : "google_unavailable",
-      response.status,
-    );
-  }
-  return raw;
-}
-
-async function oauth(endpoint: string, body: Record<string, string>) {
-  return jsonResponse(
-    await fetch(`https://oauth2.googleapis.com/${endpoint}`, {
-      method: "POST",
-      body: new URLSearchParams(body),
-      cache: "no-store",
-      signal: AbortSignal.timeout(15000),
-    }),
-  );
-}
-
-export async function beginAuthorization(clientId: string, requestId: string) {
-  const raw = await oauth("device/code", {
-    client_id: clientId,
-    scope: PHOTOS_SCOPE,
-    state: JSON.stringify({ requestId, displayName: "FamilyOS" }),
-  });
-  return {
-    deviceCode: requiredString(raw.device_code),
-    userCode: requiredString(raw.user_code),
-    verificationUrl: googleUrl(raw.verification_url),
-    expiresAt: Date.now() + positiveNumber(raw.expires_in) * 1000,
-    intervalMs: Math.max(5000, positiveNumber(raw.interval ?? 5) * 1000),
-  };
-}
-
-function tokens(
-  raw: Record<string, unknown>,
-  refreshToken?: string,
-): PhotoTokens {
-  if (
-    typeof raw.scope === "string" &&
-    !raw.scope.split(" ").includes(PHOTOS_SCOPE)
-  )
-    throw new PhotosError("missing_scope", 403);
-  return {
-    accessToken: requiredString(raw.access_token),
-    refreshToken: requiredString(raw.refresh_token ?? refreshToken),
-    expiresAt: Date.now() + positiveNumber(raw.expires_in) * 1000,
-  };
-}
-
-export async function pollAuthorization(
-  client: { id: string; secret: string },
-  deviceCode: string,
-) {
-  return tokens(
-    await oauth("token", {
-      client_id: client.id,
-      client_secret: client.secret,
-      device_code: deviceCode,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    }),
-  );
-}
-
-export async function refreshPhotosToken(
-  client: { id: string; secret: string },
-  refreshToken: string,
-) {
-  return tokens(
-    await oauth("token", {
-      client_id: client.id,
-      client_secret: client.secret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-    refreshToken,
-  );
-}
-
-async function ambient(
+async function pickerFetch(
   path: string,
-  token: string,
-  method = "GET",
-  body?: unknown,
-) {
-  return jsonResponse(
-    await fetch(`${API}/${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: "no-store",
-      signal: AbortSignal.timeout(15000),
+  init?: RequestInit,
+): Promise<Record<string, unknown>> {
+  let response: Response;
+  try {
+    response = await gfetch(`${API}/${path}`, init);
+  } catch (error) {
+    throw new PhotosError(
+      error instanceof Error ? error.message : "google_auth",
+      401,
+    );
+  }
+  if (!response.ok) {
+    const text = (await response.text()).slice(0, 400);
+    let code = "google_unavailable";
+    try {
+      code =
+        (JSON.parse(text) as { error?: { status?: string } }).error?.status ??
+        code;
+    } catch {
+      /* generic */
+    }
+    throw new PhotosError(code, response.status);
+  }
+  if (response.status === 204) return {};
+  const value: unknown = await response.json();
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export type PickerSession = {
+  id: string;
+  pickerUrl: string;
+  mediaItemsSet: boolean;
+  pollAfterMs: number;
+  expiresAt: number;
+};
+
+function stringField(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value)
+    throw new PhotosError(`invalid_${name}`, 502);
+  return value;
+}
+
+function parseDuration(value: unknown, fallbackMs: number): number {
+  if (typeof value !== "string" || !/^\d+(\.\d+)?s$/.test(value))
+    return fallbackMs;
+  return Math.max(5000, Number.parseFloat(value) * 1000);
+}
+
+export function parsePickerSession(
+  raw: Record<string, unknown>,
+): PickerSession {
+  const polling =
+    raw.pollingConfig && typeof raw.pollingConfig === "object"
+      ? (raw.pollingConfig as Record<string, unknown>)
+      : {};
+  const expiry = Date.parse(
+    typeof raw.expireTime === "string" ? raw.expireTime : "",
+  );
+  return {
+    id: stringField(raw.id, "session"),
+    pickerUrl: stringField(raw.pickerUri, "picker_url"),
+    mediaItemsSet: raw.mediaItemsSet === true,
+    pollAfterMs: parseDuration(polling.pollInterval, 5000),
+    expiresAt: Number.isFinite(expiry) ? expiry : Date.now() + 30 * 60_000,
+  };
+}
+
+export async function createPickerSession(): Promise<PickerSession> {
+  return parsePickerSession(
+    await pickerFetch("sessions", {
+      method: "POST",
+      body: JSON.stringify({ pickingConfig: { maxItemCount: "2000" } }),
     }),
   );
 }
-
-export async function createAmbientDevice(token: string, requestId: string) {
-  try {
-    return parseDevice(
-      await ambient(
-        `devices?requestId=${encodeURIComponent(requestId)}`,
-        token,
-        "POST",
-        { displayName: "FamilyOS" },
-      ),
-    );
-  } catch (error) {
-    if (!(error instanceof PhotosError) || error.code !== "ALREADY_EXISTS")
-      throw error;
-    // The create response may have been lost. Google's documented recovery is
-    // to delete the orphan by requestId and retry with the same receipt key.
-    await deleteAmbientDevice(token, requestId);
-    return parseDevice(
-      await ambient(
-        `devices?requestId=${encodeURIComponent(requestId)}`,
-        token,
-        "POST",
-        { displayName: "FamilyOS" },
-      ),
-    );
-  }
-}
-
-export async function getAmbientDevice(token: string, id: string) {
-  return parseDevice(await ambient(`devices/${encodeURIComponent(id)}`, token));
-}
-
-export async function deleteAmbientDevice(token: string, id: string) {
-  try {
-    await ambient(`devices/${encodeURIComponent(id)}`, token, "DELETE");
-  } catch (error) {
-    if (!(error instanceof PhotosError) || error.status !== 404) throw error;
-  }
-}
-
-export async function listAmbientPhotos(token: string, deviceId: string) {
-  // Ambient mode provides a curated batch (maximum 100), not an incomplete
-  // first page of an album. Google rotates the selection on subsequent reads.
-  return parsePhotos(
-    await ambient(
-      `mediaItems?${new URLSearchParams({ deviceId, pageSize: "100" })}`,
-      token,
-    ),
+export async function getPickerSession(
+  sessionId: string,
+): Promise<PickerSession> {
+  return parsePickerSession(
+    await pickerFetch(`sessions/${encodeURIComponent(sessionId)}`),
   );
 }
-
-export async function fetchPhoto(token: string, baseUrl: string) {
-  return fetch(`${googleUrl(baseUrl, true)}=w2560-h1440`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-    redirect: "error",
-    signal: AbortSignal.timeout(20000),
+export async function deletePickerSession(sessionId: string): Promise<void> {
+  await pickerFetch(`sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
   });
+}
+export async function listPickerPhotos(sessionId: string) {
+  const photos: { id: string; baseUrl: string }[] = [];
+  let pageToken = "";
+  for (let page = 0; page < 20; page += 1) {
+    const query = new URLSearchParams({ sessionId, pageSize: "100" });
+    if (pageToken) query.set("pageToken", pageToken);
+    const raw = await pickerFetch(`mediaItems?${query}`);
+    if (Array.isArray(raw.mediaItems))
+      photos.push(
+        ...raw.mediaItems.flatMap((item: unknown) => {
+          if (!item || typeof item !== "object") return [];
+          const media = item as Record<string, unknown>;
+          const file =
+            media.mediaFile && typeof media.mediaFile === "object"
+              ? (media.mediaFile as Record<string, unknown>)
+              : media;
+          const mime = typeof file.mimeType === "string" ? file.mimeType : "";
+          const baseUrl = typeof file.baseUrl === "string" ? file.baseUrl : "";
+          const id = typeof media.id === "string" ? media.id : "";
+          if (
+            !id ||
+            !baseUrl ||
+            !mime.startsWith("image/") ||
+            mime === "image/svg+xml"
+          )
+            return [];
+          return [{ id, baseUrl }];
+        }),
+      );
+    if (typeof raw.nextPageToken !== "string" || !raw.nextPageToken) break;
+    pageToken = raw.nextPageToken;
+  }
+  return photos;
+}
+export async function fetchPhoto(baseUrl: string) {
+  const response = await gfetch(`${baseUrl}=w2560-h1440`);
+  await throwIfGoogleFailed(response, "Google Photos image");
+  return response;
 }

@@ -9,7 +9,13 @@ function file() {
 
 export async function readPhotosConnection(): Promise<PhotosConnection> {
   try {
-    return JSON.parse(await readFile(file(), "utf8")) as PhotosConnection;
+    const value: unknown = JSON.parse(await readFile(file(), "utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return { state: "disconnected" };
+    const state = (value as { state?: unknown }).state;
+    if (state !== "disconnected" && state !== "selecting" && state !== "ready")
+      return { state: "disconnected" };
+    return value as PhotosConnection;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       return { state: "disconnected" };

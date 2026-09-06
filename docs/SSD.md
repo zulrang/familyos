@@ -91,8 +91,8 @@ Other rail destinations are stubs.
   `docs/design/tasks-design-spec.md`.
 
 **Decision: v1 is Calendar + Lists + Settings + stubs**
-- Subsequent scope: Photos now uses the Google Photos Ambient API with its
-  own device OAuth connection and one selected household album. See
+- Subsequent scope: Photos now uses the Google Photos Picker API with the
+  household Google connection and a user-selected photo batch. See
   `docs/photos.md` for setup, permissions, refresh limits, and storage.
 - Choice: Pairing, a rolling 5-day family calendar, selected Household Lists,
   and Settings (Google login, source selection, members, Displays). Tasks,

@@ -531,9 +531,9 @@ export function SettingsScreen() {
               marginBottom: 18,
             }}
           >
-            Create an OAuth client in Google Cloud, enable the Calendar API and
-            Tasks API, and put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in
-            .env.local. Redirect URI:
+            Create an OAuth client in Google Cloud, enable the Calendar API,
+            Tasks API, and Google Photos Picker API, then put GOOGLE_CLIENT_ID
+            and GOOGLE_CLIENT_SECRET in .env.local. Redirect URI:
             http://localhost:3000/api/auth/callback/google
           </p>
         ) : settings.signedIn ? (
