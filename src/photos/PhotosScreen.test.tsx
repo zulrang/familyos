@@ -99,6 +99,29 @@ test("empty selections do not enable slideshow controls", async () => {
   expect(screen.getByText(/No photos available yet/)).toBeVisible();
 });
 
+test("opens the slideshow full screen and exits with Escape", async () => {
+  respond({
+    state: "ready",
+    sourceName: "Family",
+    pickerUrl: "https://photos.google.com/picker",
+    photos: [{ id: "1", src: "/api/photos/image?id=1" }],
+    pollAfterMs: 600_000,
+  });
+  render(<PhotosScreen />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Full screen" }));
+  expect(
+    screen.getByRole("button", { name: "Exit full screen" }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Exit full screen" }));
+  expect(screen.getByRole("button", { name: "Full screen" })).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.getByRole("button", { name: "Full screen" })).toBeVisible();
+});
+
 test("disconnect removes the slideshow and returns to Connect", async () => {
   respond({
     state: "ready",

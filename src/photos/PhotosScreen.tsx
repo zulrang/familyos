@@ -12,6 +12,8 @@ type ScreenState =
   | { state: "loaded"; status: PhotosStatus }
   | { state: "error"; message: string };
 
+type ViewMode = "slideshow" | "settings" | "fullscreen";
+
 async function requestPhotos(
   action?: "connect" | "poll" | "disconnect",
   signal?: AbortSignal,
@@ -40,7 +42,7 @@ export function PhotosScreen() {
   const [busy, setBusy] = useState(false);
   const [paused, setPaused] = useState(false);
   const [index, setIndex] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("slideshow");
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
 
@@ -122,20 +124,29 @@ export function PhotosScreen() {
   const selection =
     status?.state === "selecting"
       ? status
-      : ready && showSettings
+      : ready && viewMode === "settings"
         ? ready
         : null;
   const count = ready?.photos.length ?? 0;
   const photo = ready?.photos[index % Math.max(1, count)];
 
   useEffect(() => {
-    if (paused || showSettings || count < 2) return;
+    if (paused || viewMode === "settings" || count < 2) return;
     const timer = setInterval(
       () => setIndex((value) => (value + 1) % count),
       15_000,
     );
     return () => clearInterval(timer);
-  }, [paused, showSettings, count]);
+  }, [paused, viewMode, count]);
+
+  useEffect(() => {
+    if (viewMode !== "fullscreen") return;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewMode("slideshow");
+    };
+    document.addEventListener("keydown", exitOnEscape);
+    return () => document.removeEventListener("keydown", exitOnEscape);
+  }, [viewMode]);
 
   return (
     <div className={styles.screen}>
@@ -143,8 +154,14 @@ export function PhotosScreen() {
         title="Photos"
         actions={
           ready ? (
-            <Button onClick={() => setShowSettings((value) => !value)}>
-              {showSettings ? "Back to photos" : "Photo settings"}
+            <Button
+              onClick={() =>
+                setViewMode((value) =>
+                  value === "settings" ? "slideshow" : "settings",
+                )
+              }
+            >
+              {viewMode === "settings" ? "Back to photos" : "Photo settings"}
             </Button>
           ) : undefined
         }
@@ -202,7 +219,7 @@ export function PhotosScreen() {
           <Button
             disabled={busy}
             onClick={() => {
-              setShowSettings(false);
+              setViewMode("slideshow");
               void update("disconnect");
             }}
           >
@@ -210,8 +227,12 @@ export function PhotosScreen() {
           </Button>
         </div>
       )}
-      {ready && !showSettings && (
-        <>
+      {ready && viewMode !== "settings" && (
+        <div
+          className={`${styles.slideshow} ${
+            viewMode === "fullscreen" ? styles.fullscreen : ""
+          }`}
+        >
           <div className={styles.viewer}>
             {photo ? (
               <>
@@ -263,10 +284,20 @@ export function PhotosScreen() {
               >
                 Next
               </Button>
+              <Button
+                disabled={!photo}
+                onClick={() =>
+                  setViewMode((value) =>
+                    value === "fullscreen" ? "slideshow" : "fullscreen",
+                  )
+                }
+              >
+                {viewMode === "fullscreen" ? "Exit full screen" : "Full screen"}
+              </Button>
             </div>
             <span>{count ? `${(index % count) + 1}/${count}` : "0/0"}</span>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
