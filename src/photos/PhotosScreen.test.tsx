@@ -122,6 +122,30 @@ test("opens the slideshow full screen and exits with Escape", async () => {
   expect(screen.getByRole("button", { name: "Full screen" })).toBeVisible();
 });
 
+test("hides idle full-screen controls and reveals them on a tap", async () => {
+  respond({
+    state: "ready",
+    sourceName: "Family",
+    pickerUrl: "https://photos.google.com/picker",
+    photos: [{ id: "1", src: "/api/photos/image?id=1" }],
+    pollAfterMs: 600_000,
+  });
+  render(<PhotosScreen />);
+  const photo = await screen.findByRole("img", { name: "Family" });
+  vi.useFakeTimers();
+
+  fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+  await act(() => vi.advanceTimersByTimeAsync(3_000));
+  expect(
+    screen.queryByRole("button", { name: "Exit full screen" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.pointerDown(photo);
+  expect(
+    screen.getByRole("button", { name: "Exit full screen" }),
+  ).toBeVisible();
+});
+
 test("disconnect removes the slideshow and returns to Connect", async () => {
   respond({
     state: "ready",

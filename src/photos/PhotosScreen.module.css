@@ -77,6 +77,7 @@
   flex-wrap: wrap;
   gap: 16px;
   padding: 18px 24px;
+  transition: opacity 400ms var(--ease-standard);
 }
 .fullscreen {
   position: fixed;
@@ -100,4 +101,8 @@
   padding-top: 48px;
   color: #fff;
   background: linear-gradient(transparent, rgb(0 0 0 / 80%));
+}
+.fullscreen .controlsHidden {
+  pointer-events: none;
+  opacity: 0;
 }

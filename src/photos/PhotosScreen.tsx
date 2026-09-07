@@ -12,7 +12,10 @@ type ScreenState =
   | { state: "loaded"; status: PhotosStatus }
   | { state: "error"; message: string };
 
-type ViewMode = "slideshow" | "settings" | "fullscreen";
+type ViewMode =
+  | { state: "slideshow" }
+  | { state: "settings" }
+  | { state: "fullscreen"; controlsVisible: boolean };
 
 async function requestPhotos(
   action?: "connect" | "poll" | "disconnect",
@@ -42,7 +45,7 @@ export function PhotosScreen() {
   const [busy, setBusy] = useState(false);
   const [paused, setPaused] = useState(false);
   const [index, setIndex] = useState(0);
-  const [viewMode, setViewMode] = useState<ViewMode>("slideshow");
+  const [viewMode, setViewMode] = useState<ViewMode>({ state: "slideshow" });
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
 
@@ -124,29 +127,51 @@ export function PhotosScreen() {
   const selection =
     status?.state === "selecting"
       ? status
-      : ready && viewMode === "settings"
+      : ready && viewMode.state === "settings"
         ? ready
         : null;
   const count = ready?.photos.length ?? 0;
   const photo = ready?.photos[index % Math.max(1, count)];
 
   useEffect(() => {
-    if (paused || viewMode === "settings" || count < 2) return;
+    if (paused || viewMode.state === "settings" || count < 2) return;
     const timer = setInterval(
       () => setIndex((value) => (value + 1) % count),
       15_000,
     );
     return () => clearInterval(timer);
-  }, [paused, viewMode, count]);
+  }, [paused, viewMode.state, count]);
 
   useEffect(() => {
-    if (viewMode !== "fullscreen") return;
+    if (viewMode.state !== "fullscreen") return;
     const exitOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setViewMode("slideshow");
+      if (event.key === "Escape") setViewMode({ state: "slideshow" });
     };
     document.addEventListener("keydown", exitOnEscape);
     return () => document.removeEventListener("keydown", exitOnEscape);
+  }, [viewMode.state]);
+
+  useEffect(() => {
+    if (viewMode.state !== "fullscreen" || !viewMode.controlsVisible) return;
+    const timer = setTimeout(
+      () =>
+        setViewMode((value) =>
+          value.state === "fullscreen"
+            ? { state: "fullscreen", controlsVisible: false }
+            : value,
+        ),
+      3_000,
+    );
+    return () => clearTimeout(timer);
   }, [viewMode]);
+
+  function revealFullscreenControls() {
+    setViewMode((value) =>
+      value.state === "fullscreen"
+        ? { state: "fullscreen", controlsVisible: true }
+        : value,
+    );
+  }
 
   return (
     <div className={styles.screen}>
@@ -157,11 +182,15 @@ export function PhotosScreen() {
             <Button
               onClick={() =>
                 setViewMode((value) =>
-                  value === "settings" ? "slideshow" : "settings",
+                  value.state === "settings"
+                    ? { state: "slideshow" }
+                    : { state: "settings" },
                 )
               }
             >
-              {viewMode === "settings" ? "Back to photos" : "Photo settings"}
+              {viewMode.state === "settings"
+                ? "Back to photos"
+                : "Photo settings"}
             </Button>
           ) : undefined
         }
@@ -219,7 +248,7 @@ export function PhotosScreen() {
           <Button
             disabled={busy}
             onClick={() => {
-              setViewMode("slideshow");
+              setViewMode({ state: "slideshow" });
               void update("disconnect");
             }}
           >
@@ -227,11 +256,12 @@ export function PhotosScreen() {
           </Button>
         </div>
       )}
-      {ready && viewMode !== "settings" && (
+      {ready && viewMode.state !== "settings" && (
         <div
           className={`${styles.slideshow} ${
-            viewMode === "fullscreen" ? styles.fullscreen : ""
+            viewMode.state === "fullscreen" ? styles.fullscreen : ""
           }`}
+          onPointerDown={revealFullscreenControls}
         >
           <div className={styles.viewer}>
             {photo ? (
@@ -261,7 +291,17 @@ export function PhotosScreen() {
               </div>
             )}
           </div>
-          <div className={styles.controls}>
+          <div
+            className={`${styles.controls} ${
+              viewMode.state === "fullscreen" && !viewMode.controlsVisible
+                ? styles.controlsHidden
+                : ""
+            }`}
+            aria-hidden={
+              viewMode.state === "fullscreen" && !viewMode.controlsVisible
+            }
+            inert={viewMode.state === "fullscreen" && !viewMode.controlsVisible}
+          >
             <span>{ready.sourceName}</span>
             <div className={styles.actions}>
               <Button
@@ -288,11 +328,15 @@ export function PhotosScreen() {
                 disabled={!photo}
                 onClick={() =>
                   setViewMode((value) =>
-                    value === "fullscreen" ? "slideshow" : "fullscreen",
+                    value.state === "fullscreen"
+                      ? { state: "slideshow" }
+                      : { state: "fullscreen", controlsVisible: true },
                   )
                 }
               >
-                {viewMode === "fullscreen" ? "Exit full screen" : "Full screen"}
+                {viewMode.state === "fullscreen"
+                  ? "Exit full screen"
+                  : "Full screen"}
               </Button>
             </div>
             <span>{count ? `${(index % count) + 1}/${count}` : "0/0"}</span>
