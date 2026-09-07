@@ -51,6 +51,8 @@ export type PickerSession = {
   expiresAt: number;
 };
 
+type PickerSessionStatus = Omit<PickerSession, "pickerUrl">;
+
 function stringField(value: unknown, name: string): string {
   if (typeof value !== "string" || !value)
     throw new PhotosError(`invalid_${name}`, 502);
@@ -63,9 +65,9 @@ function parseDuration(value: unknown, fallbackMs: number): number {
   return Math.max(5000, Number.parseFloat(value) * 1000);
 }
 
-export function parsePickerSession(
+function parsePickerSessionStatus(
   raw: Record<string, unknown>,
-): PickerSession {
+): PickerSessionStatus {
   const polling =
     raw.pollingConfig && typeof raw.pollingConfig === "object"
       ? (raw.pollingConfig as Record<string, unknown>)
@@ -75,10 +77,18 @@ export function parsePickerSession(
   );
   return {
     id: stringField(raw.id, "session"),
-    pickerUrl: stringField(raw.pickerUri, "picker_url"),
     mediaItemsSet: raw.mediaItemsSet === true,
     pollAfterMs: parseDuration(polling.pollInterval, 5000),
     expiresAt: Number.isFinite(expiry) ? expiry : Date.now() + 30 * 60_000,
+  };
+}
+
+export function parsePickerSession(
+  raw: Record<string, unknown>,
+): PickerSession {
+  return {
+    ...parsePickerSessionStatus(raw),
+    pickerUrl: stringField(raw.pickerUri, "picker_url"),
   };
 }
 
@@ -92,8 +102,8 @@ export async function createPickerSession(): Promise<PickerSession> {
 }
 export async function getPickerSession(
   sessionId: string,
-): Promise<PickerSession> {
-  return parsePickerSession(
+): Promise<PickerSessionStatus> {
+  return parsePickerSessionStatus(
     await pickerFetch(`sessions/${encodeURIComponent(sessionId)}`),
   );
 }

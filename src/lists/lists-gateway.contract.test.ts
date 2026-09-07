@@ -25,6 +25,10 @@ recorded.install(createRecordedTasksGfetch());
 vi.mock("@/shared/google", () => ({
   AuthError: class AuthError extends Error {},
   gfetch: recorded.gfetch,
+  throwIfGoogleFailed: async (response: Response) => {
+    if (!response.ok)
+      throw new Error(`Google request failed ${response.status}`);
+  },
 }));
 
 test("ListsGateway Google adapter satisfies contract (recorded)", async () => {

@@ -65,7 +65,6 @@ describe("Photos Picker connection", () => {
       if (input.includes("/sessions/session"))
         return Response.json({
           id: "session",
-          pickerUri: "https://photos.google.com/picker",
           mediaItemsSet: true,
           expireTime: "2030-01-01T00:00:00Z",
         });
