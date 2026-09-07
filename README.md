@@ -1,9 +1,10 @@
 # FamilyOS
 
 A locally hosted kitchen-wall command center for one household and multiple
-paired displays. v1 is a rolling five-day calendar, selected Google Tasks
-lists, Settings, and the fixed navigation rail; Tasks, Rewards, Meals, Recipes,
-Photos, and Sleep remain stubs.
+paired displays. The implemented product surfaces are a rolling five-day
+calendar, selected Google Tasks lists, household Tasks, a Google Photos
+slideshow, Settings, and the fixed navigation rail. Rewards, Meals, Recipes,
+and Sleep remain stubs.
 
 It is not a cloud-hosted SaaS, not multi-tenant, and not a phone UI. You run one
 FamilyOS server on a computer you control; wall panels connect over the local
@@ -27,7 +28,9 @@ pnpm dev
 # enter the pairing code printed in the server log
 ```
 
-Open [http://localhost:3001](http://localhost:3001) → pair the Display → **Settings** → sign in → pick the family calendar.
+Open [http://localhost:3001](http://localhost:3001) → pair the Display →
+**Settings** → sign in → choose the household Google sources. See
+[docs/photos.md](docs/photos.md) for the one-time Photos selection flow.
 
 `pnpm start` is production on **3000**; `pnpm dev` is development on **3001**, so both can run. For a panel on the LAN, `pnpm build && pnpm start` (binds `0.0.0.0:3000`). `pnpm dev` over Wi-Fi makes taps feel late. On the household Mac, `./scripts/macos-server install` keeps `:3000` up across logins; `./scripts/macos-server update` pulls `main`, rebuilds, and restarts.
 
@@ -43,6 +46,7 @@ The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.
 - [INSTALL.md](INSTALL.md) — clone, Google OAuth, wall kiosk, touchscreen
 - [docs/SSD.md](docs/SSD.md) — architecture, boundaries, and remaining gaps
 - [docs/kiosk.md](docs/kiosk.md) — FullPageOS Chromium, OSK extension, idle dim
+- [docs/photos.md](docs/photos.md) — Google Photos setup and slideshow behavior
 - [docs/requirements.md](docs/requirements.md) — v1 scope
 - [docs/code-design-principles.md](docs/code-design-principles.md) — coding standards for humans and agents
 - [docs/adr/](docs/adr/) — architecture decision records

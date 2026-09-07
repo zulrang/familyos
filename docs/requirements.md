@@ -21,9 +21,9 @@ configuration and data is shared.
 
 ## Product surfaces
 
-v1 includes Calendar, Lists, Settings, the fixed left navigation rail, and
-pairing. Tasks, Rewards, Meals, Recipes, Photos, and Sleep remain
-"not yet implemented" screens.
+The implemented product surfaces are Calendar, Lists, Tasks, Photos, Settings,
+the fixed left navigation rail, and pairing. Rewards, Meals, Recipes, and Sleep
+remain "not yet implemented" screens.
 
 ### Calendar
 
@@ -50,14 +50,34 @@ pairing. Tasks, Rewards, Meals, Recipes, Photos, and Sleep remain
 - Adding a list creates and selects a real Google tasklist.
 - Removing a panel only unselects the Google tasklist; it does not delete
   provider data.
-- The separate Tasks destination is reserved for future chores and does not
-  expose Google Tasks rows.
+- The separate Tasks destination contains FamilyOS-owned household chores and
+  routines; it does not expose Google Tasks rows. Its requirements are in
+  `docs/design/tasks-design-spec.md`.
+
+### Photos
+
+- Photos uses the Household Provider Connection and the Google Photos Picker
+  API. It does not require a separate OAuth client.
+- A household member explicitly chooses a Photo Selection. FamilyOS cannot
+  browse arbitrary Google Photos albums or subscribe to later album changes.
+- The selected batch is shared by every Trusted Display. Slideshow position,
+  pause state, and view mode are local to each Display.
+- The slideshow advances every 15 seconds and supports Previous, Pause/Play,
+  and Next. Photos fit within the available area without cropping.
+- Full-screen mode uses a black background. Its controls fade after three
+  seconds, reappear after a click or tap, and can exit through the visible
+  button or the Escape key.
+- Google media URLs stay server-side. Trusted Displays receive images through
+  the authenticated FamilyOS image endpoint.
+- Photo Selection and authorization setup are documented in `docs/photos.md`.
 
 ### Settings
 
 - Google integration requires one Household-level Google login.
 - The Provider Connection is not a Household Member identity.
 - Settings selects one Household Calendar and zero or more Household Lists.
+- The Photos screen manages the shared Photo Selection; Settings owns the
+  Household Provider Connection it uses.
 - Settings manages up to six Active Members. Each holds a unique Member Color
   chosen in FamilyOS (not a Google Calendar color); member email is not part of
   the v1 model.
@@ -74,5 +94,8 @@ pairing. Tasks, Rewards, Meals, Recipes, Photos, and Sleep remain
   visible but read-only.
 - Cache from one Google account must never be shown as data from another
   account.
+- Photos retains Picker session metadata and the selected media references,
+  but it does not cache image files. Photos may be unavailable while Google is
+  unreachable.
 - Stale Calendar and List Item writes are rejected and reloaded rather than
   silently overwriting a newer provider version.

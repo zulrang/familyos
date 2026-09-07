@@ -115,9 +115,15 @@ _Avoid_: Week view
 ## Lists and providers
 
 **Provider Connection**:
-The Household-level Google authorization used to access Calendar and Tasks.
-It is separate from Household Member identity.
+The Household-level Google authorization used to access Calendar, Lists, and
+Photos. It is separate from Household Member identity.
 _Avoid_: Member login, FamilyOS account
+
+**Photo Selection**:
+The batch of raster images a household member explicitly chooses through one
+Google Photos Picker session. It is shared by all Trusted Displays and is not
+an album subscription.
+_Avoid_: Household Album, synced album
 
 **Household Configuration**:
 The shared, versioned settings of one Household — family name, members,

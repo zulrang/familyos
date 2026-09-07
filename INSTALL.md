@@ -17,7 +17,8 @@ You can run it in a desktop browser while you set it up. The wall unit is option
 
 - **Node.js 24.15+** (current LTS; Next.js 16 / Vitest / jsdom)
 - **pnpm 10** — this repo pins `packageManager: pnpm@10.33.2`. `corepack enable` is the least painful way to get that version
-- A **Google Cloud** project you control, with the Calendar API and Tasks API enabled
+- A **Google Cloud** project you control, with the Calendar API, Tasks API, and
+  Google Photos Picker API enabled
 - A computer that can stay reachable if a wall panel will load the UI over the LAN
 
 A touchscreen is not required to install or to click around in a browser.
@@ -37,16 +38,24 @@ The hooks path enables a pre-push secret scan (`scripts/scan-secrets.sh`). Run `
 ## 2. Google OAuth
 
 FamilyOS has no per-person accounts. Google sign-in exists only so the
-Household's server can talk to Calendar and Tasks; it is separate from
-Household Member identity.
+Household's server can talk to Calendar, Tasks, and the Google Photos Picker;
+it is separate from Household Member identity.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/), create a project (or reuse one).
-2. Enable **Google Calendar API** and **Google Tasks API**.
+2. Enable **Google Calendar API**, **Google Tasks API**, and **Google Photos
+   Picker API**. The Photos Picker API is distinct from the Google Drive Picker
+   API and Photos Ambient API.
 3. Configure the OAuth consent screen. External + yourself as a test user is enough for a household.
 4. Create an OAuth client ID of type **Web application**.
-5. Add this authorized redirect URI:
+5. Add an authorized redirect URI for every origin from which Google sign-in
+   will be started. The recommended household setup is to sign in from a
+   browser on the server itself and authorize:
 
    `http://localhost:3000/api/auth/callback/google`
+
+   Development uses port 3001. Google permits plain HTTP for localhost only. A
+   non-localhost callback must use an HTTPS domain allowed by Google's redirect
+   URI rules; a plain-HTTP LAN hostname or private IP will be rejected.
 
 Copy the tracked template and fill in your OAuth client values:
 
@@ -56,16 +65,22 @@ cp .env.example .env.local
 
 `.env.local` is gitignored. `.env.example` stays in the repo with empty placeholders.
 
-Login requests `calendar.events`, `calendar.calendarlist.readonly`, and `tasks`. Tokens are stored on the machine running Next, in `data/kiosk.json` (also gitignored) — not in the browser. Easiest path: sign in once from that machine. The wall display then uses the same server-side tokens. If you signed in before Tasks was added, sign out and back in so Google can grant the new scope.
+Login requests `calendar.events`, `calendar.calendarlist.readonly`, `tasks`, and
+`photospicker.mediaitems.readonly`. Tokens are stored on the machine running
+Next, in `data/provider.json` (gitignored), not in the browser. Every Display
+uses those same server-side tokens. If you signed in before one of these scopes
+was added, sign out and back in so Google can grant the current set.
 
-If you insist on completing Google login **on the panel**, `GOOGLE_REDIRECT_URI` and the Cloud Console URI must be the origin Chromium actually loads (LAN hostname or IP), not `localhost`.
+FamilyOS derives the redirect URI from the origin that started sign-in; there
+is no `GOOGLE_REDIRECT_URI` setting. The matching URI must exist in the OAuth
+client's authorized redirect list. Complete sign-in from `localhost:3000`
+unless the server has an authorized HTTPS domain.
 
 ## 3. Run
 
 Production (`pnpm start`) listens on **3000**. Development (`pnpm dev`) listens
-on **3001**, so both can run on the same machine. The Google redirect URI in
-step 2 stays `localhost:3000` (sign in from production, or add the `:3001`
-callback in Cloud Console if you complete OAuth on the dev server).
+on **3001**, so both can run on the same machine. Add the `:3001` callback in
+Cloud Console if you complete OAuth on the development server.
 
 ```bash
 pnpm dev
@@ -74,7 +89,9 @@ pnpm dev
 Watch the server log for `FamilyOS pairing code: ……`. Open
 [http://localhost:3001](http://localhost:3001), enter the code to pair this
 browser profile, then go to **Settings**, sign in with Google, pick the family
-calendar, add household members and their colors. Save.
+calendar, select the Household Lists, and add household members and their
+colors. Save. Open **Photos** to make the shared Photo Selection; see
+[`docs/photos.md`](docs/photos.md).
 
 `pnpm dev` binds `0.0.0.0:3001`, so another device on the LAN can hit
 `http://<this-machine>:3001`. For a wall panel, serve production instead — Fast

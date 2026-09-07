@@ -533,8 +533,9 @@ export function SettingsScreen() {
           >
             Create an OAuth client in Google Cloud, enable the Calendar API,
             Tasks API, and Google Photos Picker API, then put GOOGLE_CLIENT_ID
-            and GOOGLE_CLIENT_SECRET in .env.local. Redirect URI:
-            http://localhost:3000/api/auth/callback/google
+            and GOOGLE_CLIENT_SECRET in .env.local. Authorize the callback path
+            /api/auth/callback/google for each origin used to sign in. Google
+            allows HTTP only on localhost; other origins require HTTPS.
           </p>
         ) : settings.signedIn ? (
           <div

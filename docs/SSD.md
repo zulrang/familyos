@@ -13,9 +13,10 @@ data, not authentication principals. Companion phones/tablets are out of v1
 scope, although any paired browser profile follows the same Trusted Display
 rules.
 
-v1: pairing, the Five-Day Calendar in `src/calendar/`, Lists in
-`src/lists/` (Google Tasks), Settings, and the fixed left rail.
-Other rail destinations are stubs.
+Implemented surfaces are pairing, the Five-Day Calendar in `src/calendar/`,
+Lists in `src/lists/` (Google Tasks), Tasks in `src/tasks/`, Photos in
+`src/photos/`, Settings, and the fixed left rail. Rewards, Meals, Recipes, and
+Sleep remain stubs.
 
 ## 2. Architectural Decisions
 
@@ -90,18 +91,19 @@ Other rail destinations are stubs.
   transactions. See `docs/adr/0006-familyos-owned-task-store.md` and
   `docs/design/tasks-design-spec.md`.
 
-**Decision: v1 is Calendar + Lists + Settings + stubs**
-- Subsequent scope: Photos now uses the Google Photos Picker API with the
-  household Google connection and a user-selected photo batch. See
-  `docs/photos.md` for setup, permissions, refresh limits, and storage.
-- Choice: Pairing, a rolling 5-day family calendar, selected Household Lists,
-  and Settings (Google login, source selection, members, Displays). Tasks,
-  Rewards, Meals, Recipes, Photos, and Sleep render a “not yet implemented”
-  screen.
+**Decision: Product surfaces ship as complete vertical slices**
+- Choice: The implemented scope is pairing, a rolling 5-day family calendar,
+  selected Household Lists, FamilyOS-owned Tasks, a Google Photos slideshow,
+  and Settings. Rewards, Meals, Recipes, and Sleep render a “not yet
+  implemented” screen.
+- Photos uses the Google Photos Picker API through the household Google
+  connection and stores one explicitly selected photo batch. It does not
+  browse or subscribe to albums. See `docs/photos.md` for setup, permissions,
+  session limits, and slideshow behavior.
 - Alternatives considered: Building Tasks (chores) in parallel; inventing Rewards/Meals UI with no production screen yet.
 - Rationale: Lists follows the same Google-as-store pattern. Invented screens
-  become accidental product. The future Tasks surface means assigned chores,
-  not Google Tasks list rows.
+  become accidental product. The Tasks surface means assigned chores, not
+  Google Tasks list rows.
 
 **Decision: Keep the Next.js App Router scaffold**
 - Choice: Stay on this repo’s Next + React + Biome + pnpm setup. Next 16 APIs come from `node_modules/next/dist/docs/`, not training data.
@@ -126,6 +128,7 @@ Other rail destinations are stubs.
 | Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
 | Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
 | Tasks (`src/tasks/`) | Task Definitions, Task events, star values, stored Star Balances (keyed by MemberId), the pure Occurrence projection, the Tasks screen and Task editor | Google Tasks rows, Rewards Grant/Spend UX, verification workflow, member roster |
+| Photos (`src/photos/`) | Google Photos Picker session, shared Photo Selection, proxied media, and per-Display slideshow UI | Arbitrary album browsing, live album subscription, Google base URLs in the browser |
 | Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, Display Configuration (Display size, Idle Dim) | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
@@ -149,6 +152,7 @@ Display(s) (paired browser profiles)
        -> Task store (node:sqlite; definitions + events, server-local)
        -> Google Calendar API  (events; one selected calendar)
        -> Google Tasks API     (explicitly selected lists / items)
+       -> Google Photos Picker API (explicitly selected photo batch)
 
 Reference wall Display
   -> FullPageOS Chromium
@@ -178,11 +182,12 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - **People:** No FamilyOS user/password/session exists for Household Members.
   All Trusted Displays have equal control.
 - **Provider authorization:** Google OAuth is one Household-level Provider
-  Connection for Calendar and Tasks. The connected Google account is not
-  automatically a Household Member.
+  Connection for Calendar, Lists, and Photos. The connected Google account is
+  not automatically a Household Member.
 - **Provider scope:** The account may see many calendars and tasklists;
   FamilyOS reads/writes one selected calendar and explicitly selected
-  tasklists only.
+  tasklists. Photos is limited to media the account explicitly chooses in a
+  Picker session.
 - **Data:** Family names and provider data are household PII. They stay on the
   local server and in Google. Do not add signup, sharing links, or a hosted
   multi-family backend.
