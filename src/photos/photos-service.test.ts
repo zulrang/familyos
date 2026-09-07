@@ -8,8 +8,13 @@ import {
   disconnectPhotos,
   getPhotosStatus,
   pollPhotos,
+  readPhoto,
 } from "./photos-service";
-import { readPhotosConnection, writePhotosConnection } from "./photos-store";
+import {
+  readPhotosConnection,
+  withPhotosConnection,
+  writePhotosConnection,
+} from "./photos-store";
 
 describe("Photos Picker connection", () => {
   let dir: string;
@@ -114,5 +119,39 @@ describe("Photos Picker connection", () => {
     });
     expect(await disconnectPhotos()).toEqual({ state: "disconnected" });
     expect(await getPhotosStatus()).toEqual({ state: "disconnected" });
+  });
+
+  test("photo images are cacheable and read without blocking on the connection queue", async () => {
+    await writePhotosConnection({
+      state: "ready",
+      sessionId: "session",
+      pickerUrl: "https://photos.google.com/picker",
+      nextPollAt: Date.now() + 600_000,
+      expiresAt: Date.now() + 600_000,
+      nextMediaPollAt: Date.now() + 600_000,
+      mediaExpiresAt: Date.now() + 600_000,
+      photos: [{ id: "one", baseUrl: "https://lh3.googleusercontent.com/one" }],
+    });
+    // A permanently pending operation occupies the queue for this test.
+    void withPhotosConnection(() => new Promise(() => {}));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("jpeg", {
+            status: 200,
+            headers: { "Content-Type": "image/jpeg" },
+          }),
+      ),
+    );
+    const response = await readPhoto("one");
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=3000");
+    // If readPhoto were still serialized behind the queue, this await would
+    // hang until the test timeout: the queued operation never resolves.
+    expect(await response.text()).toBe("jpeg");
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      "https://lh3.googleusercontent.com/one=w1920-h1080",
+      expect.anything(),
+    );
   });
 });

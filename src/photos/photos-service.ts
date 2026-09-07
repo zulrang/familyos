@@ -129,7 +129,9 @@ export function disconnectPhotos() {
   });
 }
 export function readPhoto(id: string) {
-  return withPhotosConnection(async () => {
+  // Read-only: does not mutate the connection file, so it skips the
+  // write-serialization queue that status polls and media refreshes share.
+  return (async () => {
     const connection = await readPhotosConnection();
     if (connection.state !== "ready" || connection.mediaExpiresAt <= Date.now())
       throw new Error("photo_unavailable");
@@ -147,7 +149,9 @@ export function readPhoto(id: string) {
       return new Response(response.body, {
         headers: {
           "Content-Type": mime,
-          "Cache-Control": "private, no-store",
+          // v= in the URL is mediaExpiresAt, stable until the next media
+          // refresh (~50 min), so the wall Chromium cache can hold photos.
+          "Cache-Control": "private, max-age=3000",
           "X-Content-Type-Options": "nosniff",
         },
       });
@@ -155,5 +159,5 @@ export function readPhoto(id: string) {
       if (error instanceof AuthError) throw error;
       throw new Error("photo_unavailable");
     }
-  });
+  })();
 }

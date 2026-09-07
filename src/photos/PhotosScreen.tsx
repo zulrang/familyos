@@ -134,6 +134,13 @@ export function PhotosScreen() {
   const photo = ready?.photos[index % Math.max(1, count)];
 
   useEffect(() => {
+    if (!ready || count < 2) return;
+    // Warm the browser cache for the next slide so the 15s swap is instant.
+    const next = new Image();
+    next.src = ready.photos[(index + 1) % count].src;
+  }, [ready, index, count]);
+
+  useEffect(() => {
     if (paused || viewMode.state === "settings" || count < 2) return;
     const timer = setInterval(
       () => setIndex((value) => (value + 1) % count),

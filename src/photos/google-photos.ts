@@ -147,7 +147,7 @@ export async function listPickerPhotos(sessionId: string) {
   return photos;
 }
 export async function fetchPhoto(baseUrl: string) {
-  const response = await gfetch(`${baseUrl}=w2560-h1440`);
+  const response = await gfetch(`${baseUrl}=w1920-h1080`);
   await throwIfGoogleFailed(response, "Google Photos image");
   return response;
 }
