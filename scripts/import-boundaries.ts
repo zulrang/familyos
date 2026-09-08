@@ -2,7 +2,13 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 
-const FEATURE_SLICES = new Set(["calendar", "lists", "displays", "tasks"]);
+const FEATURE_SLICES = new Set([
+  "calendar",
+  "lists",
+  "displays",
+  "tasks",
+  "photos",
+]);
 const SLICES = new Set([
   "calendar",
   "lists",
@@ -10,6 +16,7 @@ const SLICES = new Set([
   "members",
   "settings",
   "tasks",
+  "photos",
 ]);
 const SETTINGS_HTTP = "src/settings/settings-http.ts";
 const LIST_CALENDARS = "src/calendar/google-events";
@@ -20,7 +27,7 @@ function posix(p: string): string {
 
 function srcDirOf(repoPath: string): string | null {
   const m = stripExt(repoPath).match(
-    /^src\/(calendar|lists|displays|members|settings|shared|tasks)(?:\/|$)/,
+    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos)(?:\/|$)/,
   );
   return m ? m[1] : null;
 }

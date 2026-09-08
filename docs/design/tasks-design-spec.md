@@ -392,11 +392,13 @@ Components: `MemberColumn` (without `points` and without `TimeOfDayTabs`),
 - **Household column.** Appended to the grid only when open, unclaimed
   Occurrences exist today (D16). Claiming from it moves the row into the
   claimant's column.
-- **Ordering.** Timed rows first, ascending by `time`; untimed rows after, in
-  creation order (settled in design session; timed-first).
+- **Ordering.** Remaining rows first: timed ascending by `time`, then untimed
+  in creation order. Completed rows follow, in that same timed-then-untimed
+  order among themselves.
 - **Complete.** Tap the row's circle. Attribution per D15: assignee for
   `fixed`/`rotation` and claimed `open`; a member picker for unclaimed `open`.
-  Complete state follows the design system (tint deepens, circle fills).
+  Complete state deepens the tint, fills the circle, greys the row (55%
+  opacity), and moves it to the bottom of the column.
 - **Skip.** A row action offering preset reasons — Away, Sick, Not needed —
   plus optional free text. Nothing is required; a skip may carry no reason.
 - **Create/edit.** FAB opens the Task editor: title, type (Chore/Routine),
@@ -425,7 +427,8 @@ Write tests for each scenario. All references are to sections above.
 5. A `skipped` event does not change the rotation assignee for the next
    window. (D7)
 6. A skip with no reason is valid. (§6)
-7. Timed Occurrences sort before untimed ones in a member's column. (§6)
+7. Timed Occurrences sort before untimed ones in a member's column.
+   Completed Occurrences sort after remaining ones and render greyed. (§6)
 
 ### Editing and retirement
 

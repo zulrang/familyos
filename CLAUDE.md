@@ -9,6 +9,8 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - App shell / pairing gate: `src/app/layout.tsx` (thin Next router; imports from slices)
 - Calendar: `src/calendar/`
 - Lists: `src/lists/`
+- Tasks: `src/tasks/`
+- Photos: `src/photos/`
 - Settings: `src/settings/`
 - Displays / pairing UI + HTTP: `src/displays/` (session/auth in `src/shared/`)
 - Members: `src/members/`
@@ -28,7 +30,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Google Calendar (one selected) and Google Tasks (explicitly selected tasklists) are the sources of truth — no local event/list database.
 - Event Participants are stable Household Member IDs in Google private event properties only; Member Color is presentation.
 - Calendar target is a rolling Five-Day View with five-day paging and contrasted weekends — do not treat the current seven-day UI as canonical.
-- Unimplemented rail items (Tasks, Rewards, Meals, Recipes, Photos, Sleep) stay stubs until in scope.
+- Unimplemented rail items (Rewards, Meals, Recipes, Sleep) stay stubs until in scope. Tasks follows `docs/design/tasks-design-spec.md`; Photos follows `docs/photos.md`.
 - Reimplement UI in `src/` from the design skill; the kit uses `window.DS` / CDN icons and will not run as Next modules.
 - Kiosk typing is the Chromium extension in `kiosk/osk/`, not a React overlay and not Onboard.
 - When changing, authoring, or reviewing code, follow `docs/code-design-principles.md`.

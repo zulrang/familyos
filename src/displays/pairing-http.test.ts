@@ -104,6 +104,26 @@ describe("Display pairing HTTP", () => {
     assert.equal(text.includes("members"), false);
   });
 
+  test("readiness exposes the production BUILD_ID without caching", async () => {
+    const previous = process.env.FAMILYOS_BUILD_ID;
+    process.env.FAMILYOS_BUILD_ID = "build-from-test";
+    try {
+      const res = await handleReady(
+        new Request("http://familyos.test/api/ready"),
+      );
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("cache-control"), "no-store");
+      const body = (await res.json()) as { buildId: string | null };
+      assert.equal(body.buildId, "build-from-test");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.FAMILYOS_BUILD_ID;
+      } else {
+        process.env.FAMILYOS_BUILD_ID = previous;
+      }
+    }
+  });
+
   test("unpaired Displays cannot pass the Household API gate", async () => {
     const denied = await requireTrustedDisplay(
       new Request("http://familyos.test/api/settings"),

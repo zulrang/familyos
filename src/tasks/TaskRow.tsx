@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
-import { type MemberSurface, onFillInk } from "@/members/members";
+import {
+  checkInkOnFill,
+  type MemberSurface,
+  onFillInk,
+} from "@/members/members";
 import { Icon } from "@/shared/ui/Icon";
 import type { LocalTime } from "./types";
 
@@ -36,6 +40,7 @@ export function TaskRow({
   surface,
   onComplete,
   onClaim,
+  onCancelClaim,
   onSkip,
   onEdit,
   style,
@@ -44,14 +49,16 @@ export function TaskRow({
   time?: LocalTime | null;
   status: TaskRowStatus;
   surface: MemberSurface;
-  onComplete: () => void;
+  onComplete?: () => void;
   onClaim?: () => void;
+  onCancelClaim?: () => void;
   onSkip?: () => void;
   onEdit?: () => void;
   style?: CSSProperties;
 }) {
   const done = status.kind === "done";
   const ink = done ? onFillInk(surface.fill) : surface.ink;
+  const checkInk = done ? checkInkOnFill(surface) : "transparent";
   const caption =
     status.kind === "skipped" ? (status.reason ?? "Skipped") : null;
   const titleStyle = {
@@ -69,9 +76,12 @@ export function TaskRow({
         gap: 10,
         padding: "var(--pad-list-row)",
         borderRadius: "var(--radius-list-row)",
-        background: done ? surface.fill : surface.soft,
+        background: done ? surface.muted : surface.soft,
+        boxShadow: onCancelClaim
+          ? "inset 0 0 0 3px var(--brand-blue)"
+          : undefined,
         color: ink,
-        opacity: status.kind === "skipped" ? 0.55 : 1,
+        opacity: status.kind === "open" ? 1 : 0.25,
         transition: "background var(--dur-fast) var(--ease-standard)",
         ...style,
       }}
@@ -121,7 +131,26 @@ export function TaskRow({
           </span>
         ) : null}
       </span>
-      {onClaim ? (
+      {onCancelClaim ? (
+        <button
+          type="button"
+          aria-label={`Cancel claiming ${label}`}
+          onClick={onCancelClaim}
+          style={{
+            ...rowActionStyle,
+            marginLeft: "auto",
+            color: "#b42318",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minWidth: 48,
+            minHeight: 48,
+            flexShrink: 0,
+          }}
+        >
+          <Icon name="x" size={24} />
+        </button>
+      ) : onClaim ? (
         <button
           type="button"
           aria-label={`Claim ${label}`}
@@ -141,50 +170,52 @@ export function TaskRow({
           Skip
         </button>
       ) : null}
-      <label
-        style={{
-          marginLeft: onClaim || onSkip ? 0 : "auto",
-          width: 26,
-          height: 26,
-          flex: "0 0 auto",
-          position: "relative",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: done ? ink : "transparent",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={done}
-          aria-label={label}
-          onChange={onComplete}
+      {onComplete ? (
+        <label
           style={{
-            appearance: "none",
-            WebkitAppearance: "none",
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            margin: 0,
-            cursor: "pointer",
-            borderRadius: "var(--radius-pill)",
-            border: done
-              ? "1px solid transparent"
-              : "1px solid var(--check-idle-border)",
-            background: done ? surface.fill : "var(--check-idle)",
-            boxShadow: done ? `inset 0 0 0 1px ${ink}` : "none",
-            transition: "background var(--dur-fast) var(--ease-standard)",
+            marginLeft: onClaim || onSkip ? 0 : "auto",
+            width: 26,
+            height: 26,
+            flex: "0 0 auto",
+            position: "relative",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: checkInk,
           }}
-        />
-        {done ? (
-          <Icon
-            name="check"
-            size={16}
-            style={{ position: "relative", pointerEvents: "none" }}
+        >
+          <input
+            type="checkbox"
+            checked={done}
+            aria-label={label}
+            onChange={onComplete}
+            style={{
+              appearance: "none",
+              WebkitAppearance: "none",
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              margin: 0,
+              cursor: "pointer",
+              borderRadius: "var(--radius-pill)",
+              border: done
+                ? "1px solid transparent"
+                : "1px solid var(--check-idle-border)",
+              background: done ? surface.fill : "var(--check-idle)",
+              boxShadow: done ? `inset 0 0 0 1px ${checkInk}` : "none",
+              transition: "background var(--dur-fast) var(--ease-standard)",
+            }}
           />
-        ) : null}
-      </label>
+          {done ? (
+            <Icon
+              name="check"
+              size={16}
+              style={{ position: "relative", pointerEvents: "none" }}
+            />
+          ) : null}
+        </label>
+      ) : null}
     </div>
   );
 }

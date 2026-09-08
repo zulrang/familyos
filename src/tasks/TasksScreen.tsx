@@ -16,6 +16,8 @@ import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
 import { MemberColumn } from "./MemberColumn";
+import { TaskCelebration } from "./TaskCelebration";
+import styles from "./TaskEditor.module.css";
 import { TaskRow, type TaskRowStatus } from "./TaskRow";
 import {
   nowInstant,
@@ -27,6 +29,7 @@ import {
   type TaskType,
   type Weekday,
 } from "./types";
+import { occurrencesForColumn } from "./view";
 
 function headerDate(d: Date, timeZone: string): string {
   return d.toLocaleDateString("en-US", {
@@ -188,6 +191,7 @@ const HOUSEHOLD_SURFACE: MemberSurface = {
   fill: "#dcebf6",
   soft: "#eef4f8",
   ink: "#425466",
+  muted: memberSurface("#dcebf6").muted,
 };
 
 export function markDone(
@@ -305,6 +309,12 @@ export function TasksScreen() {
   const [skipNote, setSkipNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [celebration, setCelebration] = useState<{
+    member: ActiveMember;
+    date: TasksViewRead["today"];
+  } | null>(null);
+  const celebrated = useRef(new Set<string>());
+  const dismissCelebration = useCallback(() => setCelebration(null), []);
 
   const load = useCallback(async () => {
     const sRes = await fetch("/api/settings");
@@ -321,8 +331,10 @@ export function TasksScreen() {
       setError("Could not load tasks.");
       return;
     }
-    setTasks((await res.json()) as TasksViewRead);
+    const view = (await res.json()) as TasksViewRead;
+    setTasks(view);
     setError(null);
+    return view;
   }, []);
 
   useEffect(() => {
@@ -370,7 +382,31 @@ export function TasksScreen() {
       if (!res.ok) {
         setError("Could not complete task.");
       }
-      await load();
+      const confirmed = await load();
+      const person = members.find((candidate) => candidate.id === member);
+      const progress = confirmed?.progress.find((row) => row.member === member);
+      const receipt = `${confirmed?.today}:${member}`;
+      if (
+        res.ok &&
+        confirmed &&
+        person &&
+        confirmed.today === tasks.today &&
+        occ.state !== "done" &&
+        confirmed.occurrences.some(
+          (row) =>
+            row.task === occ.task &&
+            row.window === occ.window &&
+            row.state === "done" &&
+            row.by === member,
+        ) &&
+        progress &&
+        progress.total > 0 &&
+        progress.done === progress.total &&
+        !celebrated.current.has(receipt)
+      ) {
+        celebrated.current.add(receipt);
+        setCelebration({ member: person, date: confirmed.today });
+      }
     } catch {
       setError("Could not complete task.");
       await load();
@@ -509,6 +545,13 @@ export function TasksScreen() {
         title={settings ? headerDate(now, settings.timeZone) : ""}
         time={settings ? <LiveClock timeZone={settings.timeZone} /> : null}
       />
+      {celebration ? (
+        <TaskCelebration
+          key={`${celebration.date}:${celebration.member.id}`}
+          member={celebration.member}
+          onDismiss={dismissCelebration}
+        />
+      ) : null}
       {error ? (
         <div
           style={{
@@ -556,8 +599,8 @@ export function TasksScreen() {
               done: 0,
               total: 0,
             };
-            const rows = tasks.occurrences.filter(
-              (row) => row.assignee === member.id,
+            const rows = occurrencesForColumn(
+              tasks.occurrences.filter((row) => row.assignee === member.id),
             );
             return (
               <MemberColumn
@@ -566,6 +609,27 @@ export function TasksScreen() {
                 surface={surface}
                 done={progress.done}
                 total={progress.total}
+                action={
+                  memberAction?.kind === "claim" ? (
+                    <Button
+                      icon="user-plus"
+                      variant="primary"
+                      style={{
+                        minHeight: 48,
+                        justifyContent: "center",
+                        height: "auto",
+                        padding: "10px 12px",
+                      }}
+                      onClick={() => {
+                        const occurrence = memberAction.occurrence;
+                        setMemberAction(null);
+                        claim(occurrence, member.id).catch(() => {});
+                      }}
+                    >
+                      Claim for {member.name}
+                    </Button>
+                  ) : undefined
+                }
               >
                 {rows.map((row) => (
                   <TaskRow
@@ -603,6 +667,13 @@ export function TasksScreen() {
                   time={row.time}
                   status={rowStatus(row)}
                   surface={HOUSEHOLD_SURFACE}
+                  onCancelClaim={
+                    memberAction?.kind === "claim" &&
+                    memberAction.occurrence.task === row.task &&
+                    memberAction.occurrence.window === row.window
+                      ? () => setMemberAction(null)
+                      : undefined
+                  }
                   onClaim={
                     row.state === "pending" ? () => claim(row) : undefined
                   }
@@ -651,7 +722,7 @@ export function TasksScreen() {
           onSave={saveTask}
         />
       ) : null}
-      {memberAction ? (
+      {memberAction?.kind === "complete" ? (
         <MemberPicker
           action={memberAction.kind}
           members={members}
@@ -659,11 +730,7 @@ export function TasksScreen() {
           onPick={(member) => {
             const action = memberAction;
             setMemberAction(null);
-            if (action.kind === "claim") {
-              claim(action.occurrence, member.id).catch(() => {});
-            } else {
-              complete(action.occurrence, member.id).catch(() => {});
-            }
+            complete(action.occurrence, member.id).catch(() => {});
           }}
         />
       ) : null}
@@ -700,6 +767,54 @@ function CreateSheet({
   onClose: () => void;
   onSave: () => void;
 }) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // The kiosk extension overlays the viewport instead of resizing it.
+    const update = () => {
+      const keyboard = document.getElementById("familyos-osk");
+      const viewport = window.visualViewport;
+      const bottom = Math.min(
+        viewport ? viewport.offsetTop + viewport.height : window.innerHeight,
+        keyboard && keyboard.getBoundingClientRect().height > 0
+          ? keyboard.getBoundingClientRect().top
+          : window.innerHeight,
+      );
+      editorRef.current?.style.setProperty(
+        "--editor-bottom",
+        `${window.innerHeight - bottom}px`,
+      );
+      const focused = document.activeElement;
+      if (
+        focused instanceof HTMLElement &&
+        editorRef.current?.contains(focused)
+      ) {
+        focused.scrollIntoView?.({ block: "nearest" });
+      }
+    };
+    let keyboard: HTMLElement | null = null;
+    const resize =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    const discover = new MutationObserver(() => {
+      const next = document.getElementById("familyos-osk");
+      if (next && next !== keyboard) {
+        keyboard = next;
+        resize?.observe(next);
+      }
+      update();
+    });
+    discover.observe(document.documentElement, { childList: true });
+    keyboard = document.getElementById("familyos-osk");
+    if (keyboard) resize?.observe(keyboard);
+    window.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("resize", update);
+    update();
+    return () => {
+      discover.disconnect();
+      resize?.disconnect();
+      window.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("resize", update);
+    };
+  }, []);
   const closeFromBackdrop = useRef(false);
   const stars = Number(draft.stars);
   const assignmentReady =
@@ -715,16 +830,7 @@ function CreateSheet({
   const weeklyDays =
     draft.recurrence.kind === "weekly" ? draft.recurrence.days : null;
   return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 8,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+    <div ref={editorRef} className={styles.overlay}>
       <button
         type="button"
         aria-label="Close"
@@ -745,264 +851,288 @@ function CreateSheet({
         }}
       />
       <div
-        style={{
-          position: "relative",
-          width: 420,
-          maxWidth: "calc(100% - 48px)",
-          background: "var(--surface-screen)",
-          borderRadius: "var(--radius-lg)",
-          boxShadow: "var(--shadow-panel)",
-          padding: 24,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-editor-title"
+        className={styles.panel}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 style={{ font: "var(--type-section)", flex: 1 }}>
+        <div className={styles.header}>
+          <h2
+            id="task-editor-title"
+            style={{ font: "var(--type-section)", flex: 1 }}
+          >
             {draft.task ? "Edit task" : "New task"}
           </h2>
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
-        <input
-          className="fos-input"
-          placeholder="Title"
-          value={draft.title}
-          onChange={(e) => onChange({ ...draft, title: e.target.value })}
-        />
-        <div style={{ display: "flex", gap: 10 }}>
-          {(["chore", "routine"] as const).map((type) => (
-            <Button
-              key={type}
-              variant={draft.type === type ? "primary" : "secondary"}
-              onClick={() => onChange({ ...draft, type })}
-              style={{ flex: 1, textTransform: "capitalize" }}
-            >
-              {type === "chore" ? "Chore" : "Routine"}
-            </Button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Button
-            variant={
-              draft.assignment.kind === "fixed" ? "primary" : "secondary"
-            }
-            onClick={() =>
-              onChange({
-                ...draft,
-                assignment: {
-                  kind: "fixed",
-                  member:
-                    draft.assignment.kind === "fixed"
-                      ? draft.assignment.member
-                      : draft.assignment.kind === "rotation"
-                        ? (draft.assignment.order[0] ?? members[0]?.id ?? "")
-                        : (members[0]?.id ?? ""),
-                },
-              })
-            }
-            style={{ flex: 1 }}
-          >
-            Fixed
-          </Button>
-          <Button
-            variant={
-              draft.assignment.kind === "rotation" ? "primary" : "secondary"
-            }
-            onClick={() =>
-              onChange({
-                ...draft,
-                assignment: {
-                  kind: "rotation",
-                  order:
-                    draft.assignment.kind === "rotation"
-                      ? draft.assignment.order
-                      : draft.assignment.kind === "fixed"
-                        ? [draft.assignment.member]
-                        : members[0]
-                          ? [members[0].id]
-                          : [],
-                },
-              })
-            }
-            style={{ flex: 1 }}
-          >
-            Rotation
-          </Button>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {RECURRENCE_CHOICES.map(({ label, value }) => (
-            <Button
-              key={value.kind}
-              variant={
-                draft.recurrence.kind === value.kind ? "primary" : "secondary"
-              }
-              onClick={() => onChange({ ...draft, recurrence: value })}
-              style={{ flex: 1 }}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-        {draft.recurrence.kind === "once" ? (
-          <input
-            className="fos-input"
-            type="date"
-            aria-label="Date"
-            value={draft.recurrence.date}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                recurrence: { kind: "once", date: event.target.value },
-              })
-            }
-          />
-        ) : null}
-        {weeklyDays ? (
-          <div style={{ display: "flex", gap: 6 }}>
-            {WEEKDAY_OPTIONS.map(({ value, label }) => {
-              const selected = weeklyDays.includes(value);
-              return (
+        <div className={styles.body}>
+          <label className={styles.title}>
+            Task title
+            <input
+              className="fos-input"
+              placeholder="Title"
+              value={draft.title}
+              onChange={(e) => onChange({ ...draft, title: e.target.value })}
+            />
+          </label>
+          <section className={styles.details}>
+            <h3>Task details</h3>
+            <div style={{ display: "flex", gap: 10 }}>
+              {(["chore", "routine"] as const).map((type) => (
                 <Button
-                  key={value}
-                  variant={selected ? "primary" : "secondary"}
-                  onClick={() => {
-                    const days = selected
-                      ? weeklyDays.filter((day) => day !== value)
-                      : [...weeklyDays, value];
-                    onChange({
-                      ...draft,
-                      recurrence: { kind: "weekly", days },
-                    });
-                  }}
-                  aria-pressed={selected}
-                  style={{ flex: 1, paddingInline: 8 }}
+                  key={type}
+                  variant={draft.type === type ? "primary" : "secondary"}
+                  onClick={() => onChange({ ...draft, type })}
+                  style={{ flex: 1, textTransform: "capitalize" }}
                 >
-                  {label}
+                  {type === "chore" ? "Chore" : "Routine"}
                 </Button>
-              );
-            })}
-          </div>
-        ) : null}
-        {draft.recurrence.kind === "monthly" ? (
-          <input
-            className="fos-input"
-            type="number"
-            min={1}
-            max={28}
-            step={1}
-            aria-label="Day of month"
-            value={draft.recurrence.day}
-            onChange={(event) =>
-              onChange({
-                ...draft,
-                recurrence: { kind: "monthly", day: event.target.value },
-              })
-            }
-          />
-        ) : null}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => onChange({ ...draft, assignment: { kind: "open" } })}
-            style={{
-              border: "none",
-              borderRadius: "var(--radius-pill)",
-              padding: "8px 14px",
-              minHeight: "var(--hit-min)",
-              background:
-                draft.assignment.kind === "open"
-                  ? HOUSEHOLD_SURFACE.fill
-                  : HOUSEHOLD_SURFACE.soft,
-              color: HOUSEHOLD_SURFACE.ink,
-              font: "var(--type-card-meta)",
-              cursor: "pointer",
-            }}
-          >
-            Household
-          </button>
-          {members.map((member) => {
-            const surface = memberSurface(member.color);
-            const position =
-              draft.assignment.kind === "fixed"
-                ? draft.assignment.member === member.id
-                  ? 0
-                  : -1
-                : draft.assignment.kind === "rotation"
-                  ? draft.assignment.order.indexOf(member.id)
-                  : -1;
-            const selected = position >= 0;
-            return (
-              <button
-                key={member.id}
-                type="button"
-                aria-label={member.name}
-                aria-pressed={selected}
-                onClick={() => {
-                  if (draft.assignment.kind !== "rotation") {
-                    onChange({
-                      ...draft,
-                      assignment: { kind: "fixed", member: member.id },
-                    });
-                    return;
-                  }
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button
+                variant={
+                  draft.assignment.kind === "fixed" ? "primary" : "secondary"
+                }
+                onClick={() =>
+                  onChange({
+                    ...draft,
+                    assignment: {
+                      kind: "fixed",
+                      member:
+                        draft.assignment.kind === "fixed"
+                          ? draft.assignment.member
+                          : draft.assignment.kind === "rotation"
+                            ? (draft.assignment.order[0] ??
+                              members[0]?.id ??
+                              "")
+                            : (members[0]?.id ?? ""),
+                    },
+                  })
+                }
+                style={{ flex: 1 }}
+              >
+                Fixed
+              </Button>
+              <Button
+                variant={
+                  draft.assignment.kind === "rotation" ? "primary" : "secondary"
+                }
+                onClick={() =>
                   onChange({
                     ...draft,
                     assignment: {
                       kind: "rotation",
-                      order: selected
-                        ? draft.assignment.order.filter(
-                            (id) => id !== member.id,
-                          )
-                        : [...draft.assignment.order, member.id],
+                      order:
+                        draft.assignment.kind === "rotation"
+                          ? draft.assignment.order
+                          : draft.assignment.kind === "fixed"
+                            ? [draft.assignment.member]
+                            : members[0]
+                              ? [members[0].id]
+                              : [],
                     },
-                  });
-                }}
+                  })
+                }
+                style={{ flex: 1 }}
+              >
+                Rotation
+              </Button>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({ ...draft, assignment: { kind: "open" } })
+                }
                 style={{
                   border: "none",
                   borderRadius: "var(--radius-pill)",
                   padding: "8px 14px",
                   minHeight: "var(--hit-min)",
-                  background: selected ? surface.fill : surface.soft,
-                  color: selected ? onFillInk(surface.fill) : surface.ink,
+                  background:
+                    draft.assignment.kind === "open"
+                      ? HOUSEHOLD_SURFACE.fill
+                      : HOUSEHOLD_SURFACE.soft,
+                  color: HOUSEHOLD_SURFACE.ink,
                   font: "var(--type-card-meta)",
                   cursor: "pointer",
                 }}
               >
-                {member.name}
-                {draft.assignment.kind === "rotation" && selected ? (
-                  <span
-                    aria-hidden="true"
+                Household
+              </button>
+              {members.map((member) => {
+                const surface = memberSurface(member.color);
+                const position =
+                  draft.assignment.kind === "fixed"
+                    ? draft.assignment.member === member.id
+                      ? 0
+                      : -1
+                    : draft.assignment.kind === "rotation"
+                      ? draft.assignment.order.indexOf(member.id)
+                      : -1;
+                const selected = position >= 0;
+                return (
+                  <button
+                    key={member.id}
+                    type="button"
+                    aria-label={member.name}
+                    aria-pressed={selected}
+                    onClick={() => {
+                      if (draft.assignment.kind !== "rotation") {
+                        onChange({
+                          ...draft,
+                          assignment: { kind: "fixed", member: member.id },
+                        });
+                        return;
+                      }
+                      onChange({
+                        ...draft,
+                        assignment: {
+                          kind: "rotation",
+                          order: selected
+                            ? draft.assignment.order.filter(
+                                (id) => id !== member.id,
+                              )
+                            : [...draft.assignment.order, member.id],
+                        },
+                      });
+                    }}
                     style={{
-                      marginLeft: 7,
-                      fontVariantNumeric: "tabular-nums",
+                      border: "none",
+                      borderRadius: "var(--radius-pill)",
+                      padding: "8px 14px",
+                      minHeight: "var(--hit-min)",
+                      background: selected ? surface.fill : surface.soft,
+                      color: selected ? onFillInk(surface.fill) : surface.ink,
+                      font: "var(--type-card-meta)",
+                      cursor: "pointer",
                     }}
                   >
-                    {position + 1}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+                    {member.name}
+                    {draft.assignment.kind === "rotation" && selected ? (
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          marginLeft: 7,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {position + 1}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+          <section className={styles.details}>
+            <h3>Schedule & rewards</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              {RECURRENCE_CHOICES.map(({ label, value }) => (
+                <Button
+                  key={value.kind}
+                  variant={
+                    draft.recurrence.kind === value.kind
+                      ? "primary"
+                      : "secondary"
+                  }
+                  onClick={() => onChange({ ...draft, recurrence: value })}
+                  style={{ flex: 1 }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            {draft.recurrence.kind === "once" ? (
+              <input
+                className="fos-input"
+                type="date"
+                aria-label="Date"
+                value={draft.recurrence.date}
+                onChange={(event) =>
+                  onChange({
+                    ...draft,
+                    recurrence: { kind: "once", date: event.target.value },
+                  })
+                }
+              />
+            ) : null}
+            {weeklyDays ? (
+              <div style={{ display: "flex", gap: 6 }}>
+                {WEEKDAY_OPTIONS.map(({ value, label }) => {
+                  const selected = weeklyDays.includes(value);
+                  return (
+                    <Button
+                      key={value}
+                      variant={selected ? "primary" : "secondary"}
+                      onClick={() => {
+                        const days = selected
+                          ? weeklyDays.filter((day) => day !== value)
+                          : [...weeklyDays, value];
+                        onChange({
+                          ...draft,
+                          recurrence: { kind: "weekly", days },
+                        });
+                      }}
+                      aria-pressed={selected}
+                      style={{ flex: 1, paddingInline: 8 }}
+                    >
+                      {label}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : null}
+            {draft.recurrence.kind === "monthly" ? (
+              <input
+                className="fos-input"
+                type="number"
+                min={1}
+                max={28}
+                step={1}
+                aria-label="Day of month"
+                value={draft.recurrence.day}
+                onChange={(event) =>
+                  onChange({
+                    ...draft,
+                    recurrence: { kind: "monthly", day: event.target.value },
+                  })
+                }
+              />
+            ) : null}
+            <div className={styles.fields}>
+              <label>
+                Time (optional)
+                <input
+                  className="fos-input"
+                  type="time"
+                  aria-label="Time"
+                  value={draft.time}
+                  onChange={(e) => onChange({ ...draft, time: e.target.value })}
+                />
+              </label>
+              <label>
+                Stars
+                <input
+                  className="fos-input"
+                  inputMode="numeric"
+                  type="text"
+                  pattern="[0-9]*"
+                  onFocus={(event) => event.currentTarget.select()}
+                  onClick={(event) => event.currentTarget.select()}
+                  aria-label="Stars"
+                  value={draft.stars}
+                  onChange={(e) =>
+                    onChange({ ...draft, stars: e.target.value })
+                  }
+                />
+              </label>
+            </div>
+          </section>
         </div>
-        <input
-          className="fos-input"
-          type="time"
-          aria-label="Time"
-          value={draft.time}
-          onChange={(e) => onChange({ ...draft, time: e.target.value })}
-        />
-        <input
-          className="fos-input"
-          type="number"
-          min="0"
-          max={Number.MAX_SAFE_INTEGER}
-          step="1"
-          aria-label="Stars"
-          value={draft.stars}
-          onChange={(e) => onChange({ ...draft, stars: e.target.value })}
-        />
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div className={styles.footer}>
+          <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
             disabled={busy || !canSave}

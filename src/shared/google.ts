@@ -13,6 +13,7 @@ const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
   "https://www.googleapis.com/auth/tasks",
+  "https://www.googleapis.com/auth/photospicker.mediaitems.readonly",
 ].join(" ");
 
 export function authUrl(state: string, redirect: string): string {

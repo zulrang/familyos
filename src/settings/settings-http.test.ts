@@ -4,10 +4,17 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, test } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, test } from "vitest";
 
 describe("Household Configuration HTTP", () => {
   let dataRoot: string;
@@ -20,6 +27,7 @@ describe("Household Configuration HTTP", () => {
   let handlePair: typeof import("@/displays/pairing-http").handlePair;
   let handleGetSettings: typeof import("./settings-http.ts").handleGetSettings;
   let handlePatchSettings: typeof import("./settings-http.ts").handlePatchSettings;
+  let handleKickUpdate: typeof import("./update-http.ts").handleKickUpdate;
 
   let first: { cookie: string; displayId: string };
   let second: { cookie: string; displayId: string };
@@ -36,6 +44,7 @@ describe("Household Configuration HTTP", () => {
     ({ handleGetSettings, handlePatchSettings } = await import(
       "./settings-http.ts"
     ));
+    ({ handleKickUpdate } = await import("./update-http.ts"));
 
     await mkdir(dataRoot, { recursive: true });
     await writeHousehold({
@@ -483,5 +492,84 @@ describe("Household Configuration HTTP", () => {
     assert.equal(body.error, "duplicate_active_color");
     assert.deepEqual((await readHousehold()).members, before.members);
     assert.equal((await readHousehold()).configVersion, before.configVersion);
+  });
+
+  describe("Household server update", () => {
+    const previousScript = process.env.FAMILYOS_MACOS_SERVER;
+    let stubDir: string;
+    let receipt: string;
+
+    beforeAll(async () => {
+      stubDir = await mkdtemp(path.join(tmpdir(), "familyos-update-"));
+      receipt = path.join(stubDir, "receipt");
+      await writeFile(receipt, "");
+    });
+
+    afterEach(async () => {
+      await writeFile(receipt, "");
+      if (previousScript === undefined) {
+        delete process.env.FAMILYOS_MACOS_SERVER;
+      } else {
+        process.env.FAMILYOS_MACOS_SERVER = previousScript;
+      }
+    });
+
+    afterAll(async () => {
+      if (previousScript === undefined) {
+        delete process.env.FAMILYOS_MACOS_SERVER;
+      } else {
+        process.env.FAMILYOS_MACOS_SERVER = previousScript;
+      }
+      if (stubDir) await rm(stubDir, { recursive: true, force: true });
+    });
+
+    async function stubMacosServer(body: string) {
+      const script = path.join(stubDir, "macos-server");
+      await writeFile(
+        script,
+        `#!/bin/bash\nprintf '%s\\n' "$*" >> "${receipt}"\n${body}\n`,
+      );
+      await chmod(script, 0o755);
+      process.env.FAMILYOS_MACOS_SERVER = script;
+    }
+
+    test("unpaired clients cannot start an update", async () => {
+      await stubMacosServer("exit 0");
+      const res = await handleKickUpdate(
+        new Request("http://familyos.test/api/settings/update", {
+          method: "POST",
+        }),
+      );
+      assert.equal(res.status, 401);
+      assert.equal((await readFile(receipt, "utf8")).trim(), "");
+    });
+
+    test("a Trusted Display submits kick-update and the job is accepted", async () => {
+      await stubMacosServer("exit 0");
+      const res = await handleKickUpdate(
+        new Request("http://familyos.test/api/settings/update", {
+          method: "POST",
+          headers: { cookie: first.cookie },
+        }),
+      );
+      assert.equal(res.status, 202);
+      const body = (await res.json()) as { ok: boolean };
+      assert.equal(body.ok, true);
+      const logged = (await readFile(receipt, "utf8")).trim();
+      assert.equal(logged, "kick-update");
+    });
+
+    test("a kick-update failure is returned without claiming success", async () => {
+      await stubMacosServer("exit 1");
+      const res = await handleKickUpdate(
+        new Request("http://familyos.test/api/settings/update", {
+          method: "POST",
+          headers: { cookie: first.cookie },
+        }),
+      );
+      assert.equal(res.status, 500);
+      const body = (await res.json()) as { error: string };
+      assert.equal(body.error, "Could not start update.");
+    });
   });
 });

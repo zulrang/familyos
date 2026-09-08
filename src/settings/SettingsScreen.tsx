@@ -98,6 +98,9 @@ export function SettingsScreen() {
   const [pairingExpiresAt, setPairingExpiresAt] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updateKick, setUpdateKick] = useState<
+    { kind: "idle" } | { kind: "starting" } | { kind: "started" }
+  >({ kind: "idle" });
 
   async function loadDisplays() {
     const res = await fetch("/api/displays");
@@ -277,6 +280,19 @@ export function SettingsScreen() {
     await loadDisplays();
   }
 
+  async function kickUpdate() {
+    setError(null);
+    setUpdateKick({ kind: "starting" });
+    const res = await fetch("/api/settings/update", { method: "POST" });
+    if (await redirectIfPairingRequired(res)) return;
+    if (!res.ok) {
+      setUpdateKick({ kind: "idle" });
+      setError("Could not start update.");
+      return;
+    }
+    setUpdateKick({ kind: "started" });
+  }
+
   const colorTaken = (id: string, color: string) =>
     members.some(
       (x) => x.status === "active" && x.id !== id && x.color === color,
@@ -307,9 +323,23 @@ export function SettingsScreen() {
       <AppHeader
         title="Settings"
         actions={
-          <Button variant="primary" onClick={save}>
-            {saved ? "Saved" : "Save"}
-          </Button>
+          <>
+            <Button
+              disabled={
+                updateKick.kind === "starting" || updateKick.kind === "started"
+              }
+              onClick={() => void kickUpdate()}
+            >
+              {updateKick.kind === "starting"
+                ? "Updating"
+                : updateKick.kind === "started"
+                  ? "Update started"
+                  : "Update"}
+            </Button>
+            <Button variant="primary" onClick={save}>
+              {saved ? "Saved" : "Save"}
+            </Button>
+          </>
         }
       />
       <div
@@ -320,6 +350,18 @@ export function SettingsScreen() {
           maxWidth: 720,
         }}
       >
+        {updateKick.kind === "started" ? (
+          <p
+            style={{
+              font: "var(--type-card-meta)",
+              color: "var(--text-muted)",
+              marginBottom: 16,
+            }}
+          >
+            Update started. This Display will go offline until the server is
+            back.
+          </p>
+        ) : null}
         <h2 style={{ font: "var(--type-section)", marginBottom: 12 }}>
           Display
         </h2>
@@ -489,10 +531,11 @@ export function SettingsScreen() {
               marginBottom: 18,
             }}
           >
-            Create an OAuth client in Google Cloud, enable the Calendar API and
-            Tasks API, and put GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in
-            .env.local. Redirect URI:
-            http://localhost:3000/api/auth/callback/google
+            Create an OAuth client in Google Cloud, enable the Calendar API,
+            Tasks API, and Google Photos Picker API, then put GOOGLE_CLIENT_ID
+            and GOOGLE_CLIENT_SECRET in .env.local. Authorize the callback path
+            /api/auth/callback/google for each origin used to sign in. Google
+            allows HTTP only on localhost; other origins require HTTPS.
           </p>
         ) : settings.signedIn ? (
           <div

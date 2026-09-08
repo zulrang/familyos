@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -8,8 +9,9 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
+import { TaskCelebration } from "./TaskCelebration";
 import {
   claimOccurrence,
   markDone,
@@ -17,6 +19,16 @@ import {
   TasksScreen,
 } from "./TasksScreen";
 import type { Occurrence, TaskDefinition, TasksViewRead } from "./types";
+
+// jsdom does not implement the native modal dialog methods.
+beforeEach(() => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+});
 
 afterEach(() => {
   cleanup();
@@ -289,6 +301,48 @@ function submittedRecurrence(
 }
 
 describe("TasksScreen", () => {
+  test("Stars requests a numeric keyboard and replaces its value when tapped", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    const stars = screen.getByRole("textbox", { name: "Stars" });
+    expect(stars).toHaveAttribute("inputmode", "numeric");
+    await user.click(stars);
+    await user.keyboard("12");
+    expect(stars).toHaveValue("12");
+    await user.click(stars);
+    await user.keyboard("5");
+    expect(stars).toHaveValue("5");
+  });
+
+  test("the editor reserves space for the kiosk keyboard and restores it when removed", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    const dialog = screen.getByRole("dialog", { name: "New task" });
+    expect(within(dialog).getByLabelText("Task title")).toBeVisible();
+    const keyboard = document.createElement("div");
+    keyboard.id = "familyos-osk";
+    keyboard.getBoundingClientRect = () =>
+      new DOMRect(0, window.innerHeight - 300, 1024, 300);
+    try {
+      document.documentElement.appendChild(keyboard);
+      await waitFor(() =>
+        expect(dialog.parentElement).toHaveStyle("--editor-bottom: 300px"),
+      );
+      expect(
+        within(dialog).getByRole("button", { name: "Cancel" }),
+      ).toBeVisible();
+    } finally {
+      keyboard.remove();
+    }
+    await waitFor(() =>
+      expect(dialog.parentElement).toHaveStyle("--editor-bottom: 0px"),
+    );
+  });
+
   test("creating a task shows it in the assignee column the same day", async () => {
     const user = userEvent.setup();
     const store = emptyView();
@@ -379,7 +433,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "6");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -404,7 +458,7 @@ describe("TasksScreen", () => {
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
     await user.click(screen.getByRole("button", { name: "Ellie" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, String(Number.MAX_SAFE_INTEGER + 1));
 
@@ -441,7 +495,7 @@ describe("TasksScreen", () => {
     await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Rotation" }));
     await user.click(screen.getByRole("button", { name: "Ellie" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "4");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -480,7 +534,7 @@ describe("TasksScreen", () => {
     await user.click(screen.getByRole("button", { name: "Weekly" }));
     await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Household" }));
-    const stars = screen.getByRole("spinbutton", { name: "Stars" });
+    const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "5");
     await user.click(screen.getByRole("button", { name: "Add" }));
@@ -524,11 +578,20 @@ describe("TasksScreen", () => {
     await user.click(
       await screen.findByRole("button", { name: "Claim Open dishes" }),
     );
-    const picker = screen.getByRole("dialog", { name: "Claim task" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Former" }),
+      screen.getByRole("button", { name: "Cancel claiming Open dishes" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Claim Open dishes" }),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Dad" }));
+    expect(
+      screen.getByRole("button", { name: "Claim for Dad" }).closest("section"),
+    ).toHaveTextContent("Dad");
+    expect(
+      screen.queryByRole("button", { name: "Claim for Former" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Claim for Dad" }));
 
     await waitFor(() => {
       expect(
@@ -538,14 +601,16 @@ describe("TasksScreen", () => {
     const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
     expect(dad).toHaveTextContent("Open dishes");
     expect(dad).toHaveTextContent("0/1");
-    expect(picker).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Claim for Dad" }),
+    ).not.toBeInTheDocument();
     const claimRequest = fetchMock.mock.calls.find(([, init]) =>
       String(init?.body).includes('"kind":"claimed"'),
     );
     expect(String(claimRequest?.[1]?.body)).toContain('"by":"dad"');
   });
 
-  test("completing an unclaimed open occurrence requires a member pick", async () => {
+  test("an unclaimed Household task offers task actions and Claim", async () => {
     const user = userEvent.setup();
     const store = emptyView();
     store.occurrences = [
@@ -560,27 +625,40 @@ describe("TasksScreen", () => {
         assignee: null,
       },
     ];
-    const fetchMock = installFetch(store);
+    installFetch(store);
     render(<TasksScreen />);
 
-    await user.click(await screen.findByRole("checkbox", { name: "Feed cat" }));
-    expect(
-      screen.getByRole("dialog", { name: "Complete task" }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Ellie" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("checkbox", { name: "Feed cat" })).toBeChecked();
-    });
-    const ellie = screen
-      .getByRole("heading", { name: "Ellie" })
+    const claim = await screen.findByRole("button", { name: "Claim Feed cat" });
+    expect(claim).toBeVisible();
+    const household = screen
+      .getByRole("heading", { name: "Household" })
       .closest("section");
-    expect(ellie).toHaveTextContent("Feed cat");
-    expect(ellie).toHaveTextContent("1/1");
-    const completionRequest = fetchMock.mock.calls.find(([, init]) =>
-      String(init?.body).includes('"kind":"completed"'),
+    expect(household).not.toBeNull();
+    if (!household) throw new Error("Missing Household column");
+    expect(within(household).getAllByRole("button")).toEqual([
+      within(household).getByRole("button", { name: "Edit Feed cat" }),
+      claim,
+      within(household).getByRole("button", { name: "Skip Feed cat" }),
+    ]);
+    expect(
+      within(household).getByRole("checkbox", { name: "Feed cat" }),
+    ).toBeVisible();
+    await user.click(claim);
+    await user.click(
+      screen.getByRole("button", { name: "Cancel claiming Feed cat" }),
     );
-    expect(String(completionRequest?.[1]?.body)).toContain('"by":"ellie"');
+    expect(
+      screen.queryByRole("button", { name: "Claim for Ellie" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Claim Feed cat" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Claim Feed cat" }));
+    await user.click(screen.getByRole("button", { name: "Claim for Ellie" }));
+    expect(
+      await screen.findByRole("checkbox", { name: "Feed cat" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Skip Feed cat" })).toBeVisible();
   });
 
   test("completing a claimed occurrence uses the claimant without a picker", async () => {
@@ -607,7 +685,9 @@ describe("TasksScreen", () => {
       await screen.findByRole("checkbox", { name: "Take bins out" }),
     );
 
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: /Who/ }),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByRole("checkbox", { name: "Take bins out" }),
@@ -619,6 +699,133 @@ describe("TasksScreen", () => {
       String(init?.body).includes('"kind":"completed"'),
     );
     expect(String(completionRequest?.[1]?.body)).toContain('"by":"dad"');
+  });
+
+  test("completing a task greys it out and moves it below remaining work", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "t-early" as Occurrence["task"],
+        window: store.today,
+        title: "Brush teeth",
+        type: "routine",
+        lineage: "lin-1" as Occurrence["lineage"],
+        time: "07:00" as Occurrence["time"],
+        assignee: "dad",
+      },
+      {
+        state: "pending",
+        task: "t-late" as Occurrence["task"],
+        window: store.today,
+        title: "Walk dog",
+        type: "chore",
+        lineage: "lin-2" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 0, total: 2 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    const dad = (await screen.findByRole("heading", { name: "Dad" })).closest(
+      "section",
+    );
+    expect(dad).not.toBeNull();
+    expect(
+      within(dad as HTMLElement)
+        .getAllByRole("checkbox")
+        .map((el) => el.getAttribute("aria-label")),
+    ).toEqual(["Brush teeth", "Walk dog"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Brush teeth" }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("checkbox", { name: "Brush teeth" }),
+      ).toBeChecked();
+    });
+
+    const after = within(dad as HTMLElement).getAllByRole("checkbox");
+    expect(after.map((el) => el.getAttribute("aria-label"))).toEqual([
+      "Walk dog",
+      "Brush teeth",
+    ]);
+    expect(after[0]?.closest("div")).toHaveStyle({ opacity: "1" });
+    expect(after[1]?.closest("div")).toHaveStyle({
+      opacity: "0.25",
+      background: "#b6d3d3",
+    });
+  });
+
+  test("completing a later task lands it after already-done morning rows", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    store.occurrences = [
+      {
+        state: "pending",
+        task: "t-dinner" as Occurrence["task"],
+        window: store.today,
+        title: "Dinner",
+        type: "chore",
+        lineage: "lin-dinner" as Occurrence["lineage"],
+        time: "18:00" as Occurrence["time"],
+        assignee: "dad",
+      },
+      {
+        state: "pending",
+        task: "t-walk" as Occurrence["task"],
+        window: store.today,
+        title: "Walk dog",
+        type: "chore",
+        lineage: "lin-walk" as Occurrence["lineage"],
+        time: null,
+        assignee: "dad",
+      },
+      {
+        state: "done",
+        task: "t-brush" as Occurrence["task"],
+        window: store.today,
+        title: "Brush teeth",
+        type: "routine",
+        lineage: "lin-brush" as Occurrence["lineage"],
+        time: "07:00" as Occurrence["time"],
+        assignee: "dad",
+        by: "dad",
+        at: store.generatedAt,
+      },
+    ];
+    store.progress = [
+      { member: "dad", done: 1, total: 3 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    const dad = (await screen.findByRole("heading", { name: "Dad" })).closest(
+      "section",
+    );
+    expect(dad).not.toBeNull();
+    expect(
+      within(dad as HTMLElement)
+        .getAllByRole("checkbox")
+        .map((el) => el.getAttribute("aria-label")),
+    ).toEqual(["Dinner", "Walk dog", "Brush teeth"]);
+
+    await user.click(screen.getByRole("checkbox", { name: "Dinner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Dinner" })).toBeChecked();
+    });
+
+    expect(
+      within(dad as HTMLElement)
+        .getAllByRole("checkbox")
+        .map((el) => el.getAttribute("aria-label")),
+    ).toEqual(["Walk dog", "Brush teeth", "Dinner"]);
   });
 
   test("tapping the circle marks the row done and increments progress once", async () => {
@@ -1056,5 +1263,89 @@ describe("TasksScreen", () => {
       title: "Kitchen",
       assignment: { kind: "fixed", member: "ellie" },
     });
+  });
+});
+
+describe("daily completion celebration", () => {
+  function dailyTasks() {
+    const store = emptyView();
+    store.occurrences = ["Dishes", "Laundry"].map((title, index) => ({
+      state: "pending",
+      task: `daily-${index}` as Occurrence["task"],
+      lineage: `daily-${index}` as Occurrence["lineage"],
+      window: store.today,
+      title,
+      type: "chore",
+      time: null,
+      assignee: "dad",
+    }));
+    store.progress = [{ member: "dad", done: 0, total: 2 }];
+    return store;
+  }
+
+  test("celebrates only the last confirmed task and can be dismissed", async () => {
+    const user = userEvent.setup();
+    installFetch(dailyTasks());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("checkbox", { name: "Dishes" }));
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Laundry" }));
+    expect(
+      await screen.findByRole("dialog", { name: "All done!" }),
+    ).toHaveTextContent("You did it, Dad!");
+    await user.click(
+      screen.getByRole("button", { name: "Dismiss celebration" }),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("automatically dismisses after the fanfare", () => {
+    vi.useFakeTimers();
+    const dismiss = vi.fn();
+    render(
+      <TaskCelebration
+        member={{ id: "dad", name: "Dad", status: "active", color: "#a9d8d2" }}
+        onDismiss={dismiss}
+      />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(6500);
+    });
+    expect(dismiss).toHaveBeenCalledOnce();
+  });
+
+  test("opening an already completed day does not celebrate", async () => {
+    const store = dailyTasks();
+    for (const row of store.occurrences)
+      Object.assign(store, markDone(store, row));
+    installFetch(store);
+    render(<TasksScreen />);
+    await screen.findByText("Laundry");
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+  });
+
+  test("a failed final completion does not celebrate", async () => {
+    const store = dailyTasks();
+    Object.assign(store, markDone(store, store.occurrences[0]));
+    const fetchMock = installFetch(store);
+    const successfulFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (init?.method === "POST") return json({ error: "Unavailable" }, 500);
+      if (!successfulFetch) throw new Error("Missing fetch fixture");
+      return successfulFetch(input, init);
+    });
+    const user = userEvent.setup();
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("checkbox", { name: "Laundry" }));
+    await screen.findByRole("checkbox", { name: "Laundry" });
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
   });
 });

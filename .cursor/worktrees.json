@@ -2,6 +2,7 @@
   "setup-worktree-unix": [
     "git fetch origin main",
     "git reset --hard origin/main",
-    "pnpm install"
+    "pnpm install",
+    "npx skills add https://github.com/humanlayer/skills --skill show-me"
   ]
 }
