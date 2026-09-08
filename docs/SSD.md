@@ -18,6 +18,24 @@ Lists in `src/lists/` (Google Tasks), Tasks in `src/tasks/`, Photos in
 `src/photos/`, Settings, and the fixed left rail. Rewards, Meals, Recipes, and
 Sleep remain stubs.
 
+## Guiding Principles
+
+Two principles every surface answers to. Where a decision isn't already
+recorded, these decide the tie; overriding one is an ADR, not drift.
+
+**One shared wall panel, all ages.** The primary device is a 1080p touchscreen
+kiosk used by the whole Household, including children. Consequences that hold
+everywhere: type and targets sized for kitchen distance (the 13px floor),
+touch-first with no hover- or fine-pointer-only UI, no logins or gates a child
+cannot pass (Members are not auth principals), and an appliance UI on the wall
+rather than a personal one. Reference hardware is in `docs/kiosk.md`.
+
+**Easy, pleasant, delightful.** Every interaction is easy, pleasant, and
+delightful. Easy: short paths and large targets. Pleasant: the design skill's
+calm visual language and responsive feel. Delightful means polish that rewards
+use — never decorative animation, emoji chrome, or looping motion, which the
+design skill forbids. Where delight and restraint conflict, restraint wins.
+
 ## 2. Architectural Decisions
 
 **Decision: One Household server, multiple paired Displays**
