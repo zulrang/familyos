@@ -11,6 +11,7 @@ import {
   MAX_ACTIVE_MEMBERS,
   memberById,
   memberSurface,
+  memberTaskPalette,
   migrateRoster,
   onFillInk,
   parseMemberColor,
@@ -282,5 +283,43 @@ describe("Household Members", () => {
   test("check ink on fill uses contrast ink for custom colors", () => {
     assert.equal(checkInkOnFill(memberSurface("#4a90d9")), "#1f2a33");
     assert.equal(checkInkOnFill(memberSurface("#1a2744")), "#ffffff");
+  });
+
+  test("task palettes preserve the chosen color and readable contrast across the RGB range", () => {
+    const luminance = (hex: string) => {
+      const channels = [1, 3, 5].map((index) => {
+        const channel = Number.parseInt(hex.slice(index, index + 2), 16) / 255;
+        return channel <= 0.04045
+          ? channel / 12.92
+          : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const ratio = (a: string, b: string) => {
+      const values = [luminance(a), luminance(b)].sort((x, y) => x - y);
+      return (values[1] + 0.05) / (values[0] + 0.05);
+    };
+    for (let r = 0; r <= 255; r += 51) {
+      for (let g = 0; g <= 255; g += 51) {
+        for (let b = 0; b <= 255; b += 51) {
+          const color = `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+          const palette = memberTaskPalette(color);
+          assert.equal(palette.accent, color);
+          assert.ok(ratio(palette.ink, palette.panel) >= 4.5, `${color} panel`);
+          assert.ok(
+            ratio(palette.ink, palette.header) >= 4.5,
+            `${color} header`,
+          );
+          assert.ok(
+            ratio(palette.control, palette.onControl) >= 4.5,
+            `${color} control`,
+          );
+        }
+      }
+    }
+    assert.notDeepEqual(
+      memberTaskPalette("#e64324"),
+      memberTaskPalette("#316bac"),
+    );
   });
 });

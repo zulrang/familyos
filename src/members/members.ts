@@ -205,6 +205,16 @@ export type MemberSurface = {
   muted: MemberColor;
 };
 
+/** An expanded palette for task cards; the chosen color remains the accent. */
+export type MemberTaskPalette = {
+  accent: MemberColor;
+  panel: MemberColor;
+  header: MemberColor;
+  ink: MemberColor;
+  control: MemberColor;
+  onControl: MemberColor;
+};
+
 type SurfaceBase = Omit<MemberSurface, "muted">;
 
 const LEGACY_SURFACES: Record<LegacyTone, SurfaceBase> = {
@@ -270,6 +280,33 @@ function contrast(a: MemberColor, b: MemberColor): number {
   const hi = Math.max(la, lb);
   const lo = Math.min(la, lb);
   return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Derive a light task surface and same-family dark ink for any saved color.
+ * Ink contrasts at least 4.5:1 with both surfaces; controls do so against
+ * white. Keep these separate from legacy surfaces used by Calendar and Lists.
+ */
+export function memberTaskPalette(color: MemberColor): MemberTaskPalette {
+  const panel = mixHex(color, "#ffffff", 0.94);
+  const header = mixHex(color, "#ffffff", 0.76);
+  let ink = color;
+  let control = color;
+  for (let step = 0; step <= 20; step += 1) {
+    const candidate = mixHex(color, "#1f2a33", step / 20);
+    if (contrast(ink, header) < 4.5 || contrast(ink, panel) < 4.5) {
+      ink = candidate;
+    }
+    if (contrast(control, "#ffffff") < 4.5) control = candidate;
+  }
+  return {
+    accent: color,
+    panel,
+    header,
+    ink,
+    control,
+    onControl: "#ffffff",
+  };
 }
 
 function relativeLuminance(color: MemberColor): number {
