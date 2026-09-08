@@ -27,7 +27,8 @@ unlike Calendar and Lists, Task data is FamilyOS-owned (ADR 0006).
 - Definition editing: in-place for title, type, time, and stars;
   retire-and-replace for recurrence and assignment, including the
   Household Member retirement hook
-- The Tasks screen: per-member columns plus a Household column for open Tasks
+- The Tasks screen: a Family Board with member cards, personal focus views,
+  and a Household card for open Tasks
 
 ### Explicitly out of scope
 
@@ -382,25 +383,41 @@ These are facts about the design, not edge cases to fix.
 
 ## 6. Tasks Screen
 
-Reimplement from the design skill under `src/tasks/` (never import the kit).
-Components: `MemberColumn` (without `points` and without `TimeOfDayTabs`),
-`TaskRow`, the standard FAB.
+**Layout revision, 2026-09-08:** Family Board and personal focus replace the
+single row of narrow columns. This updates the presentation in D16; assignment,
+progress, ordering, and event semantics remain unchanged. Reimplement under
+`src/tasks/` using FamilyOS typography and controls (never import the kit).
+Components: `TasksBoard`, `TaskRow`, the standard FAB.
 
-- **Columns.** One equal-width column per Active Member: avatar, name,
-  done/total progress for today, then one flat list of that member's
-  Occurrences for today.
-- **Household column.** Appended to the grid only when open, unclaimed
-  Occurrences exist today (D16). Claiming from it moves the row into the
-  claimant's column.
+- **Family Board.** One card per Active Member: avatar, name, done/total
+  progress, and up to three remaining Occurrences. Three columns at kiosk
+  width, reflowing to two or one on smaller displays. The board scrolls below
+  its header; the navigation rail remains fixed.
+- **Personal focus.** Tapping a member's name header (including its progress
+  area) or the more-tasks link opens that member's full list. Task content
+  and completion controls never navigate. A member picker switches between
+  people, and Family Board returns to the prior board scroll position.
+- **Member palettes.** Preserve each saved Member Color as the accent and
+  avatar fill. Derive light card/header surfaces, contrasting text, and
+  stronger control colors from it. Text on these surfaces and white text on
+  controls meet a 4.5:1 contrast ratio. Calendar and Lists keep their existing
+  surface palette.
+- **Household card.** Appended when unclaimed open or skipped Occurrences
+  exist (D16), with its own focus view. Claim selects an Active Member and
+  moves the row into that member's tasks. An emptied Household focus view
+  remains navigable until leaving it; the empty card is omitted on the board.
 - **Ordering.** Remaining rows first: timed ascending by `time`, then untimed
   in creation order. Completed rows follow, in that same timed-then-untimed
   order among themselves.
-- **Complete.** Tap the row's circle. Attribution per D15: assignee for
-  `fixed`/`rotation` and claimed `open`; a member picker for unclaimed `open`.
-  Complete state deepens the tint, fills the circle, greys the row (55%
-  opacity), and moves it to the bottom of the column.
-- **Skip.** A row action offering preset reasons — Away, Sick, Not needed —
-  plus optional free text. Nothing is required; a skip may carry no reason.
+- **Complete.** Tap the row's circle; attribution uses its assignee (D15).
+  Unclaimed Household rows offer Claim first. Completed and skipped rows are
+  tucked into an expandable section after remaining work, retaining readable
+  contrast. Completed circles fill with a check and titles get a strike-through;
+  no undo event exists, so their circles are disabled.
+- **Skip.** Available alongside each remaining task in personal focus. Offers
+  preset reasons — Away, Sick, Not needed — plus optional free text. Nothing
+  is required; a skip may carry no reason. Skipped tasks remain in the progress
+  denominator but no longer count as remaining work.
 - **Create/edit.** FAB opens the Task editor: title, type (Chore/Routine),
   recurrence, assignment, optional time, and star value (default 0). Saving
   an existing Task runs the Section 4.3 flow. Type has no visual effect in v1
@@ -428,7 +445,8 @@ Write tests for each scenario. All references are to sections above.
    window. (D7)
 6. A skip with no reason is valid. (§6)
 7. Timed Occurrences sort before untimed ones in a member's column.
-   Completed Occurrences sort after remaining ones and render greyed. (§6)
+   Completed Occurrences sort after remaining ones in the expandable finished
+   section and remain readable. (§6)
 
 ### Editing and retirement
 

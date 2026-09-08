@@ -636,13 +636,12 @@ describe("TasksScreen", () => {
     expect(household).not.toBeNull();
     if (!household) throw new Error("Missing Household column");
     expect(within(household).getAllByRole("button")).toEqual([
-      within(household).getByRole("button", { name: "Edit Feed cat" }),
+      within(household).getByRole("button", {
+        name: "View tasks for Household",
+      }),
       claim,
-      within(household).getByRole("button", { name: "Skip Feed cat" }),
     ]);
-    expect(
-      within(household).getByRole("checkbox", { name: "Feed cat" }),
-    ).toBeVisible();
+    expect(within(household).queryByRole("checkbox")).not.toBeInTheDocument();
     await user.click(claim);
     await user.click(
       screen.getByRole("button", { name: "Cancel claiming Feed cat" }),
@@ -658,6 +657,9 @@ describe("TasksScreen", () => {
     expect(
       await screen.findByRole("checkbox", { name: "Feed cat" }),
     ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Ellie" }),
+    );
     expect(screen.getByRole("button", { name: "Skip Feed cat" })).toBeVisible();
   });
 
@@ -701,7 +703,7 @@ describe("TasksScreen", () => {
     expect(String(completionRequest?.[1]?.body)).toContain('"by":"dad"');
   });
 
-  test("completing a task greys it out and moves it below remaining work", async () => {
+  test("completing a task tucks it below remaining work in the finished section", async () => {
     const user = userEvent.setup();
     const store = emptyView();
     store.occurrences = [
@@ -755,11 +757,10 @@ describe("TasksScreen", () => {
       "Walk dog",
       "Brush teeth",
     ]);
-    expect(after[0]?.closest("div")).toHaveStyle({ opacity: "1" });
-    expect(after[1]?.closest("div")).toHaveStyle({
-      opacity: "0.25",
-      background: "#b6d3d3",
-    });
+    expect(after[1]?.closest("details")).not.toHaveAttribute("open");
+    await user.click(screen.getByText("1 completed or skipped"));
+    expect(after[1]).toBeVisible();
+    expect(after[1]).toBeDisabled();
   });
 
   test("completing a later task lands it after already-done morning rows", async () => {
@@ -1065,6 +1066,10 @@ describe("TasksScreen", () => {
     render(<TasksScreen />);
 
     await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+
+    await user.click(
       await screen.findByRole("button", { name: "Skip Walk dog" }),
     );
     const dialog = screen.getByRole("dialog", { name: "Skip task" });
@@ -1106,6 +1111,10 @@ describe("TasksScreen", () => {
     ];
     const fetchMock = installFetch(store);
     render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Ellie" }),
+    );
 
     await user.click(
       await screen.findByRole("button", { name: "Skip Dishes" }),
@@ -1151,6 +1160,10 @@ describe("TasksScreen", () => {
     ];
     const fetchMock = installFetch(store);
     render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
 
     await user.click(await screen.findByRole("button", { name: "Skip Trash" }));
     const dialog = screen.getByRole("dialog", { name: "Skip task" });
@@ -1208,8 +1221,9 @@ describe("TasksScreen", () => {
     render(<TasksScreen />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Edit Dishes" }),
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
     );
+    await user.click(screen.getByRole("button", { name: "Edit Dishes" }));
     const title = screen.getByPlaceholderText("Title");
     await user.clear(title);
     await user.type(title, "Trash");
@@ -1238,21 +1252,20 @@ describe("TasksScreen", () => {
     render(<TasksScreen />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Edit Dishes" }),
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
     );
+    await user.click(screen.getByRole("button", { name: "Edit Dishes" }));
     const title = screen.getByPlaceholderText("Title");
     await user.clear(title);
     await user.type(title, "Kitchen");
     await user.click(screen.getByRole("button", { name: "Ellie" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Ellie" }),
+    );
     expect(await screen.findByText("Kitchen")).toBeInTheDocument();
-    const ellie = screen
-      .getByRole("heading", { name: "Ellie" })
-      .closest("section");
-    expect(ellie).toHaveTextContent("Kitchen");
-    const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
-    expect(dad).not.toHaveTextContent("Kitchen");
+    expect(screen.queryByText("Dishes")).not.toBeInTheDocument();
     const saveCall = fetchMock.mock.calls.find(
       ([input, init]) =>
         urlOf(input).endsWith("/api/tasks") &&
@@ -1263,6 +1276,147 @@ describe("TasksScreen", () => {
       title: "Kitchen",
       assignment: { kind: "fixed", member: "ellie" },
     });
+  });
+});
+
+describe("Family Board navigation", () => {
+  function boardView() {
+    const store = emptyView();
+    store.occurrences = ["Dishes", "Laundry", "Water plants", "Pack lunch"].map(
+      (title, index) => ({
+        state: "pending",
+        task: `board-${index}` as Occurrence["task"],
+        lineage: `board-${index}` as Occurrence["lineage"],
+        window: store.today,
+        title,
+        type: "chore",
+        time: null,
+        assignee: "dad",
+      }),
+    );
+    store.progress = [
+      { member: "dad", done: 0, total: 4 },
+      { member: "ellie", done: 0, total: 0 },
+    ];
+    return store;
+  }
+
+  test("only the member header opens personal focus; the board previews three tasks", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetch(boardView());
+    render(<TasksScreen />);
+    await screen.findByRole("button", { name: "View tasks for Dad" });
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(screen.queryByText("Pack lunch")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Dishes"));
+    expect(screen.getByRole("heading", { name: "Family Board" })).toBeVisible();
+    await user.click(screen.getByRole("checkbox", { name: "Dishes" }));
+    expect(await screen.findByText("Pack lunch")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Family Board" })).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(screen.getByRole("heading", { name: "Dad’s tasks" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Family Board" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Skip Pack lunch" }),
+    ).toBeVisible();
+    const writes = fetchMock.mock.calls.filter(
+      ([, init]) => init?.method === "POST",
+    );
+    expect(writes).toHaveLength(1);
+  });
+
+  test("the more-tasks link opens the full list and the back button restores the board", async () => {
+    const user = userEvent.setup();
+    installFetch(boardView());
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "1 more task" }),
+    );
+    expect(screen.getByRole("checkbox", { name: "Pack lunch" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Family Board" }));
+    expect(screen.getByRole("heading", { name: "Family Board" })).toBeVisible();
+    expect(
+      screen.queryByRole("checkbox", { name: "Pack lunch" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "View tasks for Dad" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  test("member switching keeps the focus view and shows an empty member accurately", async () => {
+    const user = userEvent.setup();
+    installFetch(boardView());
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Ellie" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Ellie’s tasks" }),
+    ).toBeVisible();
+    expect(screen.getByText("No tasks today")).toBeVisible();
+    expect(screen.queryByText("All done for today")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(screen.getAllByRole("checkbox")).toHaveLength(4);
+  });
+
+  test("completion in focus updates progress and survives returning to the board", async () => {
+    const user = userEvent.setup();
+    installFetch(boardView());
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Pack lunch" }));
+    expect(await screen.findByText("3 remaining")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Dad’s tasks" })).toBeVisible();
+    await user.click(screen.getByText("1 completed or skipped"));
+    expect(screen.getByRole("checkbox", { name: "Pack lunch" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Family Board" }));
+    expect(screen.getByRole("region", { name: "Dad tasks" })).toHaveTextContent(
+      "1/4 done",
+    );
+  });
+
+  test("a Household task can be claimed from focus and then completed by its claimant", async () => {
+    const user = userEvent.setup();
+    const store = boardView();
+    store.occurrences.push({
+      ...store.occurrences[0],
+      assignee: null,
+      task: "shared" as Occurrence["task"],
+      title: "Vacuum family room",
+    });
+    installFetch(store);
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Household" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Claim Vacuum family room" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claim for Ellie" }));
+    expect(await screen.findByText("No tasks today")).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Ellie" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Vacuum family room" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "All done!" }),
+    ).toHaveTextContent("Ellie");
   });
 });
 

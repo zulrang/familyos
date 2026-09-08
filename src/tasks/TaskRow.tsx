@@ -1,10 +1,5 @@
-import type { CSSProperties } from "react";
-import {
-  checkInkOnFill,
-  type MemberSurface,
-  onFillInk,
-} from "@/members/members";
 import { Icon } from "@/shared/ui/Icon";
+import styles from "./TasksBoard.module.css";
 import type { LocalTime } from "./types";
 
 export function formatTaskTime(time: LocalTime): string {
@@ -17,17 +12,6 @@ export function formatTaskTime(time: LocalTime): string {
     : `${wallHour}:${minutes} ${ampm}`;
 }
 
-const rowActionStyle = {
-  minHeight: "var(--hit-min)",
-  padding: "0 14px",
-  border: "1px solid var(--surface-grid-line)",
-  borderRadius: "var(--radius-pill)",
-  background: "var(--surface-card)",
-  color: "var(--text-title)",
-  font: "var(--type-card-meta)",
-  cursor: "pointer",
-} as const;
-
 export type TaskRowStatus =
   | { kind: "open" }
   | { kind: "done" }
@@ -37,116 +21,62 @@ export function TaskRow({
   label,
   time,
   status,
-  surface,
   onComplete,
   onClaim,
   onCancelClaim,
   onSkip,
   onEdit,
-  style,
 }: {
   label: string;
   time?: LocalTime | null;
   status: TaskRowStatus;
-  surface: MemberSurface;
   onComplete?: () => void;
   onClaim?: () => void;
   onCancelClaim?: () => void;
   onSkip?: () => void;
   onEdit?: () => void;
-  style?: CSSProperties;
 }) {
   const done = status.kind === "done";
-  const ink = done ? onFillInk(surface.fill) : surface.ink;
-  const checkInk = done ? checkInkOnFill(surface) : "transparent";
-  const caption =
-    status.kind === "skipped" ? (status.reason ?? "Skipped") : null;
-  const titleStyle = {
-    font: "var(--type-card-meta)",
-    color: done ? ink : "var(--text-title)",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  } as const;
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "var(--pad-list-row)",
-        borderRadius: "var(--radius-list-row)",
-        background: done ? surface.muted : surface.soft,
-        boxShadow: onCancelClaim
-          ? "inset 0 0 0 3px var(--brand-blue)"
-          : undefined,
-        color: ink,
-        opacity: status.kind === "open" ? 1 : 0.25,
-        transition: "background var(--dur-fast) var(--ease-standard)",
-        ...style,
-      }}
-    >
-      <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+    <div className={styles.taskRow} data-state={status.kind}>
+      {onComplete ? (
+        <label className={styles.check}>
+          <input
+            type="checkbox"
+            checked={done}
+            disabled={done}
+            aria-label={label}
+            onChange={onComplete}
+          />
+          {done ? <Icon name="check" size={24} /> : null}
+        </label>
+      ) : null}
+      <div className={styles.taskCopy}>
         {onEdit ? (
           <button
             type="button"
+            className={styles.taskTitleButton}
             aria-label={`Edit ${label}`}
             onClick={onEdit}
-            style={{
-              border: "none",
-              background: "none",
-              padding: 0,
-              margin: 0,
-              ...titleStyle,
-              textAlign: "left",
-              cursor: "pointer",
-              maxWidth: "100%",
-            }}
           >
             {label}
           </button>
         ) : (
-          <span style={titleStyle}>{label}</span>
+          <span className={styles.taskTitle}>{label}</span>
         )}
         {time ? (
-          <span
-            style={{
-              font: "var(--fw-semibold) var(--fs-caption)/1.2 var(--font-sans)",
-              color: done ? ink : "var(--text-muted)",
-              marginTop: 2,
-            }}
-          >
-            {formatTaskTime(time)}
-          </span>
+          <span className={styles.taskMeta}>{formatTaskTime(time)}</span>
         ) : null}
-        {caption ? (
-          <span
-            style={{
-              font: "var(--fw-semibold) var(--fs-caption)/1.2 var(--font-sans)",
-              color: done ? ink : "var(--text-muted)",
-              marginTop: 2,
-            }}
-          >
-            {caption}
-          </span>
+        {status.kind === "skipped" ? (
+          <span className={styles.taskMeta}>{status.reason ?? "Skipped"}</span>
         ) : null}
-      </span>
+      </div>
       {onCancelClaim ? (
         <button
           type="button"
           aria-label={`Cancel claiming ${label}`}
           onClick={onCancelClaim}
-          style={{
-            ...rowActionStyle,
-            marginLeft: "auto",
-            color: "#b42318",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            minWidth: 48,
-            minHeight: 48,
-            flexShrink: 0,
-          }}
+          className={styles.rowAction}
         >
           <Icon name="x" size={24} />
         </button>
@@ -155,7 +85,7 @@ export function TaskRow({
           type="button"
           aria-label={`Claim ${label}`}
           onClick={onClaim}
-          style={{ marginLeft: "auto", ...rowActionStyle }}
+          className={styles.rowAction}
         >
           Claim
         </button>
@@ -165,56 +95,10 @@ export function TaskRow({
           type="button"
           aria-label={`Skip ${label}`}
           onClick={onSkip}
-          style={{ marginLeft: onClaim ? 0 : "auto", ...rowActionStyle }}
+          className={styles.skip}
         >
           Skip
         </button>
-      ) : null}
-      {onComplete ? (
-        <label
-          style={{
-            marginLeft: onClaim || onSkip ? 0 : "auto",
-            width: 26,
-            height: 26,
-            flex: "0 0 auto",
-            position: "relative",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: checkInk,
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={done}
-            aria-label={label}
-            onChange={onComplete}
-            style={{
-              appearance: "none",
-              WebkitAppearance: "none",
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              margin: 0,
-              cursor: "pointer",
-              borderRadius: "var(--radius-pill)",
-              border: done
-                ? "1px solid transparent"
-                : "1px solid var(--check-idle-border)",
-              background: done ? surface.fill : "var(--check-idle)",
-              boxShadow: done ? `inset 0 0 0 1px ${checkInk}` : "none",
-              transition: "background var(--dur-fast) var(--ease-standard)",
-            }}
-          />
-          {done ? (
-            <Icon
-              name="check"
-              size={16}
-              style={{ position: "relative", pointerEvents: "none" }}
-            />
-          ) : null}
-        </label>
       ) : null}
     </div>
   );

@@ -15,10 +15,9 @@ import { formatClock } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
-import { MemberColumn } from "./MemberColumn";
 import { TaskCelebration } from "./TaskCelebration";
 import styles from "./TaskEditor.module.css";
-import { TaskRow, type TaskRowStatus } from "./TaskRow";
+import { TasksBoard } from "./TasksBoard";
 import {
   nowInstant,
   type Occurrence,
@@ -29,7 +28,6 @@ import {
   type TaskType,
   type Weekday,
 } from "./types";
-import { occurrencesForColumn } from "./view";
 
 function headerDate(d: Date, timeZone: string): string {
   return d.toLocaleDateString("en-US", {
@@ -165,27 +163,6 @@ type MemberAction =
   | { kind: "complete"; occurrence: Occurrence };
 
 const SKIP_PRESETS = ["Away", "Sick", "Not needed"] as const;
-
-function rowStatus(row: Occurrence): TaskRowStatus {
-  switch (row.state) {
-    case "done":
-      return { kind: "done" };
-    case "skipped":
-      return { kind: "skipped", reason: row.reason };
-    case "pending":
-    case "claimed":
-    case "expired":
-      return { kind: "open" };
-    default: {
-      const _exhaustive: never = row;
-      return _exhaustive;
-    }
-  }
-}
-
-function canSkip(row: Occurrence): boolean {
-  return row.state === "pending" || row.state === "claimed";
-}
 
 const HOUSEHOLD_SURFACE: MemberSurface = {
   fill: "#dcebf6",
@@ -520,16 +497,6 @@ export function TasksScreen() {
     }
   }
 
-  const surfaces = new Map<string, MemberSurface>(
-    members.map((member) => [member.id, memberSurface(member.color)]),
-  );
-  const householdRows = tasks.occurrences.filter(
-    (row) =>
-      row.assignee === null &&
-      (row.state === "pending" || row.state === "skipped"),
-  );
-  const columnCount = members.length + (householdRows.length > 0 ? 1 : 0);
-
   return (
     <div
       style={{
@@ -578,120 +545,30 @@ export function TasksScreen() {
         </div>
       ) : null}
       {members.length > 0 ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-            gap: 14,
-            padding: "4px 24px 24px",
-            flex: 1,
-            minHeight: 0,
-            overflow: "hidden",
+        <TasksBoard
+          members={members}
+          tasks={tasks}
+          onComplete={(row) => complete(row).catch(() => {})}
+          onClaim={(row) => claim(row).catch(() => {})}
+          onSkip={(row) => {
+            setSkipNote("");
+            setSkipping(row);
           }}
-        >
-          {members.map((member) => {
-            const surface =
-              surfaces.get(member.id) ?? memberSurface(member.color);
-            const progress = tasks.progress.find(
-              (row) => row.member === member.id,
-            ) ?? {
-              member: member.id,
-              done: 0,
-              total: 0,
-            };
-            const rows = occurrencesForColumn(
-              tasks.occurrences.filter((row) => row.assignee === member.id),
-            );
-            return (
-              <MemberColumn
-                key={member.id}
-                name={member.name}
-                surface={surface}
-                done={progress.done}
-                total={progress.total}
-                action={
-                  memberAction?.kind === "claim" ? (
-                    <Button
-                      icon="user-plus"
-                      variant="primary"
-                      style={{
-                        minHeight: 48,
-                        justifyContent: "center",
-                        height: "auto",
-                        padding: "10px 12px",
-                      }}
-                      onClick={() => {
-                        const occurrence = memberAction.occurrence;
-                        setMemberAction(null);
-                        claim(occurrence, member.id).catch(() => {});
-                      }}
-                    >
-                      Claim for {member.name}
-                    </Button>
-                  ) : undefined
+          onEdit={openEditor}
+          claimSelection={
+            memberAction?.kind === "claim"
+              ? {
+                  occurrence: memberAction.occurrence,
+                  onCancel: () => setMemberAction(null),
+                  onPick: (member) => {
+                    const occurrence = memberAction.occurrence;
+                    setMemberAction(null);
+                    claim(occurrence, member).catch(() => {});
+                  },
                 }
-              >
-                {rows.map((row) => (
-                  <TaskRow
-                    key={`${row.task}:${row.window}`}
-                    label={row.title}
-                    time={row.time}
-                    status={rowStatus(row)}
-                    surface={surface}
-                    onComplete={() => complete(row)}
-                    onEdit={() => openEditor(row)}
-                    onSkip={
-                      canSkip(row)
-                        ? () => {
-                            setSkipNote("");
-                            setSkipping(row);
-                          }
-                        : undefined
-                    }
-                  />
-                ))}
-              </MemberColumn>
-            );
-          })}
-          {householdRows.length > 0 ? (
-            <MemberColumn
-              name="Household"
-              surface={HOUSEHOLD_SURFACE}
-              done={0}
-              total={householdRows.length}
-            >
-              {householdRows.map((row) => (
-                <TaskRow
-                  key={`${row.task}:${row.window}`}
-                  label={row.title}
-                  time={row.time}
-                  status={rowStatus(row)}
-                  surface={HOUSEHOLD_SURFACE}
-                  onCancelClaim={
-                    memberAction?.kind === "claim" &&
-                    memberAction.occurrence.task === row.task &&
-                    memberAction.occurrence.window === row.window
-                      ? () => setMemberAction(null)
-                      : undefined
-                  }
-                  onClaim={
-                    row.state === "pending" ? () => claim(row) : undefined
-                  }
-                  onEdit={() => openEditor(row)}
-                  onSkip={
-                    canSkip(row)
-                      ? () => {
-                          setSkipNote("");
-                          setSkipping(row);
-                        }
-                      : undefined
-                  }
-                  onComplete={() => complete(row)}
-                />
-              ))}
-            </MemberColumn>
-          ) : null}
-        </div>
+              : null
+          }
+        />
       ) : null}
       {members.length > 0 ? (
         <Fab
