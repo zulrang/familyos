@@ -25,6 +25,7 @@ export function TaskRow({
   onClaim,
   onCancelClaim,
   onSkip,
+  onEdit,
 }: {
   label: string;
   time?: LocalTime | null;
@@ -33,6 +34,7 @@ export function TaskRow({
   onClaim?: () => void;
   onCancelClaim?: () => void;
   onSkip?: () => void;
+  onEdit?: () => void;
 }) {
   const done = status.kind === "done";
   return (
@@ -50,7 +52,18 @@ export function TaskRow({
         </label>
       ) : null}
       <div className={styles.taskCopy}>
-        <span className={styles.taskTitle}>{label}</span>
+        {onEdit ? (
+          <button
+            type="button"
+            className={styles.taskTitleButton}
+            aria-label={`Edit ${label}`}
+            onClick={onEdit}
+          >
+            {label}
+          </button>
+        ) : (
+          <span className={styles.taskTitle}>{label}</span>
+        )}
         {time ? (
           <span className={styles.taskMeta}>{formatTaskTime(time)}</span>
         ) : null}

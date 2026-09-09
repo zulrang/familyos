@@ -21,6 +21,9 @@ import { TasksBoard } from "./TasksBoard";
 import {
   nowInstant,
   type Occurrence,
+  type Recurrence,
+  type TaskDefinition,
+  type TaskId,
   type TasksViewRead,
   type TaskType,
   type Weekday,
@@ -50,6 +53,7 @@ function emptyView(): TasksViewRead {
     occurrences: [],
     progress: [],
     starBalances: [],
+    definitions: [],
     today: "1970-01-01" as TasksViewRead["today"],
     generatedAt: nowInstant(),
   };
@@ -80,7 +84,10 @@ type DraftAssignment =
   | { kind: "rotation"; order: string[] }
   | { kind: "open" };
 
-type Draft = DraftFields & { assignment: DraftAssignment };
+type Draft = DraftFields & {
+  assignment: DraftAssignment;
+  task: TaskId | null;
+};
 
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
@@ -120,6 +127,35 @@ function parseDraftRecurrence(
       return _exhaustive;
     }
   }
+}
+
+function toDraftRecurrence(recurrence: Recurrence): DraftRecurrence {
+  switch (recurrence.kind) {
+    case "daily":
+      return recurrence;
+    case "once":
+      return { kind: "once", date: recurrence.date };
+    case "weekly":
+      return { kind: "weekly", days: [...recurrence.days] };
+    case "monthly":
+      return { kind: "monthly", day: String(recurrence.day) };
+    default: {
+      const _exhaustive: never = recurrence;
+      return _exhaustive;
+    }
+  }
+}
+
+function sheetFromDefinition(definition: TaskDefinition): Draft {
+  return {
+    task: definition.id,
+    title: definition.title,
+    type: definition.type,
+    recurrence: toDraftRecurrence(definition.recurrence),
+    assignment: definition.assignment,
+    time: definition.time ?? "",
+    stars: String(definition.stars),
+  };
 }
 
 type MemberAction =
@@ -292,6 +328,11 @@ export function TasksScreen() {
 
   const members = settings ? activeMembers(settings.members) : [];
 
+  function openEditor(row: Occurrence) {
+    const definition = tasks.definitions.find((item) => item.id === row.task);
+    if (definition) setSheet(sheetFromDefinition(definition));
+  }
+
   async function complete(occ: Occurrence, member = occ.assignee) {
     if (!member) {
       setMemberAction({ kind: "complete", occurrence: occ });
@@ -411,7 +452,7 @@ export function TasksScreen() {
     }
   }
 
-  async function createTask() {
+  async function saveTask() {
     if (!sheet) return;
     const title = sheet.title.trim();
     const recurrence = parseDraftRecurrence(sheet.recurrence);
@@ -430,9 +471,10 @@ export function TasksScreen() {
     setBusy(true);
     try {
       const res = await fetch("/api/tasks", {
-        method: "POST",
+        method: sheet.task ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...(sheet.task ? { id: sheet.task } : {}),
           title,
           type: sheet.type,
           recurrence,
@@ -443,7 +485,9 @@ export function TasksScreen() {
       });
       if (await redirectIfPairingRequired(res)) return;
       if (!res.ok) {
-        setError("Could not create task.");
+        setError(
+          sheet.task ? "Could not save task." : "Could not create task.",
+        );
         return;
       }
       setSheet(null);
@@ -510,6 +554,7 @@ export function TasksScreen() {
             setSkipNote("");
             setSkipping(row);
           }}
+          onEdit={openEditor}
           claimSelection={
             memberAction?.kind === "claim"
               ? {
@@ -530,6 +575,7 @@ export function TasksScreen() {
           label="Add task"
           onClick={() =>
             setSheet({
+              task: null,
               title: "",
               type: "chore",
               recurrence: { kind: "daily" },
@@ -550,7 +596,7 @@ export function TasksScreen() {
           busy={busy}
           onChange={setSheet}
           onClose={() => setSheet(null)}
-          onSave={createTask}
+          onSave={saveTask}
         />
       ) : null}
       {memberAction?.kind === "complete" ? (
@@ -692,7 +738,7 @@ function CreateSheet({
             id="task-editor-title"
             style={{ font: "var(--type-section)", flex: 1 }}
           >
-            New task
+            {draft.task ? "Edit task" : "New task"}
           </h2>
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
@@ -969,7 +1015,7 @@ function CreateSheet({
             disabled={busy || !canSave}
             onClick={onSave}
           >
-            Add
+            {draft.task ? "Save" : "Add"}
           </Button>
         </div>
       </div>
