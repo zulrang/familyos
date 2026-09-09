@@ -238,7 +238,7 @@ describe("Tasks HTTP", () => {
     );
   });
 
-  test("GET exposes derived star balances without a writer route", async () => {
+  test("GET exposes stored star balances after a completion and adjustment", async () => {
     const created = await handleCreateTask(
       req("http://familyos.test/api/tasks", {
         method: "POST",

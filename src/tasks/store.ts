@@ -2,6 +2,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataDir } from "@/shared/data-path";
+import type { CompletionCorrection } from "./admin-types";
+import { migrateTaskAdministration } from "./store-migration";
 import {
   type EventReceipt,
   isRecord,
@@ -113,7 +115,6 @@ BEGIN
     OR NEW.retired_at IS NULL;
 END;
 
-PRAGMA user_version = 1;
 `;
 
 type Cached = { dir: string; db: DatabaseSync };
@@ -126,7 +127,13 @@ export function tasksDatabase(): DatabaseSync {
   cached?.db.close();
   mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, "tasks.sqlite"));
-  db.exec(SCHEMA);
+  try {
+    db.exec(SCHEMA);
+    migrateTaskAdministration(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   cached = { dir, db };
   return db;
 }
@@ -341,7 +348,80 @@ export function loadStore(): {
 } {
   return {
     definitions: loadDefinitions(),
-    events: loadEvents(),
+    events: loadEffectiveEvents(),
     adjustments: loadStarAdjustments(),
   };
+}
+
+export function taskTransaction<T>(write: () => T): T {
+  const db = tasksDatabase();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = write();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function loadStoredStarBalances(): import("./types").StarBalance[] {
+  return tasksDatabase()
+    .prepare("SELECT member, balance FROM star_balances ORDER BY member")
+    .all()
+    .map((row) => ({
+      member: String(row.member),
+      balance: Number(row.balance),
+    }));
+}
+
+export function loadCompletionCorrections(): CompletionCorrection[] {
+  return tasksDatabase()
+    .prepare("SELECT * FROM completion_corrections ORDER BY sequence")
+    .all()
+    .map((row) => {
+      const task = parseTaskId(row.task);
+      const window = parseLocalDate(row.window);
+      const at = parseInstant(row.at);
+      if (!task || !window || !at)
+        throw new Error("Invalid completion correction");
+      return {
+        id: String(row.id),
+        task,
+        window,
+        at,
+        by: row.by === null ? null : String(row.by),
+        reason: String(row.reason),
+        previous: row.previous === null ? null : String(row.previous),
+      };
+    });
+}
+
+/** Apply corrections to the projection without changing any original event. */
+export function loadEffectiveEvents(): TaskEvent[] {
+  const corrections = new Map(
+    loadCompletionCorrections().map((row) => [
+      `${row.task}:${row.window}`,
+      row,
+    ]),
+  );
+  return loadEvents().flatMap((event): TaskEvent[] => {
+    const correction = corrections.get(`${event.task}:${event.window}`);
+    if (!correction) return [event];
+    if (event.kind === "verified") return [];
+    if (event.kind !== "completed") return [event];
+    // Keep an undone occurrence terminal on the wall: its original unique
+    // completion receipt cannot be inserted again. Parents can restore it here.
+    return correction.by === null
+      ? [
+          {
+            kind: "skipped",
+            task: event.task,
+            window: event.window,
+            reason: `Completion corrected: ${correction.reason}`,
+          },
+        ]
+      : [{ ...event, by: correction.by }];
+  });
 }

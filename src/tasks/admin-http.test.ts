@@ -1,0 +1,396 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { POST as saveMember } from "@/app/admin/api/members/route";
+import { handleAdminMembers } from "@/members/admin-http";
+import { readHousehold, writeHousehold } from "@/settings/settings";
+import { handleAdminSession } from "@/shared/admin-auth";
+import { handleAdminTasks } from "./admin-http";
+import { correctAdminCompletion } from "./admin-store";
+import type { TaskAdminRead } from "./admin-types";
+import {
+  applyEvent,
+  loadDefinitions,
+  loadEvents,
+  loadStoredStarBalances,
+  tasksDatabase,
+} from "./store";
+import {
+  type CreateTaskDraft,
+  nowInstant,
+  parseLocalDate,
+  type TaskDefinition,
+} from "./types";
+import { view } from "./view";
+
+describe("parent administration", () => {
+  let dir: string;
+  let cookie: string;
+  const today = (() => {
+    const date = parseLocalDate("2026-09-08");
+    if (!date) throw new Error("Invalid test date");
+    return date;
+  })();
+  const draft: CreateTaskDraft = {
+    title: "Dishes",
+    type: "chore",
+    recurrence: { kind: "daily" },
+    assignment: { kind: "fixed", member: "a" },
+    time: null,
+    stars: 5,
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "familyos-admin-http-"));
+    vi.stubEnv("FAMILYOS_DATA_DIR", dir);
+    vi.stubEnv("FAMILYOS_ADMIN_PIN", "123456");
+    await writeHousehold({
+      familyName: "Family",
+      members: [
+        { id: "a", name: "Alex", status: "active", color: "#a9d8d2" },
+        { id: "b", name: "Bailey", status: "active", color: "#dccfea" },
+        { id: "c", name: "Casey", status: "active", color: "#f6c9c5" },
+      ],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 1,
+    });
+    cookie = "";
+    const login = await handleAdminSession(
+      request("session", { pin: "123456" }),
+    );
+    cookie = login.headers
+      .getSetCookie()
+      .map((line) => line.split(";")[0])
+      .join("; ");
+  });
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await rm(dir, { recursive: true, force: true });
+  });
+  function request(endpoint: string, body?: unknown) {
+    return new Request(`http://familyos.test/admin/api/${endpoint}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        cookie,
+        origin: "http://familyos.test",
+        "x-familyos-admin": "1",
+        "content-type": "application/json",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  }
+  const tasks = (body?: unknown) => handleAdminTasks(request("tasks", body));
+  async function snapshot(): Promise<TaskAdminRead> {
+    return (await tasks()).json();
+  }
+  async function create(overrides: Partial<CreateTaskDraft> = {}) {
+    const result = await tasks({
+      kind: "create",
+      id: crypto.randomUUID(),
+      draft: { ...draft, ...overrides },
+    });
+    expect(result.status).toBe(200);
+    return ((await result.json()) as { definition: TaskDefinition }).definition;
+  }
+  function complete(task: TaskDefinition, member = "a") {
+    return applyEvent({
+      kind: "completed",
+      task: task.id,
+      window: today,
+      by: member,
+      at: nowInstant(),
+    });
+  }
+  function balance(member: string) {
+    return (
+      loadStoredStarBalances().find((row) => row.member === member)?.balance ??
+      0
+    );
+  }
+
+  test("paired-display credentials cannot bypass the PIN on reads or writes", async () => {
+    cookie = "familyos_display=not-an-admin-session";
+    expect((await tasks()).status).toBe(401);
+    expect(
+      (await tasks({ kind: "create", id: crypto.randomUUID(), draft })).status,
+    ).toBe(401);
+    expect((await handleAdminMembers(request("members"))).status).toBe(401);
+    expect(loadDefinitions()).toHaveLength(0);
+  });
+  test("title, type, time, and stars edit in place without revaluing earlier earnings", async () => {
+    const definition = await create();
+    complete(definition);
+    complete(definition);
+    expect(balance("a")).toBe(5);
+    const response = await tasks({
+      kind: "edit",
+      task: definition.id,
+      draft: {
+        ...draft,
+        title: "Kitchen",
+        type: "routine",
+        time: "08:00",
+        stars: 12,
+      },
+    });
+    expect(response.status).toBe(200);
+    const updated = (await response.json()).definition;
+    expect(updated).toMatchObject({
+      id: definition.id,
+      lineage: definition.lineage,
+      title: "Kitchen",
+      stars: 12,
+      retiredAt: null,
+    });
+    expect(balance("a")).toBe(5);
+    expect(loadEvents()).toHaveLength(1);
+  });
+  test("schedule changes replace atomically, retain lineage, and preserve rotation turns", async () => {
+    const rotation = { kind: "rotation", order: ["a", "b", "c"] } as const;
+    const definition = await create({
+      assignment: { kind: rotation.kind, order: [...rotation.order] },
+    });
+    complete(definition);
+    const response = await tasks({
+      kind: "edit",
+      task: definition.id,
+      draft: {
+        ...draft,
+        title: "New title",
+        recurrence: { kind: "weekly", days: ["mon"] },
+        assignment: rotation,
+      },
+    });
+    expect(response.status).toBe(200);
+    const updated = (await response.json()).definition;
+    expect(updated.id).not.toBe(definition.id);
+    expect(updated.lineage).toBe(definition.lineage);
+    expect(updated.assignment.order).toEqual(["b", "c", "a"]);
+    expect(
+      loadDefinitions().find((row) => row.id === definition.id),
+    ).toMatchObject({ title: "Dishes", stars: 5 });
+    expect(
+      loadDefinitions().find((row) => row.id === definition.id)?.retiredAt,
+    ).not.toBeNull();
+    expect(
+      (await tasks({ kind: "edit", task: definition.id, draft })).status,
+    ).toBe(409);
+    expect(loadDefinitions()).toHaveLength(2);
+  });
+  test("member retirement preserves identity, retires fixed tasks and removes rotation membership", async () => {
+    const fixed = await create({ assignment: { kind: "fixed", member: "b" } });
+    const rotating = await create({
+      assignment: { kind: "rotation", order: ["a", "b", "c"] },
+    });
+    complete(rotating);
+    expect(
+      (
+        await saveMember(
+          request("members", { kind: "retire", id: "b", expectedVersion: 1 }),
+        )
+      ).status,
+    ).toBe(200);
+    const household = await readHousehold();
+    expect(household.members.find((row) => row.id === "b")).toEqual({
+      id: "b",
+      name: "Bailey",
+      status: "retired",
+    });
+    expect(
+      loadDefinitions().find((row) => row.id === fixed.id)?.retiredAt,
+    ).not.toBeNull();
+    expect(
+      loadDefinitions().find(
+        (row) => row.lineage === rotating.lineage && row.retiredAt === null,
+      )?.assignment,
+    ).toEqual({ kind: "rotation", order: ["c", "a"] });
+    expect(
+      (
+        await tasks({
+          kind: "create",
+          id: crypto.randomUUID(),
+          draft: { ...draft, assignment: { kind: "fixed", member: "b" } },
+        })
+      ).status,
+    ).toBe(400);
+    // Recovery after a repeated read cannot create additional replacements.
+    await snapshot();
+    await snapshot();
+    expect(loadDefinitions()).toHaveLength(3);
+  });
+  test("membership validation and concurrent edits preserve the roster", async () => {
+    const collision = await saveMember(
+      request("members", {
+        kind: "create",
+        id: crypto.randomUUID(),
+        name: "Duplicate color",
+        color: "#a9d8d2",
+        expectedVersion: 1,
+      }),
+    );
+    expect(collision.status).toBe(400);
+    const edits = await Promise.all([
+      saveMember(
+        request("members", {
+          kind: "edit",
+          id: "a",
+          name: "First",
+          color: "#a9d8d2",
+          expectedVersion: 1,
+        }),
+      ),
+      saveMember(
+        request("members", {
+          kind: "edit",
+          id: "a",
+          name: "Second",
+          color: "#a9d8d2",
+          expectedVersion: 1,
+        }),
+      ),
+    ]);
+    expect(edits.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect((await readHousehold()).members).toHaveLength(3);
+    expect((await readHousehold()).configVersion).toBe(2);
+  });
+  test("undo, restore and reattribute completions preserve original events and stored credit", async () => {
+    const definition = await create();
+    complete(definition);
+    const original = loadEvents();
+    const undo = {
+      kind: "correct",
+      id: crypto.randomUUID(),
+      task: definition.id,
+      window: today,
+      by: null,
+      reason: "Tapped accidentally",
+      previous: null,
+    };
+    expect((await tasks(undo)).status).toBe(200);
+    expect((await tasks(undo)).status).toBe(200);
+    expect(balance("a")).toBe(0);
+    expect(loadEvents()).toEqual(original);
+    let data = await snapshot();
+    expect(view(data.definitions, data.events, today)[0]?.state).toBe(
+      "skipped",
+    );
+    const restored = {
+      ...undo,
+      id: crypto.randomUUID(),
+      previous: undo.id,
+      by: "b",
+      reason: "Bailey did it",
+    };
+    expect((await tasks(restored)).status).toBe(200);
+    expect(balance("b")).toBe(5);
+    expect(balance("a")).toBe(0);
+    data = await snapshot();
+    expect(view(data.definitions, data.events, today)[0]).toMatchObject({
+      state: "done",
+      by: "b",
+    });
+    expect(data.corrections).toHaveLength(2);
+    expect(loadEvents()).toEqual(original);
+    expect(
+      (await tasks({ ...restored, id: crypto.randomUUID(), previous: null }))
+        .status,
+    ).toBe(409);
+  });
+  test("correction uses stars captured at completion time after definition edits", async () => {
+    const definition = await create();
+    complete(definition);
+    await tasks({
+      kind: "edit",
+      task: definition.id,
+      draft: { ...draft, stars: 20 },
+    });
+    correctAdminCompletion({
+      id: crypto.randomUUID(),
+      task: definition.id,
+      window: today,
+      by: "b",
+      reason: "Attribution",
+      at: nowInstant(),
+      previous: null,
+    });
+    expect(balance("a")).toBe(0);
+    expect(balance("b")).toBe(5);
+  });
+  test("insufficient balance rejects a correction without partial history or credits", async () => {
+    const definition = await create();
+    complete(definition);
+    await tasks({
+      kind: "adjust-stars",
+      id: crypto.randomUUID(),
+      member: "a",
+      delta: -5,
+      reason: "Spent",
+    });
+    const correction = {
+      kind: "correct",
+      id: crypto.randomUUID(),
+      task: definition.id,
+      window: today,
+      by: "b",
+      reason: "Wrong person",
+      previous: null,
+    };
+    expect((await tasks(correction)).status).toBe(409);
+    expect((await snapshot()).corrections).toHaveLength(0);
+    expect(balance("a")).toBe(0);
+    expect(balance("b")).toBe(0);
+  });
+  test("star adjustments are nonzero, nonnegative, append-only and retry-safe", async () => {
+    const grant = {
+      kind: "adjust-stars",
+      id: crypto.randomUUID(),
+      member: "a",
+      delta: 10,
+      reason: "Correction",
+    };
+    expect((await tasks(grant)).status).toBe(200);
+    expect((await tasks(grant)).status).toBe(200);
+    expect(balance("a")).toBe(10);
+    expect((await tasks({ ...grant, delta: 20 })).status).toBe(409);
+    for (const delta of [0, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      expect(
+        (await tasks({ ...grant, id: crypto.randomUUID(), delta })).status,
+      ).toBe(400);
+    expect(
+      (await tasks({ ...grant, id: crypto.randomUUID(), delta: -11 })).status,
+    ).toBe(409);
+    expect(balance("a")).toBe(10);
+    expect(() => tasksDatabase().exec("DELETE FROM star_adjustments")).toThrow(
+      /append-only/,
+    );
+    expect((await snapshot()).adjustments).toHaveLength(1);
+  });
+  test("retired members retain balances and accept corrections", async () => {
+    await saveMember(
+      request("members", { kind: "retire", id: "a", expectedVersion: 1 }),
+    );
+    expect(
+      (
+        await tasks({
+          kind: "adjust-stars",
+          id: crypto.randomUUID(),
+          member: "a",
+          delta: 3,
+          reason: "Historical correction",
+        })
+      ).status,
+    ).toBe(200);
+    expect(balance("a")).toBe(3);
+  });
+  test("new late completions on retired definitions still credit once", async () => {
+    const definition = await create();
+    await tasks({ kind: "retire", task: definition.id });
+    expect(complete(definition).status).toBe("inserted");
+    expect(complete(definition).status).toBe("already-present");
+    expect(balance("a")).toBe(5);
+  });
+});
