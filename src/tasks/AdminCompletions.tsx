@@ -115,8 +115,19 @@ export function AdminCompletions({
   const completions = data.originalEvents
     .filter((event) => event.kind === "completed")
     .sort((a, b) => b.at.localeCompare(a.at));
-  const visible = completions.filter((event) =>
-    `${data.definitions.find((row) => row.id === event.task)?.title ?? "Task"} ${members.find((member) => member.id === event.by)?.name ?? event.by} ${event.window}`
+  const name = (id: string) =>
+    members.find((member) => member.id === id)?.name ?? id;
+  const rows = completions.map((event) => {
+    const history = data.corrections.filter(
+      (row) => row.task === event.task && row.window === event.window,
+    );
+    const latest = history.at(-1);
+    return { event, history, by: latest ? latest.by : event.by };
+  });
+  const visible = rows.filter(({ event, by }) =>
+    `${data.definitions.find((row) => row.id === event.task)?.title ?? "Task"} ${
+      by ? name(by) : "undone"
+    } ${name(event.by)} ${event.window}`
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
@@ -129,15 +140,8 @@ export function AdminCompletions({
       {!visible.length && (
         <p className={styles.card}>No matching completions.</p>
       )}
-      {visible.map((event) => {
+      {visible.map(({ event, history, by }) => {
         const key = `${event.task}:${event.window}`;
-        const history = data.corrections.filter(
-          (row) => row.task === event.task && row.window === event.window,
-        );
-        const latest = history.at(-1);
-        const by = latest ? latest.by : event.by;
-        const name = (id: string) =>
-          members.find((member) => member.id === id)?.name ?? id;
         return (
           <article className={styles.card} key={key}>
             <h2>
