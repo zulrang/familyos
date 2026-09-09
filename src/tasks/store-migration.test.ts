@@ -45,7 +45,7 @@ test("version-one data survives migration; balances start at zero and new credit
     );
     expect(() =>
       db.exec("UPDATE definitions SET title = 'Changed' WHERE id = 'task'"),
-    ).toThrow(/immutable/);
+    ).toThrow(/retired definition is frozen/);
   } finally {
     db.close();
   }

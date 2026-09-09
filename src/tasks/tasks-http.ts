@@ -1,4 +1,8 @@
-import { activeMembers, memberById } from "@/members/members";
+import {
+  activeMembers,
+  type HouseholdMember,
+  memberById,
+} from "@/members/members";
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { msToZonedDate } from "@/shared/time";
@@ -8,12 +12,15 @@ import {
   insertDefinition,
   loadStore,
   loadStoredStarBalances,
+  saveDefinition,
 } from "./store";
 import {
+  type AssignmentPolicy,
   createDefinition,
   parseCreateTaskDraft,
   parseEventBatch,
   parseLocalDate,
+  parseSaveTaskDraft,
   type TasksViewRead,
 } from "./types";
 import { view } from "./view";
@@ -54,10 +61,30 @@ export async function handleGetTasks(request: Request): Promise<Response> {
     occurrences,
     progress,
     starBalances: loadStoredStarBalances(),
+    definitions: definitions.filter(
+      (definition) => definition.retiredAt === null,
+    ),
     today,
     generatedAt: now.toISOString() as TasksViewRead["generatedAt"],
   };
   return Response.json(body);
+}
+
+function assignedMembers(assignment: AssignmentPolicy): string[] {
+  return assignment.kind === "fixed"
+    ? [assignment.member]
+    : assignment.kind === "rotation"
+      ? assignment.order
+      : [];
+}
+
+function hasInactiveAssignee(
+  assignment: AssignmentPolicy,
+  members: HouseholdMember[],
+): boolean {
+  return assignedMembers(assignment).some(
+    (id) => memberById(members, id)?.status !== "active",
+  );
 }
 
 export async function handleCreateTask(request: Request): Promise<Response> {
@@ -66,22 +93,36 @@ export async function handleCreateTask(request: Request): Promise<Response> {
   const draft = parseCreateTaskDraft(await readJson(request));
   if (!draft) return jsonError("invalid body", 400);
   const household = await readHousehold();
-  const assignedMembers =
-    draft.assignment.kind === "fixed"
-      ? [draft.assignment.member]
-      : draft.assignment.kind === "rotation"
-        ? draft.assignment.order
-        : [];
-  if (
-    assignedMembers.some(
-      (id) => memberById(household.members, id)?.status !== "active",
-    )
-  ) {
+  if (hasInactiveAssignee(draft.assignment, household.members)) {
     return jsonError("active member required", 400);
   }
   const definition = createDefinition(draft);
   insertDefinition(definition);
   return Response.json({ definition });
+}
+
+export async function handleSaveTask(request: Request): Promise<Response> {
+  const display = await requireTrustedDisplay(request);
+  if (isUnauthorized(display)) return display;
+  const draft = parseSaveTaskDraft(await readJson(request));
+  if (!draft) return jsonError("invalid body", 400);
+  const household = await readHousehold();
+  if (hasInactiveAssignee(draft.assignment, household.members)) {
+    return jsonError("active member required", 400);
+  }
+  const today = parseLocalDate(msToZonedDate(Date.now(), household.timeZone));
+  if (!today) return jsonError("invalid household date", 500);
+  try {
+    const { id, ...fields } = draft;
+    return Response.json({
+      definition: saveDefinition({ id, draft: fields, today }),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "task not found") {
+      return jsonError("task not found", 404);
+    }
+    throw error;
+  }
 }
 
 export async function handlePostTaskEvents(

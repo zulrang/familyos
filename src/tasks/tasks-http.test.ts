@@ -14,6 +14,7 @@ describe("Tasks HTTP", () => {
   let dataRoot: string;
   let handleGetTasks: typeof import("./tasks-http.ts").handleGetTasks;
   let handleCreateTask: typeof import("./tasks-http.ts").handleCreateTask;
+  let handleSaveTask: typeof import("./tasks-http.ts").handleSaveTask;
   let handlePostTaskEvents: typeof import("./tasks-http.ts").handlePostTaskEvents;
   let writeHousehold: typeof import("@/settings/settings").writeHousehold;
   let emitStartupPairingCode: typeof import("@/shared/pairing").emitStartupPairingCode;
@@ -28,9 +29,12 @@ describe("Tasks HTTP", () => {
     dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-tasks-http-"));
     process.env.FAMILYOS_DATA_DIR = dataRoot;
 
-    ({ handleGetTasks, handleCreateTask, handlePostTaskEvents } = await import(
-      "./tasks-http.ts"
-    ));
+    ({
+      handleGetTasks,
+      handleCreateTask,
+      handleSaveTask,
+      handlePostTaskEvents,
+    } = await import("./tasks-http.ts"));
     ({ writeHousehold } = await import("@/settings/settings"));
     ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import(
       "@/shared/pairing"
@@ -113,6 +117,7 @@ describe("Tasks HTTP", () => {
     assert.ok(typeof body.generatedAt === "string");
     assert.ok(!Number.isNaN(Date.parse(body.generatedAt)));
     assert.ok(Array.isArray(body.starBalances));
+    assert.ok(Array.isArray(body.definitions));
   });
 
   test("create shows the same day; timed sorts before untimed", async () => {
@@ -886,5 +891,316 @@ describe("Tasks HTTP", () => {
       }),
     );
     assert.equal(missing.status, 400);
+  });
+
+  test("PUT overwrites details in place and keeps the same id", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Dishes",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+          stars: 2,
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const saved = await handleSaveTask(
+      req("http://familyos.test/api/tasks", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: definition.id,
+          title: "Trash",
+          type: "routine",
+          recurrence: definition.recurrence,
+          assignment: definition.assignment,
+          time: "07:00",
+          stars: 5,
+        }),
+      }),
+    );
+    assert.equal(saved.status, 200);
+    const body = (await saved.json()) as { definition: TaskDefinition };
+    assert.equal(body.definition.id, definition.id);
+    assert.equal(body.definition.lineage, definition.lineage);
+    assert.equal(body.definition.retiredAt, null);
+    assert.equal(body.definition.title, "Trash");
+    const viewAfter = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    assert.equal(
+      viewAfter.occurrences.find((row) => row.task === definition.id)?.title,
+      "Trash",
+    );
+    assert.equal(
+      viewAfter.definitions.find((row) => row.id === definition.id)?.stars,
+      5,
+    );
+  });
+
+  test("PUT that changes assignment retires the old row and carries the new title", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Dishes",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const saved = await handleSaveTask(
+      req("http://familyos.test/api/tasks", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: definition.id,
+          title: "Kitchen",
+          type: definition.type,
+          recurrence: definition.recurrence,
+          assignment: { kind: "fixed", member: "ellie" },
+          stars: 0,
+        }),
+      }),
+    );
+    assert.equal(saved.status, 200);
+    const body = (await saved.json()) as { definition: TaskDefinition };
+    assert.notEqual(body.definition.id, definition.id);
+    assert.equal(body.definition.lineage, definition.lineage);
+    assert.equal(body.definition.title, "Kitchen");
+    assert.equal(
+      loadDefinitions().find((row) => row.id === definition.id)?.title,
+      "Dishes",
+    );
+    assert.equal(
+      loadDefinitions().find((row) => row.id === definition.id)?.retiredAt !==
+        null,
+      true,
+    );
+    const viewAfter = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    assert.equal(
+      viewAfter.definitions.some((row) => row.id === definition.id),
+      false,
+    );
+    assert.equal(
+      viewAfter.occurrences.find((row) => row.task === body.definition.id)
+        ?.title,
+      "Kitchen",
+    );
+  });
+
+  test("PUT pre-rotates a rotation so the person on turn stays on turn", async () => {
+    await writeHousehold({
+      familyName: "TasksHousehold",
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+        { id: "luke", name: "Luke", status: "active", color: "#dccfea" },
+      ],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 1,
+    });
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Dishes rotation",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "rotation", order: ["dad", "ellie", "luke"] },
+        }),
+      }),
+    );
+    const { definition } = (await created.json()) as {
+      definition: TaskDefinition;
+    };
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "completed",
+              task: definition.id,
+              window: addLocalDays(before.today, -1),
+              by: "dad",
+              at: "2026-08-25T16:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    const saved = await handleSaveTask(
+      req("http://familyos.test/api/tasks", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: definition.id,
+          title: definition.title,
+          type: definition.type,
+          recurrence: { kind: "weekly", days: ["mon"] },
+          assignment: definition.assignment,
+          stars: 0,
+        }),
+      }),
+    );
+    const body = (await saved.json()) as { definition: TaskDefinition };
+    assert.deepEqual(body.definition.assignment, {
+      kind: "rotation",
+      order: ["ellie", "luke", "dad"],
+    });
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    assert.equal(
+      after.occurrences.find((row) => row.task === body.definition.id)
+        ?.assignee,
+      "ellie",
+    );
+    await writeHousehold({
+      familyName: "TasksHousehold",
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+      ],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 1,
+    });
+  });
+
+  test("a completion after a title-only save still appears; a retired id does not", async () => {
+    const titleOnly = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Live rename",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+        }),
+      }),
+    );
+    const live = (await titleOnly.json()) as { definition: TaskDefinition };
+    await handleSaveTask(
+      req("http://familyos.test/api/tasks", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: live.definition.id,
+          title: "Renamed live",
+          type: live.definition.type,
+          recurrence: live.definition.recurrence,
+          assignment: live.definition.assignment,
+          stars: 0,
+        }),
+      }),
+    );
+    const replacedCreate = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Old dishes",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "ellie" },
+        }),
+      }),
+    );
+    const replaced = (await replacedCreate.json()) as {
+      definition: TaskDefinition;
+    };
+    const retired = await handleSaveTask(
+      req("http://familyos.test/api/tasks", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: replaced.definition.id,
+          title: "New dishes",
+          type: replaced.definition.type,
+          recurrence: replaced.definition.recurrence,
+          assignment: { kind: "open" },
+          stars: 0,
+        }),
+      }),
+    );
+    const retiredBody = (await retired.json()) as {
+      definition: TaskDefinition;
+    };
+    const today = (
+      (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"))
+      ).json()) as TasksViewRead
+    ).today;
+    await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "completed",
+              task: live.definition.id,
+              window: today,
+              by: "dad",
+              at: "2026-08-25T16:00:00Z",
+            },
+            {
+              kind: "completed",
+              task: replaced.definition.id,
+              window: today,
+              by: "ellie",
+              at: "2026-08-25T16:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    assert.equal(
+      after.occurrences.find((row) => row.task === live.definition.id)?.state,
+      "done",
+    );
+    assert.equal(
+      after.occurrences.some((row) => row.task === replaced.definition.id),
+      false,
+    );
+    assert.equal(
+      after.occurrences.find((row) => row.task === retiredBody.definition.id)
+        ?.state,
+      "pending",
+    );
+  });
+
+  test("PUT of an unknown id is not found", async () => {
+    const res = await handleSaveTask(
+      req("http://familyos.test/api/tasks", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: crypto.randomUUID(),
+          title: "Ghost",
+          type: "chore",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+          stars: 0,
+        }),
+      }),
+    );
+    assert.equal(res.status, 404);
   });
 });

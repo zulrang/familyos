@@ -40,6 +40,7 @@ type TaskActions = {
   onComplete: (row: Occurrence) => void;
   onClaim: (row: Occurrence) => void;
   onSkip: (row: Occurrence) => void;
+  onEdit: (row: Occurrence) => void;
 };
 
 const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
@@ -99,6 +100,7 @@ function GroupTasks({
   onComplete,
   onClaim,
   onSkip,
+  onEdit,
 }: TaskActions & {
   group: TaskGroup;
   claimSelection: ClaimSelection | null;
@@ -135,6 +137,7 @@ function GroupTasks({
           ? () => onSkip(row)
           : undefined
       }
+      onEdit={!preview ? () => onEdit(row) : undefined}
     />
   );
   return (

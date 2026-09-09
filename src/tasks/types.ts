@@ -106,6 +106,7 @@ export type TasksViewRead = {
   occurrences: Occurrence[];
   progress: MemberProgress[];
   starBalances: StarBalance[];
+  definitions: TaskDefinition[];
   today: LocalDate;
   generatedAt: Instant;
 };
@@ -118,6 +119,18 @@ export type CreateTaskDraft = {
   time: LocalTime | null;
   stars: number;
 };
+
+export type SaveTaskDraft = CreateTaskDraft & { id: TaskId };
+
+export type DefinitionSavePlan =
+  | {
+      kind: "in-place";
+      title: string;
+      type: TaskType;
+      time: LocalTime | null;
+      stars: number;
+    }
+  | { kind: "replace"; retiredAt: LocalDate; replacement: TaskDefinition };
 
 const WEEKDAYS = new Set<string>([
   "sun",
@@ -356,6 +369,141 @@ export function createDefinition(draft: CreateTaskDraft): TaskDefinition {
     stars: draft.stars,
     retiredAt: null,
   };
+}
+
+function sameItems<T>(left: readonly T[], right: readonly T[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((item) => right.includes(item)) &&
+    right.every((item) => left.includes(item))
+  );
+}
+
+export function recurrenceEquals(left: Recurrence, right: Recurrence): boolean {
+  if (left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "daily":
+      return true;
+    case "once":
+      return right.kind === "once" && left.date === right.date;
+    case "weekly":
+      return right.kind === "weekly" && sameItems(left.days, right.days);
+    case "monthly":
+      return right.kind === "monthly" && left.day === right.day;
+    default: {
+      const _exhaustive: never = left;
+      return _exhaustive;
+    }
+  }
+}
+
+export function assignmentEquals(
+  left: AssignmentPolicy,
+  right: AssignmentPolicy,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "open":
+      return true;
+    case "fixed":
+      return right.kind === "fixed" && left.member === right.member;
+    case "rotation":
+      return (
+        right.kind === "rotation" &&
+        left.order.length === right.order.length &&
+        left.order.every((id, index) => id === right.order[index])
+      );
+    default: {
+      const _exhaustive: never = left;
+      return _exhaustive;
+    }
+  }
+}
+
+export function rotateRotationOrder<T>(
+  order: NonEmpty<T>,
+  completedCount: number,
+): NonEmpty<T> {
+  const shift = completedCount % order.length;
+  if (shift === 0) return order;
+  return [...order.slice(shift), ...order.slice(0, shift)] as NonEmpty<T>;
+}
+
+function replacementRotation(
+  current: NonEmpty<MemberId>,
+  submitted: NonEmpty<MemberId>,
+  completedCount: number,
+): NonEmpty<MemberId> {
+  const preRotated = rotateRotationOrder(current, completedCount);
+  if (sameItems(current, submitted)) return preRotated;
+  const remaining = preRotated.filter((id) => submitted.includes(id));
+  const added = submitted.filter((id) => !current.includes(id));
+  const [first, ...rest] = [...remaining, ...added];
+  return first === undefined ? submitted : [first, ...rest];
+}
+
+export function planDefinitionSave(input: {
+  current: TaskDefinition;
+  draft: CreateTaskDraft;
+  today: LocalDate;
+  nextId: TaskId;
+  completedCount: number;
+}): DefinitionSavePlan {
+  const { current, draft, today, nextId, completedCount } = input;
+  if (
+    recurrenceEquals(current.recurrence, draft.recurrence) &&
+    assignmentEquals(current.assignment, draft.assignment)
+  ) {
+    return {
+      kind: "in-place",
+      title: draft.title,
+      type: draft.type,
+      time: draft.time,
+      stars: draft.stars,
+    };
+  }
+  const assignment =
+    draft.assignment.kind === "rotation" &&
+    current.assignment.kind === "rotation"
+      ? {
+          kind: "rotation" as const,
+          order: replacementRotation(
+            current.assignment.order,
+            draft.assignment.order,
+            completedCount,
+          ),
+        }
+      : draft.assignment;
+  return {
+    kind: "replace",
+    retiredAt: today,
+    replacement: {
+      id: nextId,
+      lineage: current.lineage,
+      title: draft.title,
+      type: draft.type,
+      recurrence: draft.recurrence,
+      assignment,
+      time: draft.time,
+      stars: draft.stars,
+      retiredAt: null,
+    },
+  };
+}
+
+const SAVE_KEYS = new Set([...CREATE_KEYS, "id"]);
+
+export function parseSaveTaskDraft(raw: unknown): SaveTaskDraft | null {
+  if (!isRecord(raw)) return null;
+  for (const key of Object.keys(raw)) {
+    if (!SAVE_KEYS.has(key)) return null;
+  }
+  const id = parseTaskId(raw.id);
+  if (!id) return null;
+  const draft = parseCreateTaskDraft(
+    Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "id")),
+  );
+  return draft ? { id, ...draft } : null;
 }
 
 export function addLocalDays(date: LocalDate, days: number): LocalDate {

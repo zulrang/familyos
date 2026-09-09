@@ -2,8 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 
 /** ADR 0007: stored balances start at zero; historical completions are not backfilled. */
 export function migrateTaskAdministration(db: DatabaseSync) {
-  if (Number(db.prepare("PRAGMA user_version").get()?.user_version) >= 2)
-    return;
+  const hasBalances = db
+    .prepare(
+      "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'star_balances'",
+    )
+    .get();
+  if (hasBalances) return;
   db.exec(`BEGIN IMMEDIATE;
     CREATE TABLE star_balances (
       member TEXT PRIMARY KEY,
@@ -40,13 +44,16 @@ export function migrateTaskAdministration(db: DatabaseSync) {
       INSERT INTO star_balances (member, balance) VALUES (NEW.member, 0) ON CONFLICT DO NOTHING;
       UPDATE star_balances SET balance = balance + NEW.delta WHERE member = NEW.member;
     END;
-    DROP TRIGGER definitions_retired_once;
+    DROP TRIGGER IF EXISTS definitions_retired_once;
+    DROP TRIGGER IF EXISTS definitions_update_guard;
     CREATE TRIGGER definitions_retired_once BEFORE UPDATE ON definitions
     BEGIN
+      SELECT RAISE(ABORT, 'retired definition is frozen')
+        WHERE OLD.retired_at IS NOT NULL;
       SELECT RAISE(ABORT, 'immutable except retiredAt and editable fields') WHERE
         NEW.creation_order IS NOT OLD.creation_order OR NEW.id IS NOT OLD.id
         OR NEW.lineage IS NOT OLD.lineage OR NEW.recurrence IS NOT OLD.recurrence
-        OR NEW.assignment IS NOT OLD.assignment OR OLD.retired_at IS NOT NULL
+        OR NEW.assignment IS NOT OLD.assignment
         OR (NEW.retired_at IS NOT NULL AND (
           NEW.title IS NOT OLD.title OR NEW.type IS NOT OLD.type
           OR NEW.time IS NOT OLD.time OR NEW.stars IS NOT OLD.stars));
