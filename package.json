@@ -13,7 +13,8 @@
     "test:contract": "vitest run --config vitest.contract.config.mts",
     "scan-secrets": "bash scripts/scan-secrets.sh",
     "macos:install": "bash scripts/macos-server install",
-    "macos:update": "bash scripts/macos-server update"
+    "macos:update": "bash scripts/macos-server update",
+    "prototype:rewards": "python3 -m http.server 4317 --bind 127.0.0.1 --directory src/rewards/prototype"
   },
   "dependencies": {
     "next": "16.3.1",
