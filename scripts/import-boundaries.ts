@@ -8,6 +8,7 @@ const FEATURE_SLICES = new Set([
   "displays",
   "tasks",
   "photos",
+  "admin",
 ]);
 const SLICES = new Set([
   "calendar",
@@ -17,6 +18,7 @@ const SLICES = new Set([
   "settings",
   "tasks",
   "photos",
+  "admin",
 ]);
 const SETTINGS_HTTP = "src/settings/settings-http.ts";
 const LIST_CALENDARS = "src/calendar/google-events";
@@ -27,7 +29,7 @@ function posix(p: string): string {
 
 function srcDirOf(repoPath: string): string | null {
   const m = stripExt(repoPath).match(
-    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos)(?:\/|$)/,
+    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos|admin)(?:\/|$)/,
   );
   return m ? m[1] : null;
 }

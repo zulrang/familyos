@@ -6,7 +6,7 @@ import { PairingScreen } from "@/displays/PairingScreen";
 import { IdleDimApply } from "@/shared/IdleDimApply";
 import { NavRail } from "@/shared/NavRail";
 import { resolveTrustedDisplay } from "@/shared/pairing";
-import "./globals.css";
+import "../globals.css";
 
 const newsreader = Newsreader({
   subsets: ["latin"],

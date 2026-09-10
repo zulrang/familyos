@@ -6,10 +6,12 @@ import {
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { msToZonedDate } from "@/shared/time";
+import { reconcileRetiredMembers } from "./admin-store";
 import {
   applyEvent,
   insertDefinition,
   loadStore,
+  loadStoredStarBalances,
   saveDefinition,
 } from "./store";
 import {
@@ -21,7 +23,7 @@ import {
   parseSaveTaskDraft,
   type TasksViewRead,
 } from "./types";
-import { starBalances, view } from "./view";
+import { view } from "./view";
 
 function jsonError(error: string, status: number): Response {
   return Response.json({ error }, { status });
@@ -44,7 +46,8 @@ export async function handleGetTasks(request: Request): Promise<Response> {
     msToZonedDate(now.getTime(), household.timeZone),
   );
   if (!today) return jsonError("invalid household date", 500);
-  const { definitions, events, adjustments } = loadStore();
+  reconcileRetiredMembers(household.members, today);
+  const { definitions, events } = loadStore();
   const occurrences = view(definitions, events, today);
   const progress = activeMembers(household.members).map((member) => {
     const mine = occurrences.filter((row) => row.assignee === member.id);
@@ -57,7 +60,7 @@ export async function handleGetTasks(request: Request): Promise<Response> {
   const body: TasksViewRead = {
     occurrences,
     progress,
-    starBalances: starBalances(definitions, events, adjustments),
+    starBalances: loadStoredStarBalances(),
     definitions: definitions.filter(
       (definition) => definition.retiredAt === null,
     ),

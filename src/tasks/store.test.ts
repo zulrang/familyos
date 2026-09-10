@@ -67,7 +67,7 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("all three tables exist and user_version is 2", () => {
+  test("task history, balances, and correction tables exist at schema version 2", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -78,7 +78,14 @@ describe("tasks sqlite store", () => {
       tables
         .map((row) => row.name)
         .filter((name) => !name.startsWith("sqlite_")),
-      ["definitions", "events", "star_adjustments"],
+      [
+        "completion_corrections",
+        "completion_credits",
+        "definitions",
+        "events",
+        "star_adjustments",
+        "star_balances",
+      ],
     );
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
@@ -583,6 +590,11 @@ describe("tasks sqlite store", () => {
   });
 
   test("reads append-only star adjustments", () => {
+    tasksDatabase()
+      .prepare(
+        "INSERT INTO star_adjustments (id, member, delta, reason, at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("adj-start", "ellie", 3, "Grant", "2026-08-25T11:00:00Z");
     tasksDatabase()
       .prepare(
         `INSERT INTO star_adjustments (id, member, delta, reason, at)

@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RosterError } from "@/members/members";
 import {
@@ -131,11 +132,13 @@ export async function readHousehold(): Promise<HouseholdConfig> {
   }
 }
 
-// ponytail: last-write-wins JSON file; upgrade to a write queue if concurrent Settings races show up.
+// Replace atomically so readers never observe a partially written roster.
 export async function writeHousehold(next: HouseholdConfig): Promise<void> {
   const file = householdFile();
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(normalize(next), null, 2)}\n`);
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(normalize(next), null, 2)}\n`);
+  await rename(temporary, file);
 }
 
 export type HouseholdUpdateResult =
@@ -155,7 +158,7 @@ export type HouseholdUpdateResult =
  * Member roster patches are validated through parseRoster.
  * listIds patches are normalized through parseListIds.
  */
-export async function updateHousehold(
+async function updateHouseholdUnlocked(
   expectedVersion: unknown,
   patch: Partial<
     Omit<HouseholdConfig, "configVersion" | "members" | "listIds">
@@ -203,4 +206,15 @@ export async function updateHousehold(
   };
   await writeHousehold(next);
   return { ok: true, config: next };
+}
+
+let householdUpdates: Promise<unknown> = Promise.resolve();
+
+/** Serialize version checks and writes across the wall and parent phones. */
+export function updateHousehold(
+  ...args: Parameters<typeof updateHouseholdUnlocked>
+): Promise<HouseholdUpdateResult> {
+  const result = householdUpdates.then(() => updateHouseholdUnlocked(...args));
+  householdUpdates = result.catch(() => undefined);
+  return result;
 }

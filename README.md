@@ -6,9 +6,9 @@ calendar, selected Google Tasks lists, household Tasks, a Google Photos
 slideshow, Settings, and the fixed navigation rail. Rewards, Meals, Recipes,
 and Sleep remain stubs.
 
-It is not a cloud-hosted SaaS, not multi-tenant, and not a phone UI. You run one
-FamilyOS server on a computer you control; wall panels connect over the local
-network.
+You run one FamilyOS server on a computer you control; wall panels connect over
+the local network. Parents can manage local Tasks, Members, and star corrections
+from the separate mobile interface at `/admin`.
 
 ![FamilyOS calendar](docs/calendar.png)
 
@@ -34,9 +34,17 @@ Open [http://localhost:3001](http://localhost:3001) → pair the Display →
 
 `pnpm start` is production on **3000**; `pnpm dev` is development on **3001**, so both can run. For a panel on the LAN, `pnpm build && pnpm start` (binds `0.0.0.0:3000`). `pnpm dev` over Wi-Fi makes taps feel late. On the household Mac, `./scripts/macos-server install` keeps `:3000` up across logins; `./scripts/macos-server update` pulls `main`, rebuilds, and restarts.
 
+## Parent admin
+
+Set a six-digit `FAMILYOS_ADMIN_PIN` in the server's environment or `.env.local`
+and restart. Open `/admin` on home Wi-Fi; display pairing is not required.
+Safari's **Share → Add to Home Screen** provides standalone access. Sessions
+lock after 15 minutes of inactivity. Setup, editing behavior, and task-storage
+migration details: [docs/admin.md](docs/admin.md).
+
 ## Touchscreen
 
-Laid out for a **1080p landscape** capacitive panel, read from across a kitchen. Mouse/trackpad in a desktop browser is fine for development. Phones are not a target.
+The main UI is laid out for a **1080p landscape** capacitive panel, read from across a kitchen. Mouse/trackpad in a desktop browser is fine for development. The parent admin interface is designed for iPhones.
 
 The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.com/guysoft/FullPageOS) (Chromium kiosk). Picture is HDMI; touch is a separate USB HID cable. Reference hardware is a CAPERAVE CF15T + Goodix digitizer. Compatibility, cables, and what will not work: [INSTALL.md](INSTALL.md#touchscreen-compatibility). FullPageOS setup: [docs/kiosk.md](docs/kiosk.md).
 
