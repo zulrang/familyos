@@ -22,7 +22,7 @@ configuration and data is shared.
 ## Product surfaces
 
 The implemented product surfaces are Calendar, Lists, Tasks, Photos, Settings,
-the fixed left navigation rail, and pairing. Rewards, Meals, Recipes, and Sleep
+the fixed left navigation rail, and pairing. Meals, Recipes, and Sleep
 remain "not yet implemented" screens.
 
 ### Calendar
@@ -99,3 +99,7 @@ remain "not yet implemented" screens.
   unreachable.
 - Stale Calendar and List Item writes are rejected and reloaded rather than
   silently overwriting a newer provider version.
+
+Rewards supports a parent-managed household catalog, one unreserved goal per
+active member, and atomic Spends retaining the original reward name and cost.
+See [Rewards](rewards.md); rewards owed and fulfillment are deferred to #82.

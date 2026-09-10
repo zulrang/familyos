@@ -15,7 +15,8 @@ rules.
 
 Implemented surfaces are pairing, the Five-Day Calendar in `src/calendar/`,
 Lists in `src/lists/` (Google Tasks), Tasks in `src/tasks/`, Photos in
-`src/photos/`, Settings, and the fixed left rail. Rewards, Meals, Recipes, and
+`src/photos/`, Settings, Rewards in `src/rewards/`, parent admin, and the fixed
+left rail. Meals, Recipes, and
 Sleep remain stubs.
 
 ## Guiding Principles
@@ -112,7 +113,7 @@ design skill forbids. Where delight and restraint conflict, restraint wins.
 **Decision: Product surfaces ship as complete vertical slices**
 - Choice: The implemented scope is pairing, a rolling 5-day family calendar,
   selected Household Lists, FamilyOS-owned Tasks, a Google Photos slideshow,
-  and Settings. Rewards, Meals, Recipes, and Sleep render a “not yet
+  Settings, Rewards, and parent admin. Meals, Recipes, and Sleep render a “not yet
   implemented” screen.
 - Photos uses the Google Photos Picker API through the household Google
   connection and stores one explicitly selected photo batch. It does not
@@ -240,14 +241,13 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Member Colors are presentation. They are unique only among Active Members and
   may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
-- Unimplemented rail items stay stubs. Do not invent a visual language for Rewards, Meals, Recipes, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant. Photos setup and slideshow behavior are documented in `docs/photos.md`.
+- Unimplemented rail items stay stubs. Do not invent a visual language for Meals, Recipes, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant. Photos setup and slideshow behavior are documented in `docs/photos.md`.
 - Task data is FamilyOS-owned and append-only (ADR 0006), except Star Balance
   which is a mutable integer (ADR 0007). Do not store Tasks in Google Tasks,
   materialize occurrence rows, derive Star Balance from completions, add a
-  verification workflow, add Grant/Spend writers, or render stars anywhere.
-  Star values are captured in the editor; completion credits the stored
-  integer; display nothing until Rewards ships. The spec's decision log
-  (D1–D19) rejects the rest by name.
+  verification workflow, or put Grant/Spend UX on the Tasks wall. Star values
+  are captured in the editor; completion credits the stored integer. Rewards
+  and parent admin now expose those stored balances and Grant/Spend controls.
 - Biome is the linter (`pnpm lint`). Don’t add ESLint because Next tutorials use it.
 - Tests are Vitest only (`pnpm test` / `pnpm test:contract`). Component tests need `// @vitest-environment jsdom` because the default env is `node`. Don’t add a second runner.
 - On the reference panel, touch is USB-A (black USB 2.0), not the Pi USB-C power port and not HDMI. See `docs/kiosk.md`.
@@ -258,3 +258,9 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 - Tasks is designed and ready to build: `docs/design/tasks-design-spec.md` (member columns per the design-skill kit, minus TimeOfDayTabs and the points pill). Keep shell/calendar/lists code from depending on the remaining feature modules.
 - Companion surfaces (phone/tablet) are mentioned in the design skill and are not v1. Don’t add a responsive breakpoint architecture “for later.”
+
+## Rewards
+
+The `/rewards` wall screen and `/admin/rewards` catalog are implemented. Mobile
+`/admin/stars` uses the approved Manage stars layout. Domain, storage, access,
+and deferred fulfillment details are in [rewards.md](rewards.md).

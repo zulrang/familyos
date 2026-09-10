@@ -74,5 +74,10 @@ credit their stored star value exactly once, including late events for retired
 definitions. Changing a task's star value does not revalue existing balances.
 Legacy completions have no stored credit to reverse when corrected.
 
-Calendar, Google lists, photos, system settings, and rewards management are not
-part of this admin release.
+**Rewards:** create household choices, edit their names, descriptions, icons and
+positive star costs, or retire them. Retirement clears selected goals and keeps
+previous Spend details. The wall Rewards screen handles goal selection and
+spending. See [Rewards](rewards.md). Rewards owed and delivery are deferred to
+[issue #82](https://github.com/zulrang/familyos/issues/82).
+
+Calendar, Google lists, photos, and system settings are not part of this admin release.
