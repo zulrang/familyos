@@ -23,6 +23,9 @@ create their own rewards. There is no production sample data.
   balance is checked at commit time; stale displays cannot overdraw.
 - Repeat requests with the same Spend ID and same payload return the original
   receipt, even after reward changes. Reusing an ID for a different payload fails.
+- Successful catalog edits retain immutable receipts keyed by reward and source
+  revision. Identical retries succeed without editing again, including after later
+  edits or retirement; different stale payloads still conflict.
 - Grant and Spend admin forms require a reason and preserve request IDs and
   payloads when retrying an uncertain response. Balances cannot become negative
   or exceed the safe-integer limit. Retired members remain available in admin.

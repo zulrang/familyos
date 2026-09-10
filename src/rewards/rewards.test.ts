@@ -82,6 +82,72 @@ describe("Rewards persistence", () => {
       }),
     ).toBeNull();
   });
+  test("retrying a saved edit succeeds without advancing revision again", () => {
+    const { store, id, draft } = fixture();
+    const edit = {
+      kind: "edit" as const,
+      id,
+      revision: 1,
+      draft: { ...draft, name: "A new title" },
+    };
+    store.administer(edit);
+    expect(() => store.administer(edit)).not.toThrow();
+    expect(store.snapshot().rewards[0]).toMatchObject({
+      name: "A new title",
+      revision: 2,
+    });
+  });
+  test("edit receipts survive later edits and retirement but reject a different stale payload", () => {
+    const { store, db, id, draft } = fixture();
+    const first = {
+      kind: "edit" as const,
+      id,
+      revision: 1,
+      draft: { ...draft, name: "First title" },
+    };
+    store.administer(first);
+    store.administer({
+      ...first,
+      revision: 2,
+      draft: { ...draft, name: "Later title" },
+    });
+    expect(() => rewardsStore(db).administer(first)).not.toThrow();
+    expect(store.snapshot().rewards[0]).toMatchObject({
+      name: "Later title",
+      revision: 3,
+    });
+    expect(() => store.administer({ ...first, draft })).toThrow(
+      /different edit/,
+    );
+    store.administer({ kind: "retire", id, revision: 3 });
+    expect(() => store.administer(first)).not.toThrow();
+    expect(store.snapshot().rewards[0]).toMatchObject({
+      name: "Later title",
+      revision: 4,
+      retiredAt: expect.any(String),
+    });
+  });
+  test("a failed edit receipt rolls back the edit and its revision", () => {
+    const { store, db, id, draft } = fixture();
+    const edit = {
+      kind: "edit" as const,
+      id,
+      revision: 1,
+      draft: { ...draft, name: "Changed title" },
+    };
+    db.exec(
+      "CREATE TRIGGER fail_edit_receipt BEFORE INSERT ON reward_edits BEGIN SELECT RAISE(ABORT, 'receipt failure'); END;",
+    );
+    expect(() => store.administer(edit)).toThrow(/receipt failure/);
+    expect(store.snapshot().rewards[0]).toMatchObject({
+      name: draft.name,
+      revision: 1,
+    });
+    db.exec("DROP TRIGGER fail_edit_receipt");
+    store.administer(edit);
+    expect(() => store.administer(edit)).not.toThrow();
+    expect(store.snapshot().rewards[0].revision).toBe(2);
+  });
   test("goals reserve nothing, follow current prices, and clear when a reward retires", () => {
     const { store, id, draft } = fixture();
     store.apply({ kind: "goal", member: "a", reward: id });

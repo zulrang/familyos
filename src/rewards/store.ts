@@ -17,6 +17,15 @@ export function rewardsStore(db: DatabaseSync) {
       cost INTEGER NOT NULL CHECK(cost > 0 AND cost <= 9007199254740991), icon TEXT NOT NULL,
       revision INTEGER NOT NULL, retired_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS reward_edits (
+      reward TEXT NOT NULL, revision INTEGER NOT NULL,
+      name TEXT NOT NULL, description TEXT NOT NULL, cost INTEGER NOT NULL, icon TEXT NOT NULL,
+      PRIMARY KEY (reward, revision)
+    );
+    CREATE TRIGGER IF NOT EXISTS reward_edits_no_update BEFORE UPDATE ON reward_edits
+      BEGIN SELECT RAISE(ABORT, 'Reward edit receipts are immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS reward_edits_no_delete BEFORE DELETE ON reward_edits
+      BEGIN SELECT RAISE(ABORT, 'Reward edit receipts are immutable'); END;
     CREATE TABLE IF NOT EXISTS reward_goals (member TEXT PRIMARY KEY, reward TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS reward_spends (
       id TEXT PRIMARY KEY, member TEXT NOT NULL, reward TEXT NOT NULL,
@@ -112,12 +121,36 @@ export function rewardsStore(db: DatabaseSync) {
         );
         return;
       }
+      // A reward revision can be edited successfully only once. Check its
+      // immutable receipt before current state so a lost response can be retried
+      // even after later edits or retirement, without replaying the mutation.
+      if (command.kind === "edit") {
+        const previous = db
+          .prepare("SELECT * FROM reward_edits WHERE reward=? AND revision=?")
+          .get(command.id, command.revision);
+        if (previous) {
+          if (
+            previous.name !== command.draft.name ||
+            previous.description !== command.draft.description ||
+            previous.cost !== command.draft.cost ||
+            previous.icon !== command.draft.icon
+          ) {
+            throw new RewardConflict(
+              "This revision was already used for a different edit. Refresh before editing again.",
+            );
+          }
+          return;
+        }
+      }
       active(command.id, command.revision);
       if (command.kind === "edit") {
         const { name, description, cost, icon } = command.draft;
         db.prepare(
           "UPDATE rewards SET name=?, description=?, cost=?, icon=?, revision=revision+1 WHERE id=?",
         ).run(name, description, cost, icon, command.id);
+        db.prepare(
+          "INSERT INTO reward_edits (reward, revision, name, description, cost, icon) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(command.id, command.revision, name, description, cost, icon);
       } else {
         db.prepare(
           "UPDATE rewards SET retired_at=?, revision=revision+1 WHERE id=?",

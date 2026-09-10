@@ -114,6 +114,45 @@ describe("Rewards authorization and commands", () => {
       ).status,
     ).toBe(403);
   });
+  test("retrying the editor's unchanged payload returns success after the first save", async () => {
+    const id = crypto.randomUUID();
+    const draft = {
+      name: "Movie",
+      description: "Choose a film",
+      cost: 2,
+      icon: "image",
+    };
+    await handleRewards(
+      request(true, { kind: "create", id, draft }),
+      tasksDatabase,
+      true,
+    );
+    const edit = {
+      kind: "edit",
+      id,
+      revision: 1,
+      draft: { ...draft, name: "Movie night" },
+    };
+    expect(
+      (await handleRewards(request(true, edit), tasksDatabase, true)).status,
+    ).toBe(200);
+    expect(
+      (await handleRewards(request(true, edit), tasksDatabase, true)).status,
+    ).toBe(200);
+    const data = await (
+      await handleRewards(request(true), tasksDatabase, true)
+    ).json();
+    expect(data.rewards[0]).toMatchObject({ name: "Movie night", revision: 2 });
+    expect(
+      (
+        await handleRewards(
+          request(true, { ...edit, draft }),
+          tasksDatabase,
+          true,
+        )
+      ).status,
+    ).toBe(409);
+  });
   test("wall mutations use the browser Host when Next uses an internal request hostname", async () => {
     const response = await handleRewards(
       new Request("http://localhost:4320/api/rewards", {
