@@ -85,6 +85,7 @@ describe("AdminCompletions", () => {
           [correction("c1", "dishes", "2026-09-08", "ellie")],
         )}
         members={members}
+        onSaved={() => {}}
         query="Ellie"
       />,
     );
@@ -99,6 +100,7 @@ describe("AdminCompletions", () => {
           [correction("c1", "dishes", "2026-09-08", null)],
         )}
         members={members}
+        onSaved={() => {}}
         query="undone"
       />,
     );
@@ -113,6 +115,7 @@ describe("AdminCompletions", () => {
           [correction("c1", "dishes", "2026-09-08", "ellie")],
         )}
         members={members}
+        onSaved={() => {}}
         query="Dad"
       />,
     );
@@ -127,6 +130,7 @@ describe("AdminCompletions", () => {
           [correction("c1", "dishes", "2026-09-08", "ellie")],
         )}
         members={members}
+        onSaved={() => {}}
         query="zzz"
       />,
     );

@@ -1,66 +1,109 @@
 "use client";
-
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
+import { type HouseholdMember, memberSurface } from "@/members/members";
 import styles from "@/shared/Admin.module.css";
 import {
   adminRequest,
   adminRequestId,
   useAdminData,
 } from "@/shared/admin-client";
+import { Avatar } from "@/shared/ui/Avatar";
+import { Icon } from "@/shared/ui/Icon";
+import starsStyles from "./AdminStars.module.css";
 import { readTaskAdminData } from "./admin-client";
+import type { TaskAdminCommand } from "./admin-types";
 
-function AdjustmentForm({
+export function StarAdjustmentForm({
   member,
+  balance,
   onSaved,
   onCancel,
+  onBusyChange,
 }: {
-  member: string;
+  member: HouseholdMember;
+  balance: number;
   onSaved: () => void;
   onCancel: () => void;
+  onBusyChange: (busy: boolean) => void;
 }) {
-  const [id] = useState(adminRequestId);
-  const [direction, setDirection] = useState("grant");
-  const [amount, setAmount] = useState("");
+  const [direction, setDirection] = useState<"grant" | "spend">("grant");
+  const [amount, setAmount] = useState("1");
   const [reason, setReason] = useState("");
-  const [save, setSave] = useState<{
-    status: "idle" | "saving";
-    error?: string;
-  }>({ status: "idle" });
+  const [save, setSave] = useState<
+    | { status: "editing" }
+    | { status: "saving" }
+    | { status: "error"; error: string }
+  >({ status: "editing" });
+  const request = useRef<Extract<
+    TaskAdminCommand,
+    { kind: "adjust-stars" }
+  > | null>(null);
+  const saving = useRef(false);
+  const count = Number(amount),
+    after = balance + (direction === "grant" ? count : -count);
+  const valid =
+    Number.isSafeInteger(count) &&
+    count > 0 &&
+    Number.isSafeInteger(after) &&
+    after >= 0;
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (
-      !window.confirm(
-        `${direction === "grant" ? "Add" : "Subtract"} ${amount} stars? This adjustment will be recorded with your reason.`,
+    if (saving.current || !valid || !reason.trim()) return;
+    if (!request.current) {
+      if (
+        !window.confirm(
+          `${direction === "grant" ? "Grant" : "Spend"} ${count} stars for ${member.name}? Balance: ${balance} → ${after}.`,
+        )
       )
-    )
-      return;
+        return;
+      request.current = {
+        kind: "adjust-stars",
+        id: adminRequestId(),
+        member: member.id,
+        delta: direction === "grant" ? count : -count,
+        reason: reason.trim(),
+      };
+    }
+    saving.current = true;
+    onBusyChange(true);
     setSave({ status: "saving" });
     try {
-      await adminRequest("tasks", {
-        kind: "adjust-stars",
-        id,
-        member,
-        delta: Number(amount) * (direction === "grant" ? 1 : -1),
-        reason,
-      });
+      await adminRequest("tasks", request.current);
+      onBusyChange(false);
       onSaved();
     } catch (error) {
-      setSave({ status: "idle", error: (error as Error).message });
+      setSave({
+        status: "error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not save. Retry this adjustment.",
+      });
+      saving.current = false;
+      onBusyChange(false);
     }
   }
   return (
     <form className={styles.form} onSubmit={submit}>
-      <div className={styles.grid}>
-        <label>
-          Adjustment
-          <select
-            value={direction}
-            onChange={(event) => setDirection(event.target.value)}
-          >
-            <option value="grant">Add stars (Grant)</option>
-            <option value="spend">Subtract stars (Spend)</option>
-          </select>
-        </label>
+      <fieldset
+        className={starsStyles.fields}
+        disabled={save.status !== "editing"}
+      >
+        <fieldset
+          className={starsStyles.segmented}
+          aria-label="Adjustment type"
+        >
+          {(["grant", "spend"] as const).map((mode) => (
+            <button
+              type="button"
+              key={mode}
+              aria-pressed={direction === mode}
+              onClick={() => setDirection(mode)}
+            >
+              {mode === "grant" ? "Grant" : "Spend"}
+            </button>
+          ))}
+        </fieldset>
         <label>
           Number of stars
           <input
@@ -68,57 +111,109 @@ function AdjustmentForm({
             type="number"
             inputMode="numeric"
             min={1}
-            max={Number.MAX_SAFE_INTEGER}
+            max={
+              direction === "spend"
+                ? balance
+                : Number.MAX_SAFE_INTEGER - balance
+            }
             step={1}
             value={amount}
-            onChange={(event) => setAmount(event.target.value)}
+            onChange={(e) => setAmount(e.target.value)}
           />
         </label>
+        <div className={starsStyles.presets}>
+          {[1, 3, 5].map((n) => (
+            <button
+              type="button"
+              className={styles.quiet}
+              key={n}
+              disabled={
+                direction === "spend"
+                  ? n > balance
+                  : !Number.isSafeInteger(balance + n)
+              }
+              onClick={() => setAmount(String(n))}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <label>
+          Reason
+          <textarea
+            required
+            maxLength={1000}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={
+              direction === "grant"
+                ? "Helping with the garden"
+                : "Ice cream outing"
+            }
+          />
+        </label>
+      </fieldset>
+      <div className={starsStyles.preview}>
+        <span>Balance after {direction === "grant" ? "Grant" : "Spend"}</span>
+        <output aria-live="polite">
+          {valid ? (
+            <>
+              <strong>{after}</strong> stars
+            </>
+          ) : after < 0 ? (
+            "Not enough stars"
+          ) : (
+            "Enter a supported whole number"
+          )}
+        </output>
       </div>
-      <label>
-        Reason
-        <textarea
-          required
-          maxLength={1000}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          placeholder="Why are you adjusting this balance?"
-        />
-      </label>
-      {save.error && (
+      {save.status === "error" && (
         <p role="alert" className={styles.error}>
           {save.error}
         </p>
       )}
-      <div className={styles.actions}>
-        <button type="submit" disabled={save.status === "saving"}>
-          {save.status === "saving" ? "Saving…" : "Record adjustment"}
+      <button
+        type="submit"
+        disabled={save.status === "saving" || !valid || !reason.trim()}
+      >
+        {save.status === "saving"
+          ? "Saving…"
+          : save.status === "error"
+            ? "Retry adjustment"
+            : direction === "grant"
+              ? "Grant stars"
+              : "Spend stars"}
+      </button>
+      {save.status === "error" && (
+        <button type="button" className={styles.quiet} onClick={onCancel}>
+          Refresh balance
         </button>
-        <button
-          type="button"
-          className={styles.quiet}
-          disabled={save.status === "saving"}
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
-      </div>
+      )}
+      <p className={styles.muted}>A reason is saved with each adjustment.</p>
     </form>
   );
 }
-
 export function AdminStars() {
   const { state, reload } = useAdminData(readTaskAdminData);
-  const [member, setMember] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [formVersion, setFormVersion] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const member =
+    state.status === "ready"
+      ? (state.data.members.find((m) => m.id === selected) ??
+        state.data.members[0])
+      : undefined;
+  function refresh() {
+    setFormVersion((v) => v + 1);
+    void reload();
+  }
   return (
     <div className={styles.stack}>
       <div className={styles.intro}>
-        <div className={styles.eyebrow}>Give credit where it’s due</div>
-        <h1>Stars</h1>
+        <h1>Manage stars</h1>
         <p className={styles.muted}>
-          Correct balances with a recorded Grant or Spend. Balances cannot go
-          below zero.
+          Grant or spend stars with a recorded reason.
         </p>
       </div>
       {notice && <output className={styles.success}>{notice}</output>}
@@ -128,92 +223,131 @@ export function AdminStars() {
           <p role="alert" className={styles.error}>
             {state.error}
           </p>
-          <button type="button" onClick={() => void reload()}>
+          <button type="button" onClick={refresh}>
             Try again
           </button>
         </>
       )}
       {state.status === "ready" && (
         <>
-          {!state.data.members.length && (
+          {!member && (
             <p className={styles.card}>
               Add a member first to manage their stars.
             </p>
           )}
-          {state.data.members.map((person) => (
-            <article className={styles.card} key={person.id}>
-              <div className={styles.row}>
-                <div>
-                  <h2>{person.name}</h2>
-                  {person.status === "retired" && (
-                    <span className={styles.badge}>Retired</span>
-                  )}
-                </div>
-                <span className={styles.balance}>
-                  {state.data.tasks.balances.find(
-                    (balance) => balance.member === person.id,
-                  )?.balance ?? 0}{" "}
-                  <span role="img" aria-label="stars">
-                    ☆
+          <section aria-label="Choose a member">
+            <h2>Members</h2>
+            <div className={starsStyles.members}>
+              {state.data.members.map((person) => {
+                const surface =
+                  person.status === "active"
+                    ? memberSurface(person.color)
+                    : { soft: "#edf2eb", ink: "#52675d" };
+                return (
+                  <button
+                    type="button"
+                    key={person.id}
+                    className={starsStyles.member}
+                    disabled={saving}
+                    style={{ background: surface.soft, color: surface.ink }}
+                    aria-pressed={member?.id === person.id}
+                    onClick={() => {
+                      if (
+                        member?.id !== person.id &&
+                        window.confirm(
+                          "Change member and discard any unsaved adjustment?",
+                        )
+                      ) {
+                        setSelected(person.id);
+                        setFormVersion((v) => v + 1);
+                      }
+                    }}
+                  >
+                    <Avatar name={person.name} surface={surface} />
+                    <span>
+                      <strong>{person.name}</strong>
+                      <span className={starsStyles.smallBalance}>
+                        {state.data.tasks.balances.find(
+                          (b) => b.member === person.id,
+                        )?.balance ?? 0}
+                        <Icon name="star" size={18} />
+                      </span>
+                      {person.status === "retired" && <small>Retired</small>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+          {member && (
+            <>
+              <section className={styles.card}>
+                <div className={styles.row}>
+                  <div>
+                    <h2>{member.name}</h2>
+                    <p className={styles.muted}>Star Balance</p>
+                  </div>
+                  <span className={starsStyles.balance}>
+                    {state.data.tasks.balances.find(
+                      (b) => b.member === member.id,
+                    )?.balance ?? 0}
+                    <Icon name="star" size={32} />
                   </span>
-                </span>
-              </div>
-              {member === person.id ? (
-                <AdjustmentForm
-                  member={person.id}
+                </div>
+                <StarAdjustmentForm
+                  key={`${member.id}-${formVersion}`}
+                  member={member}
+                  onBusyChange={setSaving}
+                  balance={
+                    state.data.tasks.balances.find(
+                      (b) => b.member === member.id,
+                    )?.balance ?? 0
+                  }
                   onSaved={() => {
-                    setMember(null);
                     setNotice("Star adjustment recorded.");
-                    void reload();
+                    refresh();
                   }}
-                  onCancel={() => setMember(null)}
+                  onCancel={refresh}
                 />
-              ) : (
-                <button
-                  type="button"
-                  className={styles.quiet}
-                  disabled={member !== null}
-                  onClick={() => setMember(person.id)}
-                  aria-label={`Adjust stars for ${person.name}`}
-                >
-                  Adjust stars
-                </button>
-              )}
-              <details className={styles.history}>
-                <summary>Adjustment history</summary>
-                <ul>
+              </section>
+              <section className={styles.card}>
+                <h2>{member.name}’s Star Adjustments</h2>
+                <ul className={starsStyles.history}>
                   {state.data.tasks.adjustments
-                    .filter((adjustment) => adjustment.member === person.id)
+                    .filter((a) => a.member === member.id)
+                    .slice()
                     .reverse()
-                    .map((adjustment) => (
-                      <li key={adjustment.id}>
-                        <strong>
-                          {adjustment.delta > 0 ? "+" : ""}
-                          {adjustment.delta} stars
-                        </strong>{" "}
-                        · {new Date(adjustment.at).toLocaleString()}
-                        <br />
-                        {adjustment.reason ?? "No reason recorded"}
+                    .map((a) => (
+                      <li key={a.id}>
+                        <div className={styles.row}>
+                          <strong>
+                            {a.delta > 0 ? "+" : ""}
+                            {a.delta} stars
+                          </strong>
+                          <span className={styles.muted}>
+                            {new Date(a.at).toLocaleString()}
+                          </span>
+                        </div>
+                        <p>{a.reason ?? "No reason recorded"}</p>
                       </li>
                     ))}
                 </ul>
+                {!state.data.tasks.adjustments.some(
+                  (a) => a.member === member.id,
+                ) && <p className={styles.muted}>No Star Adjustments yet.</p>}
                 <p className={styles.muted}>
                   Task completion corrections appear under Tasks → Completions.
                 </p>
-              </details>
-            </article>
-          ))}
+              </section>
+            </>
+          )}
           <button
             type="button"
             className={styles.quiet}
+            disabled={saving}
             onClick={() => {
-              if (
-                !member ||
-                window.confirm("Discard this unsaved adjustment and refresh?")
-              ) {
-                setMember(null);
-                void reload();
-              }
+              if (window.confirm("Discard any unsaved adjustment and refresh?"))
+                refresh();
             }}
           >
             Refresh balances

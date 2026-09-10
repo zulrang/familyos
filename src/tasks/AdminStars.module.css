@@ -1,0 +1,98 @@
+.members {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.members .member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  min-width: 0;
+  border: 2px solid transparent;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+.members .member[aria-pressed="true"] {
+  border-color: currentColor;
+}
+.member > span:last-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.smallBalance,
+.balance {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.smallBalance {
+  font-size: 14px;
+}
+.balance {
+  font-size: 44px;
+  font-weight: 800;
+  color: #76531d;
+}
+.smallBalance svg,
+.balance svg {
+  fill: #f2c94c;
+  stroke: #c59418;
+}
+.fields.fields {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+}
+.segmented {
+  display: flex;
+  gap: 4px;
+  background: #edf2eb;
+  border-radius: 16px;
+  padding: 4px;
+}
+.segmented button {
+  flex: 1;
+  background: transparent;
+  color: #285d4d;
+}
+.segmented button[aria-pressed="true"] {
+  background: #285d4d;
+  color: white;
+}
+.presets {
+  display: flex;
+  gap: 8px;
+}
+.presets button {
+  flex: 1;
+}
+.preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #edf2eb;
+  border-radius: 12px;
+  padding: 14px;
+  font-size: 14px;
+}
+.preview strong {
+  font-size: 24px;
+  color: #285d4d;
+}
+.history li {
+  list-style: none;
+  padding: 14px 0;
+  border-bottom: 1px solid #e2e8e0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+@media (min-width: 650px) {
+  .members {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

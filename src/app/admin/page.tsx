@@ -59,6 +59,17 @@ export default function AdminHome() {
             <p>Review balances and record a correction.</p>
           </div>
         </Link>
+        <Link
+          href="/admin/rewards"
+          className={`${styles.card} ${styles.cardLink}`}
+        >
+          <div>
+            <h2>Rewards</h2>
+            <p>
+              Create household rewards, set star costs, and retire old choices.
+            </p>
+          </div>
+        </Link>
       </div>
       <p className={styles.muted} style={{ marginTop: 28 }}>
         On iPhone, use Safari’s Share menu → Add to Home Screen for quick

@@ -210,3 +210,15 @@ Household Time Zone range, for the Household or for one member. Skips,
 claims, Grants, and Spends are not included; retired members and closed Task
 Windows are.
 _Avoid_: Star Balance, Window (for the range)
+
+**Reward**:
+A household-wide choice with a positive Star cost. A retired Reward is no longer
+available to select or spend on; previous Reward Spends retain its original details.
+
+**Reward Goal**:
+A member's one selected active Reward to save toward at its current cost.
+Selecting a Goal does not reserve Stars, and retiring its Reward clears the Goal.
+
+**Reward Spend**:
+An immutable record of Stars spent on a Reward, retaining the member, Reward,
+and Reward name and cost at the moment of spending. It does not record delivery.
