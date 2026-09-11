@@ -6,7 +6,6 @@ import {
   LEGACY_TONE_COLORS,
   MAX_ACTIVE_MEMBERS,
   type Member,
-  memberSurface,
   parseMemberColor,
   retireMember,
 } from "@/members/members";
@@ -25,6 +24,7 @@ import {
 import { isIanaTimeZone } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { parseUiScale, UI_SCALES, type UiScale } from "@/shared/ui-scale";
+import { MemberColorPreview } from "./MemberColorPreview";
 import { PairingCodeDialog } from "./PairingCodeDialog";
 
 const IDLE_DIM_AFTER_LABEL: Record<IdleDimAfterMs, string> = {
@@ -745,58 +745,53 @@ export function SettingsScreen() {
             ) : (
               <div
                 key={m.id}
-                style={{ display: "flex", gap: 8, alignItems: "center" }}
+                style={{ display: "grid", gap: 12, marginBottom: 12 }}
               >
-                <input
-                  className="fos-input"
-                  placeholder="Name"
-                  value={m.name}
-                  onChange={(e) => patchMember(m.id, { name: e.target.value })}
-                  style={{ flex: 1 }}
-                />
-                <span
-                  aria-hidden
-                  style={{
-                    width: 28,
-                    height: 28,
-                    flex: "0 0 28px",
-                    borderRadius: 8,
-                    background: memberSurface(m.color).fill,
-                  }}
-                />
-                <input
-                  aria-label={`Member Color for ${m.name || "member"}`}
-                  className="fos-input"
-                  type="color"
-                  value={m.color}
-                  onChange={(e) => {
-                    const color = parseMemberColor(e.target.value);
-                    if (!color) return;
-                    if (colorTaken(m.id, color)) {
-                      setError(
-                        "Each Active Member needs a different Member Color.",
-                      );
-                      return;
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    className="fos-input"
+                    placeholder="Name"
+                    value={m.name}
+                    onChange={(e) =>
+                      patchMember(m.id, { name: e.target.value })
                     }
-                    setError(null);
-                    patchMember(m.id, { color });
-                  }}
-                  style={{
-                    width: 48,
-                    height: 40,
-                    flex: "0 0 48px",
-                    padding: 2,
-                    cursor: "pointer",
-                  }}
-                />
-                <Button
-                  variant="ghost"
-                  onClick={() =>
-                    setMembers((ms) => retireMember(ms, m.id) ?? ms)
-                  }
-                >
-                  Retire
-                </Button>
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <input
+                    aria-label={`Member Color for ${m.name || "member"}`}
+                    className="fos-input"
+                    type="color"
+                    value={m.color}
+                    onChange={(e) => {
+                      const color = parseMemberColor(e.target.value);
+                      if (!color) return;
+                      if (colorTaken(m.id, color)) {
+                        setError(
+                          "Each Active Member needs a different Member Color.",
+                        );
+                        return;
+                      }
+                      setError(null);
+                      patchMember(m.id, { color });
+                    }}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      flex: "0 0 48px",
+                      padding: 2,
+                      cursor: "pointer",
+                    }}
+                  />
+                  <Button
+                    variant="ghost"
+                    onClick={() =>
+                      setMembers((ms) => retireMember(ms, m.id) ?? ms)
+                    }
+                  >
+                    Retire
+                  </Button>
+                </div>
+                <MemberColorPreview member={m} />
               </div>
             ),
           )}
