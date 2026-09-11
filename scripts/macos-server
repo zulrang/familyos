@@ -23,6 +23,7 @@ Usage: scripts/macos-server <command>
   install     Write a LaunchAgent and start production on :3000 (survives login)
   uninstall   Stop and remove the LaunchAgent
   update      Checkout main, pull, rebuild, restart
+  check-update Fetch remote main; print whether it has commits missing from local main
   kick-update Submit update as a user-domain one-shot (survives stop of :3000)
   restart     Restart the running agent (no git / build)
   run         Start pnpm start (used by launchd; not a daily command)
@@ -308,6 +309,20 @@ cmd_kick_update() {
   echo "Update job started (${target}). Logs: ${UPDATE_LOG_OUT}"
 }
 
+cmd_check_update() {
+  cd "$ROOT"
+  # Refresh the remote-tracking ref explicitly, even with a custom fetch refspec.
+  # Do not switch branches or touch the working tree while checking.
+  GIT_TERMINAL_PROMPT=0 git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+  local incoming
+  incoming=$(git rev-list --count refs/heads/main..refs/remotes/origin/main)
+  if [[ "$incoming" -gt 0 ]]; then
+    echo '{"available":true}'
+  else
+    echo '{"available":false}'
+  fi
+}
+
 cmd_update() {
   require_darwin
   require_not_root
@@ -371,6 +386,7 @@ case "${1:-}" in
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
   update) cmd_update ;;
+  check-update) cmd_check_update ;;
   kick-update) cmd_kick_update ;;
   restart) cmd_restart ;;
   --check) cmd_check ;;

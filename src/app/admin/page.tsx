@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AdminUpdate } from "@/settings/AdminUpdate";
 import styles from "@/shared/Admin.module.css";
 import { Icon } from "@/shared/ui/Icon";
 
@@ -79,6 +80,7 @@ export default function AdminHome() {
           </div>
         </Link>
       </div>
+      <AdminUpdate />
       <p className={styles.muted} style={{ marginTop: 28 }}>
         On iPhone, use Safari’s Share menu → Add to Home Screen for quick
         access. Connect to home Wi-Fi when making changes.

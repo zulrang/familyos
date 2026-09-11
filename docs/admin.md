@@ -35,6 +35,19 @@ layout, pairing, scaling, and dimming.
 
 ## Editing local data
 
+The admin home page checks for updates when opened. The **Update** card appears
+only when remote `main` has commits missing from local `main`.
+`./scripts/macos-server check-update` fetches `origin/main` and compares commit
+history without switching branches or changing working files. A failed check
+offers a retry instead of showing an Update button.
+
+The **Update** button starts `./scripts/macos-server update`
+through its separate macOS update job (`kick-update`), so it survives the server
+restart. It pulls `main`, installs dependencies, rebuilds, and restarts FamilyOS.
+The checkout must be clean. “Update started” confirms launch, not completion;
+refresh after a few minutes. Update logs are `~/Library/Logs/familyos-update.log`
+and `~/Library/Logs/familyos-update.err.log`.
+
 **Tasks:** create, edit, and retire; manage once/daily/weekly/monthly schedules,
 fixed/open/rotation assignments, type, optional time, and star value. Title,
 type, time, and stars edit in place. Schedule or assignment changes atomically
