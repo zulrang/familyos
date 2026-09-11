@@ -12,6 +12,7 @@ import {
 } from "react";
 import styles from "@/shared/Admin.module.css";
 import { adminRequest } from "@/shared/admin-client";
+import { Icon } from "@/shared/ui/Icon";
 
 type Session = { status: "locked" } | { status: "unlocked"; expiresAt: number };
 type Gate =
@@ -160,9 +161,11 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             className={styles.quiet}
+            aria-label="Lock now"
+            title="Lock now"
             onClick={() => void lock()}
           >
-            Lock now
+            <Icon name="lock" size={22} />
           </button>
         )}
       </header>

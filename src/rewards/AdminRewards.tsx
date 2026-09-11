@@ -1,6 +1,7 @@
 "use client";
 import { type FormEvent, useRef, useState } from "react";
 import styles from "@/shared/Admin.module.css";
+import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import {
   adminRequest,
   adminRequestId,
@@ -63,79 +64,91 @@ function RewardForm({
     }
   }
   return (
-    <form className={styles.form} onSubmit={submit}>
-      <h2>{reward ? "Edit reward" : "Add reward"}</h2>
-      <fieldset className={styles.fields} disabled={save.status !== "editing"}>
-        <div className={styles.stack}>
-          <label>
-            Name
-            <input
-              required
-              maxLength={100}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label>
-            Description
-            <textarea
-              maxLength={500}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </label>
-          <label>
-            Star cost
-            <input
-              required
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={Number.MAX_SAFE_INTEGER}
-              step={1}
-              value={cost}
-              onChange={(e) => setCost(e.target.value)}
-            />
-          </label>
-          <label>
-            Icon
-            <Icon name={icon} size={30} />
-            <select
-              value={icon}
-              onChange={(e) => setIcon(e.target.value as Reward["icon"])}
+    <AdminEditorScreen
+      title={reward ? "Edit reward" : "Add reward"}
+      backLabel="Rewards"
+      onBack={onCancel}
+      busy={save.status === "saving"}
+    >
+      {(close) => (
+        <form className={styles.form} onSubmit={submit}>
+          <fieldset
+            className={styles.fields}
+            disabled={save.status !== "editing"}
+          >
+            <div className={styles.stack}>
+              <label>
+                Name
+                <input
+                  required
+                  maxLength={100}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <label>
+                Description
+                <textarea
+                  maxLength={500}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </label>
+              <label>
+                Star cost
+                <input
+                  required
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={Number.MAX_SAFE_INTEGER}
+                  step={1}
+                  value={cost}
+                  onChange={(e) => setCost(e.target.value)}
+                />
+              </label>
+              <label>
+                Icon
+                <Icon name={icon} size={30} />
+                <select
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value as Reward["icon"])}
+                >
+                  {rewardIcons.map((i) => (
+                    <option key={i} value={i}>
+                      {i.charAt(0).toUpperCase() +
+                        i.slice(1).replaceAll("-", " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          {save.error && (
+            <p role="alert" className={styles.error}>
+              {save.error}
+            </p>
+          )}
+          <div className={styles.actions}>
+            <button type="submit" disabled={save.status === "saving"}>
+              {save.status === "saving"
+                ? "Saving…"
+                : save.status === "error"
+                  ? "Retry save"
+                  : "Save reward"}
+            </button>
+            <button
+              type="button"
+              className={styles.quiet}
+              disabled={save.status === "saving"}
+              onClick={close}
             >
-              {rewardIcons.map((i) => (
-                <option key={i} value={i}>
-                  {i.charAt(0).toUpperCase() + i.slice(1).replaceAll("-", " ")}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </fieldset>
-      {save.error && (
-        <p role="alert" className={styles.error}>
-          {save.error}
-        </p>
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
-      <div className={styles.actions}>
-        <button type="submit" disabled={save.status === "saving"}>
-          {save.status === "saving"
-            ? "Saving…"
-            : save.status === "error"
-              ? "Retry save"
-              : "Save reward"}
-        </button>
-        <button
-          type="button"
-          className={styles.quiet}
-          disabled={save.status === "saving"}
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+    </AdminEditorScreen>
   );
 }
 export function AdminRewards() {
@@ -193,29 +206,13 @@ export function AdminRewards() {
           </button>
         </>
       )}
-      {editor ? (
-        <section className={styles.card}>
-          <RewardForm
-            reward={editor.reward}
-            onSaved={() => {
-              setEditor(null);
-              void reload();
-            }}
-            onCancel={() => {
-              setEditor(null);
-              void reload();
-            }}
-          />
-        </section>
-      ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => setEditor({ reward: null })}
-        >
-          Add reward
-        </button>
-      )}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setEditor({ reward: null })}
+      >
+        Add reward
+      </button>
       <label className={styles.row}>
         <span>Include retired rewards</span>
         <input
@@ -250,7 +247,7 @@ export function AdminRewards() {
                     <button
                       type="button"
                       className={styles.quiet}
-                      disabled={!!editor || busy}
+                      disabled={busy}
                       onClick={() => setEditor({ reward: r })}
                     >
                       Edit reward
@@ -258,7 +255,7 @@ export function AdminRewards() {
                     <button
                       type="button"
                       className={styles.danger}
-                      disabled={!!editor || busy}
+                      disabled={busy}
                       onClick={() => void retire(r)}
                     >
                       Retire reward
@@ -269,15 +266,23 @@ export function AdminRewards() {
             ))}
         </>
       )}
-      {!editor && (
-        <button
-          type="button"
-          className={styles.quiet}
-          disabled={busy}
-          onClick={() => void reload()}
-        >
-          Refresh rewards
-        </button>
+      <button
+        type="button"
+        className={styles.quiet}
+        disabled={busy}
+        onClick={() => void reload()}
+      >
+        Refresh rewards
+      </button>
+      {editor && (
+        <RewardForm
+          reward={editor.reward}
+          onSaved={() => {
+            setEditor(null);
+            void reload();
+          }}
+          onCancel={() => setEditor(null)}
+        />
       )}
     </div>
   );

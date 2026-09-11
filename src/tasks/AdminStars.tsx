@@ -2,6 +2,7 @@
 import { type FormEvent, useRef, useState } from "react";
 import { type HouseholdMember, memberSurface } from "@/members/members";
 import styles from "@/shared/Admin.module.css";
+import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import {
   adminRequest,
   adminRequestId,
@@ -197,7 +198,7 @@ export function AdminStars() {
   const { state, reload } = useAdminData(readTaskAdminData);
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
-  const [formVersion, setFormVersion] = useState(0);
+  const [editor, setEditor] = useState<"closed" | "adjusting">("closed");
   const [saving, setSaving] = useState(false);
   const member =
     state.status === "ready"
@@ -205,7 +206,7 @@ export function AdminStars() {
         state.data.members[0])
       : undefined;
   function refresh() {
-    setFormVersion((v) => v + 1);
+    setEditor("closed");
     void reload();
   }
   return (
@@ -251,17 +252,7 @@ export function AdminStars() {
                     disabled={saving}
                     style={{ background: surface.soft, color: surface.ink }}
                     aria-pressed={member?.id === person.id}
-                    onClick={() => {
-                      if (
-                        member?.id !== person.id &&
-                        window.confirm(
-                          "Change member and discard any unsaved adjustment?",
-                        )
-                      ) {
-                        setSelected(person.id);
-                        setFormVersion((v) => v + 1);
-                      }
-                    }}
+                    onClick={() => setSelected(person.id)}
                   >
                     <Avatar name={person.name} surface={surface} />
                     <span>
@@ -294,21 +285,9 @@ export function AdminStars() {
                     <Icon name="star" size={32} />
                   </span>
                 </div>
-                <StarAdjustmentForm
-                  key={`${member.id}-${formVersion}`}
-                  member={member}
-                  onBusyChange={setSaving}
-                  balance={
-                    state.data.tasks.balances.find(
-                      (b) => b.member === member.id,
-                    )?.balance ?? 0
-                  }
-                  onSaved={() => {
-                    setNotice("Star adjustment recorded.");
-                    refresh();
-                  }}
-                  onCancel={refresh}
-                />
+                <button type="button" onClick={() => setEditor("adjusting")}>
+                  Adjust balance
+                </button>
               </section>
               <section className={styles.card}>
                 <h2>{member.name}’s Star Adjustments</h2>
@@ -339,16 +318,48 @@ export function AdminStars() {
                   Task completion corrections appear under Tasks → Completions.
                 </p>
               </section>
+              {editor === "adjusting" && (
+                <AdminEditorScreen
+                  title="Adjust stars"
+                  backLabel="Stars"
+                  busy={saving}
+                  onBack={() => setEditor("closed")}
+                >
+                  <div className={styles.stack}>
+                    <div className={styles.row}>
+                      <h2>{member.name}</h2>
+                      <span className={starsStyles.balance}>
+                        {state.data.tasks.balances.find(
+                          (b) => b.member === member.id,
+                        )?.balance ?? 0}
+                        <Icon name="star" size={32} />
+                      </span>
+                    </div>
+                    <StarAdjustmentForm
+                      key={member.id}
+                      member={member}
+                      onBusyChange={setSaving}
+                      balance={
+                        state.data.tasks.balances.find(
+                          (b) => b.member === member.id,
+                        )?.balance ?? 0
+                      }
+                      onSaved={() => {
+                        setNotice("Star adjustment recorded.");
+                        refresh();
+                      }}
+                      onCancel={refresh}
+                    />
+                  </div>
+                </AdminEditorScreen>
+              )}
             </>
           )}
           <button
             type="button"
             className={styles.quiet}
             disabled={saving}
-            onClick={() => {
-              if (window.confirm("Discard any unsaved adjustment and refresh?"))
-                refresh();
-            }}
+            onClick={refresh}
           >
             Refresh balances
           </button>
