@@ -10,6 +10,7 @@ export const IDLE_DIM_DEFAULT_AFTER_MS: IdleDimAfterMs = 300_000;
 export const IDLE_DIM_DEFAULT_TO: IdleDimTo = 10;
 
 export const IDLE_DIM_APPLY_URL = "http://127.0.0.1:7380/idle-dim";
+export const IDLE_DIM_CHANGED = "familyos:idle-dim-changed";
 
 export type IdleDim = {
   idleDimAfterMs: IdleDimAfterMs;
@@ -35,6 +36,9 @@ export function parseIdleDimTo(
 }
 
 export async function applyIdleDim(dim: IdleDim): Promise<void> {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(IDLE_DIM_CHANGED, { detail: dim }));
+  }
   try {
     await fetch(IDLE_DIM_APPLY_URL, {
       method: "POST",

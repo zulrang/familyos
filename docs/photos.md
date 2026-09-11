@@ -47,6 +47,12 @@ redirects must use an authorized HTTPS domain.
   standard Photos view.
 - Picker can return images and videos; the FamilyOS slideshow displays raster
   images only.
+- After the Display's configured Idle Dim timeout without interaction, photos
+  automatically play full screen with no controls. Tap anywhere (or press a
+  key) to return to the previous screen, preserving its in-progress state.
+  The wake-up tap does not activate controls underneath. If no photos are
+  available, the current screen stays visible. Hardware backlight dimming
+  continues independently on the kiosk.
 
 The Photo Selection is shared server state. Slideshow position, pause state,
 and full-screen state are local UI state on each Display.

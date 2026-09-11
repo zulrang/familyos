@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AppHeader } from "@/shared/AppHeader";
 import { Button } from "@/shared/ui/Button";
 import { QrCode } from "@/shared/ui/QrCode";
@@ -16,6 +17,15 @@ type ViewMode =
   | { state: "slideshow" }
   | { state: "settings" }
   | { state: "fullscreen"; controlsVisible: boolean };
+
+type PhotosPresentation =
+  | { mode?: "screen" }
+  | {
+      mode: "idle";
+      idle: boolean;
+      onDismiss: () => void;
+      children: ReactNode;
+    };
 
 async function requestPhotos(
   action?: "connect" | "poll" | "disconnect",
@@ -40,7 +50,7 @@ async function requestPhotos(
   return body as PhotosStatus;
 }
 
-export function PhotosScreen() {
+export function PhotosScreen(props: PhotosPresentation = {}) {
   const [screen, setScreen] = useState<ScreenState>({ state: "loading" });
   const [busy, setBusy] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -48,6 +58,7 @@ export function PhotosScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>({ state: "slideshow" });
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const active = useRef<AbortController | null>(null);
+  const idleDialog = useRef<HTMLDialogElement>(null);
 
   async function update(action?: "connect" | "poll" | "disconnect") {
     active.current?.abort();
@@ -95,8 +106,14 @@ export function PhotosScreen() {
   }, []);
 
   useEffect(() => {
-    if (busy || screen.state !== "loaded" || !("pollAfterMs" in screen.status))
-      return;
+    if (busy) return;
+    const pollAfterMs =
+      screen.state === "loaded" && "pollAfterMs" in screen.status
+        ? screen.status.pollAfterMs
+        : props.mode === "idle"
+          ? 60_000
+          : null;
+    if (pollAfterMs === null) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       active.current = controller;
@@ -115,12 +132,12 @@ export function PhotosScreen() {
                   : "Google Photos is unavailable.",
             });
         });
-    }, screen.status.pollAfterMs);
+    }, pollAfterMs);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [screen, busy]);
+  }, [screen, busy, props.mode]);
 
   const status = screen.state === "loaded" ? screen.status : null;
   const ready = status?.state === "ready" ? status : null;
@@ -132,6 +149,20 @@ export function PhotosScreen() {
         : null;
   const count = ready?.photos.length ?? 0;
   const photo = ready?.photos[index % Math.max(1, count)];
+  const playing = props.mode !== "idle" || props.idle;
+  const showingIdle =
+    props.mode === "idle" && props.idle && !!photo && failedSrc !== photo.src;
+
+  useEffect(() => {
+    if (!showingIdle) return;
+    const dialog = idleDialog.current;
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    return () => {
+      if (typeof dialog.close === "function" && dialog.open) dialog.close();
+    };
+  }, [showingIdle]);
 
   useEffect(() => {
     if (!ready || count < 2) return;
@@ -141,13 +172,14 @@ export function PhotosScreen() {
   }, [ready, index, count]);
 
   useEffect(() => {
-    if (paused || viewMode.state === "settings" || count < 2) return;
+    if (!playing || paused || viewMode.state === "settings" || count < 2)
+      return;
     const timer = setInterval(
       () => setIndex((value) => (value + 1) % count),
       15_000,
     );
     return () => clearInterval(timer);
-  }, [paused, viewMode.state, count]);
+  }, [playing, paused, viewMode.state, count]);
 
   useEffect(() => {
     if (viewMode.state !== "fullscreen") return;
@@ -177,6 +209,47 @@ export function PhotosScreen() {
       value.state === "fullscreen"
         ? { state: "fullscreen", controlsVisible: true }
         : value,
+    );
+  }
+
+  if (props.mode === "idle") {
+    return (
+      <>
+        <div className={styles.idleContent} inert={showingIdle}>
+          {props.children}
+        </div>
+        {showingIdle &&
+          photo &&
+          createPortal(
+            <dialog
+              ref={idleDialog}
+              className={styles.idleDialog}
+              aria-label="Idle photo slideshow"
+              onCancel={(event) => {
+                event.preventDefault();
+                props.onDismiss();
+              }}
+            >
+              <button
+                type="button"
+                data-idle-slideshow=""
+                className={styles.idleSlideshow}
+                aria-label="Return to previous screen"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={props.onDismiss}
+              >
+                {/* biome-ignore lint/performance/noImgElement: private authenticated photo stream */}
+                <img
+                  src={photo.src}
+                  alt={ready?.sourceName}
+                  className={styles.photo}
+                  onError={() => setFailedSrc(photo.src)}
+                />
+              </button>
+            </dialog>,
+            document.body,
+          )}
+      </>
     );
   }
 

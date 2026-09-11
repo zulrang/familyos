@@ -3,6 +3,7 @@ import { Newsreader, Nunito_Sans } from "next/font/google";
 import { cookies } from "next/headers";
 import { DisplayTrustWatch } from "@/displays/DisplayTrustWatch";
 import { PairingScreen } from "@/displays/PairingScreen";
+import { IdlePhotos } from "@/photos/IdlePhotos";
 import { IdleDimApply } from "@/shared/IdleDimApply";
 import { NavRail } from "@/shared/NavRail";
 import { resolveTrustedDisplay } from "@/shared/pairing";
@@ -63,19 +64,21 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body>
         <IdleDimApply idleDimAfterMs={idleDimAfterMs} idleDimTo={idleDimTo} />
         <DisplayTrustWatch />
-        <div style={{ display: "flex", height: "100%" }}>
-          <NavRail />
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              height: "100%",
-              position: "relative",
-            }}
-          >
-            {children}
+        <IdlePhotos idleDimAfterMs={idleDimAfterMs}>
+          <div style={{ display: "flex", height: "100%" }}>
+            <NavRail />
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                height: "100%",
+                position: "relative",
+              }}
+            >
+              {children}
+            </div>
           </div>
-        </div>
+        </IdlePhotos>
       </body>
     </html>
   );
