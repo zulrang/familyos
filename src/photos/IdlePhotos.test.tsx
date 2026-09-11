@@ -10,8 +10,11 @@ import {
 import { useState } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { IDLE_DIM_CHANGED } from "@/shared/idle-dim";
+import { NavRail } from "@/shared/NavRail";
 import { IdlePhotos } from "./IdlePhotos";
 import type { PhotosStatus } from "./photos";
+
+vi.mock("next/navigation", () => ({ usePathname: () => "/lists" }));
 
 const ready: PhotosStatus = {
   state: "ready",
@@ -44,6 +47,7 @@ async function setup(status: PhotosStatus = ready) {
   vi.stubGlobal("fetch", async () => Response.json(status));
   render(
     <IdlePhotos idleDimAfterMs={30_000}>
+      <NavRail />
       <PreviousScreen />
     </IdlePhotos>,
   );
@@ -52,6 +56,39 @@ async function setup(status: PhotosStatus = ready) {
 
 const overlay = () =>
   screen.queryByRole("button", { name: "Return to previous screen" });
+
+test("Sleep immediately enters idle and waking preserves the screen and restarts its timeout", async () => {
+  await setup();
+  fireEvent.click(screen.getByText("Count 0"));
+  const sleep = screen.getByRole("button", { name: "Sleep" });
+  expect(screen.queryByRole("link", { name: "Sleep" })).toBeNull();
+  fireEvent.pointerDown(sleep);
+  fireEvent.pointerUp(sleep);
+  fireEvent.click(sleep);
+  expect(overlay()).toBeVisible();
+  expect(screen.getByText("Count 1").parentElement).toHaveAttribute("inert");
+  const wake = screen.getByRole("button", {
+    name: "Return to previous screen",
+  });
+  fireEvent.pointerDown(wake);
+  fireEvent.pointerUp(wake);
+  fireEvent.click(wake);
+  expect(overlay()).not.toBeInTheDocument();
+  expect(screen.getByText("Count 1")).toBeVisible();
+  expect(screen.getByText("Count 1").parentElement).not.toHaveAttribute(
+    "inert",
+  );
+  await act(() => vi.advanceTimersByTimeAsync(29_999));
+  expect(overlay()).not.toBeInTheDocument();
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(overlay()).toBeVisible();
+  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.click(screen.getByRole("button", { name: "Sleep" }));
+  expect(overlay()).toBeVisible();
+  fireEvent.keyDown(window, { key: "Enter" });
+  expect(overlay()).not.toBeInTheDocument();
+  expect(screen.getByText("Count 1")).toBeVisible();
+});
 
 test("idle playback advances and a full tap restores the preserved screen without clicking through", async () => {
   await setup();

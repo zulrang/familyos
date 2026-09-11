@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useContext } from "react";
 import { FAMILYOS_NAV } from "@/shared/nav";
+import { SleepContext } from "@/shared/SleepContext";
 import { Icon } from "@/shared/ui/Icon";
 
 export type NavRailItem = { id: string; label: string; icon: string };
@@ -18,6 +19,7 @@ export function NavRail({
   style?: CSSProperties;
 }) {
   const path = usePathname();
+  const sleep = useContext(SleepContext);
   const active = path === "/" ? "calendar" : path.slice(1).split("/")[0];
   return (
     <nav
@@ -48,26 +50,36 @@ export function NavRail({
       <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
         {items.map((it) => {
           const on = it.id === active;
-          return (
+          const itemStyle: CSSProperties = {
+            border: "none",
+            background: on ? "var(--white)" : "transparent",
+            color: on ? "var(--text-title)" : "var(--neutral-600)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 6,
+            padding: "13px 2px",
+            marginTop: it.id === "sleep" ? "auto" : 0,
+            font: "var(--type-nav-label)",
+          };
+          const content = (
+            <>
+              <Icon name={it.icon} size={22} />
+              {it.label}
+            </>
+          );
+          return it.id === "sleep" ? (
+            <button key={it.id} type="button" onClick={sleep} style={itemStyle}>
+              {content}
+            </button>
+          ) : (
             <Link
               key={it.id}
               href={it.id === "calendar" ? "/" : `/${it.id}`}
               prefetch={false}
-              style={{
-                border: "none",
-                background: on ? "var(--white)" : "transparent",
-                color: on ? "var(--text-title)" : "var(--neutral-600)",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 6,
-                padding: "13px 2px",
-                marginTop: it.id === "sleep" ? "auto" : 0,
-                font: "var(--type-nav-label)",
-              }}
+              style={itemStyle}
             >
-              <Icon name={it.icon} size={22} />
-              {it.label}
+              {content}
             </Link>
           );
         })}

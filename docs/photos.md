@@ -53,6 +53,8 @@ redirects must use an authorized HTTPS domain.
   The wake-up tap does not activate controls underneath. If no photos are
   available, the current screen stays visible. Hardware backlight dimming
   continues independently on the kiosk.
+- **Sleep** in the navigation rail starts this idle slideshow immediately.
+  Waking returns to the same screen with its in-progress state preserved.
 
 The Photo Selection is shared server state. Slideshow position, pause state,
 and full-screen state are local UI state on each Display.

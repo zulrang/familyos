@@ -6,6 +6,7 @@ import {
   type IdleDim,
   type IdleDimAfterMs,
 } from "@/shared/idle-dim";
+import { SleepContext } from "@/shared/SleepContext";
 import { PhotosScreen } from "./PhotosScreen";
 
 export function IdlePhotos({
@@ -67,7 +68,7 @@ export function IdlePhotos({
       idle={state === "idle"}
       onDismiss={() => setState("active")}
     >
-      {children}
+      <SleepContext value={() => setState("idle")}>{children}</SleepContext>
     </PhotosScreen>
   );
 }
