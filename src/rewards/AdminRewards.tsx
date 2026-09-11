@@ -99,13 +99,14 @@ function RewardForm({
           </label>
           <label>
             Icon
+            <Icon name={icon} size={30} />
             <select
               value={icon}
               onChange={(e) => setIcon(e.target.value as Reward["icon"])}
             >
               {rewardIcons.map((i) => (
                 <option key={i} value={i}>
-                  {i}
+                  {i.charAt(0).toUpperCase() + i.slice(1).replaceAll("-", " ")}
                 </option>
               ))}
             </select>

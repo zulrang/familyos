@@ -14,6 +14,21 @@ export const rewardIcons = [
   "utensils",
   "image",
   "moon",
+  "gift",
+  "gamepad",
+  "film",
+  "tv",
+  "music",
+  "headphones",
+  "ice-cream",
+  "pizza",
+  "cake",
+  "cookie",
+  "palette",
+  "bike",
+  "tent",
+  "ticket",
+  "heart",
 ] as const;
 export type RewardIcon = (typeof rewardIcons)[number];
 export type Reward = RewardDraft & {

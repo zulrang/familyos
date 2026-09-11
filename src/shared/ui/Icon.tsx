@@ -30,6 +30,89 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M12 8H7.5A2.5 2.5 0 1 1 10 5.5L12 8Zm0 0h4.5A2.5 2.5 0 1 0 14 5.5L12 8Z" />
     </>
   ),
+  gamepad: (
+    <>
+      <path d="M7 6h10a4 4 0 0 1 4 3l1 8a2 2 0 0 1-3 2l-4-3H9l-4 3a2 2 0 0 1-3-2l1-8a4 4 0 0 1 4-3Z" />
+      <path d="M7 9v4M5 11h4M16 10h.01M19 12h.01" />
+    </>
+  ),
+  film: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4M7 12h10" />
+    </>
+  ),
+  tv: (
+    <>
+      <rect x="3" y="7" width="18" height="14" rx="2" />
+      <path d="m7 2 5 5 5-5" />
+    </>
+  ),
+  music: (
+    <>
+      <path d="M9 18V5l12-3v13M9 9l12-3" />
+      <ellipse cx="6" cy="18" rx="3" ry="3" />
+      <ellipse cx="18" cy="15" rx="3" ry="3" />
+    </>
+  ),
+  headphones: (
+    <>
+      <path d="M3 14v-3a9 9 0 0 1 18 0v3" />
+      <rect x="3" y="12" width="4" height="9" rx="2" />
+      <rect x="17" y="12" width="4" height="9" rx="2" />
+    </>
+  ),
+  "ice-cream": (
+    <>
+      <path d="m8 13 4 9 4-9M6 7a6 6 0 0 1 12 0 3 3 0 0 1 0 6H6a3 3 0 0 1 0-6Z" />
+    </>
+  ),
+  pizza: (
+    <>
+      <path d="m3 21 5-17a19 19 0 0 1 12 12L3 21ZM7 7a15 15 0 0 1 10 10" />
+      <circle cx="9" cy="13" r="1" />
+      <path d="M7 17h.01M13 15h.01" />
+    </>
+  ),
+  cake: (
+    <>
+      <path d="M12 3v2M8 10V7h8v3M3 21h18M5 21V10h14v11M5 14q2 4 4 0 3 4 6 0 2 4 4 0" />
+    </>
+  ),
+  cookie: (
+    <>
+      <path d="M21 12a9 9 0 1 1-9-9 4 4 0 0 0 4 4 4 4 0 0 0 5 5Z" />
+      <path d="M8 8h.01M7 14h.01M12 12h.01M12 18h.01M17 15h.01" />
+    </>
+  ),
+  palette: (
+    <>
+      <path d="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-4 2 2 0 0 1 1-4h3a3 3 0 0 0 3-3c0-4-4-7-9-7Z" />
+      <circle cx="7" cy="11" r="1" />
+      <circle cx="10" cy="7" r="1" />
+      <circle cx="15" cy="7" r="1" />
+    </>
+  ),
+  bike: (
+    <>
+      <circle cx="5" cy="17" r="4" />
+      <circle cx="19" cy="17" r="4" />
+      <path d="m5 17 5-9 5 9H5M8 8h4M10 8l7 0M15 3h2l2 14" />
+    </>
+  ),
+  tent: (
+    <>
+      <path d="m3 21 9-18 9 18H3Zm5 0 4-8 4 8M10 3l2 4 2-4" />
+    </>
+  ),
+  ticket: (
+    <>
+      <path d="M3 5h18v4a3 3 0 0 0 0 6v4H3v-4a3 3 0 0 0 0-6V5ZM15 5v2M15 11v2M15 17v2" />
+    </>
+  ),
+  heart: (
+    <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0l-1 1-1-1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />
+  ),
   utensils: (
     <>
       <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2" />
