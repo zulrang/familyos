@@ -22,7 +22,8 @@ layout, pairing, scaling, and dimming.
   credential hashes in `admin.sqlite` under `FAMILYOS_DATA_DIR` (default `data/`).
 - Every admin data request checks session expiry on the server. Reading data
   does not renew a session. Foreground interaction renews it, at most once per
-  ten seconds. Fifteen minutes without activity locks access; **Lock now** also
+  ten seconds. Fifteen minutes without activity locks access; the **lock icon**
+  (accessible label “Lock now”) also
   revokes the server session. The browser clears protected screens on expiry
   and checks access when returning from the background.
 - Five failed attempts on a device start a five-minute cooldown. Fifty failed
@@ -65,6 +66,48 @@ If a completion's stars have already been spent, reversing it requires enough
 balance first; no partial correction is saved. Adjustment history and completion
 history remain separate.
 
+**Rewards:** create household choices, edit their names, descriptions, icons and
+positive star costs, or retire them. Retirement clears selected goals and keeps
+previous Spend details. The wall Rewards screen handles goal selection and
+spending. See [Rewards](rewards.md). Rewards owed and delivery are deferred to
+[issue #82](https://github.com/zulrang/familyos/issues/82).
+
+Calendar, Google lists, photos, and system settings are not part of this admin release.
+
+## Mobile workflow
+
+The home screen links to Tasks, Members, Stars, and Rewards. Section navigation
+stays available on list pages. Create/edit actions for Tasks, Members, and
+Rewards open a rounded drawer covering 90% of the viewport. In Stars, select a
+member and choose **Adjust balance** to open the same drawer for Grant/Spend.
+
+The drawer slides up while the backdrop fades in. The list remains visible
+underneath, preserving its content and scroll position, but cannot be interacted
+with while the drawer is open. The form scrolls independently beneath a fixed
+title bar. Use the circular down-chevron button at the top right to dismiss it;
+the drawer slides down as the backdrop fades out. Cancel controls use the same
+transition. Close is disabled during a save, and reduced-motion preferences
+skip the animations. A successful save closes the drawer and reloads its data.
+Completion corrections remain inline under Tasks → Completions.
+
+Opening or refreshing a normal admin route shows its page, not a new-task form.
+The development preview wrapper can automatically sign in and open **New task**
+to demonstrate the drawer; those behaviors belong only to the temporary wrapper.
+
+## Screenshots
+
+Captured from the actual admin routes on 2026-09-11 at a 390 × 844 mobile viewport.
+Names, tasks, and balances are browser-only sample data, not household records.
+These show the web interface, not a native iOS app or Safari's browser chrome.
+
+| Admin home | Task list |
+| --- | --- |
+| ![Admin home with Tasks, Members, Stars, and Rewards links](screenshots/admin/home.png) | ![Task list with search, create, edit, and retire controls](screenshots/admin/tasks.png) |
+
+| Task editor | Star adjustment |
+| --- | --- |
+| ![Task edit drawer with circular down-chevron close button](screenshots/admin/task-drawer.png) | ![Star adjustment drawer showing a three-star grant and projected balance](screenshots/admin/star-adjustment.png) |
+
 ## Task storage migration
 
 The first task-store open upgrades SQLite to version 2 transactionally. Following
@@ -74,10 +117,45 @@ credit their stored star value exactly once, including late events for retired
 definitions. Changing a task's star value does not revalue existing balances.
 Legacy completions have no stored credit to reverse when corrected.
 
-**Rewards:** create household choices, edit their names, descriptions, icons and
-positive star costs, or retire them. Retirement clears selected goals and keeps
-previous Spend details. The wall Rewards screen handles goal selection and
-spending. See [Rewards](rewards.md). Rewards owed and delivery are deferred to
-[issue #82](https://github.com/zulrang/familyos/issues/82).
+## Development preview
 
-Calendar, Google lists, photos, and system settings are not part of this admin release.
+For a phone-sized browser preview served from the Mac to a remote PC, follow
+[Mobile admin preview](agents/mobile-preview.md). It uses isolated temporary data.
+
+## Reusing form drawers
+
+Create/edit forms use `src/shared/AdminEditorScreen.tsx`. Wrap the form inside
+this component where its saving state is owned:
+
+```tsx
+<AdminEditorScreen
+  title="Edit member"
+  backLabel="Members"
+  onBack={onCancel}
+  busy={save.status === "saving"}
+>
+  {(close) => (
+    <form onSubmit={submit}>
+      {/* Fields and save action */}
+      <button type="button" disabled={save.status === "saving"} onClick={close}>
+        Cancel
+      </button>
+    </form>
+  )}
+</AdminEditorScreen>
+```
+
+The shared component provides a 90%-height bottom drawer with rounded top corners,
+a fixed title bar with a circular down-chevron close button on the right, its own
+scrolling content area, safe-area spacing, initial heading focus, and reduced-motion
+support. The browser makes the underlying admin shell inert.
+The close button, Escape, and the render callback's `close` slide the drawer down before
+calling `onBack`. `backLabel` supplies the close button’s accessible destination
+label and is not shown as button text; dismissal is blocked while `busy` or already
+closing. Reduced motion skips the animation. Pass ordinary React children when no additional
+close control is needed. The form owns validation, persistence, save/cancel
+actions, and any discard confirmation.
+Keep the list mounted and render the drawer alongside it while editing, so the
+background content and scroll position survive opening and dismissal. Dismiss
+the drawer on successful save or cancellation; avoid replacing the list with an
+early return for the editor.

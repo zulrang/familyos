@@ -68,7 +68,6 @@ export function AdminTasks() {
           type="button"
           className={section === "definitions" ? undefined : styles.quiet}
           aria-pressed={section === "definitions"}
-          disabled={!!editor}
           onClick={() => setSection("definitions")}
         >
           Manage tasks
@@ -77,7 +76,6 @@ export function AdminTasks() {
           type="button"
           className={section === "completions" ? undefined : styles.quiet}
           aria-pressed={section === "completions"}
-          disabled={!!editor}
           onClick={() => setSection("completions")}
         >
           Completions
@@ -122,23 +120,9 @@ export function AdminTasks() {
             />
           ) : (
             <>
-              {editor ? (
-                <AdminTaskForm
-                  key={editor.kind === "new" ? "new" : editor.task.id}
-                  task={editor.kind === "edit" ? editor.task : undefined}
-                  members={state.data.members}
-                  today={state.data.tasks.today}
-                  onSaved={() => saved("Task saved.")}
-                  onCancel={() => setEditor(null)}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setEditor({ kind: "new" })}
-                >
-                  New task
-                </button>
-              )}
+              <button type="button" onClick={() => setEditor({ kind: "new" })}>
+                New task
+              </button>
               <div className={styles.form}>
                 <label className={styles.check}>
                   <input
@@ -212,7 +196,7 @@ export function AdminTasks() {
                             type="button"
                             className={styles.quiet}
                             aria-label={`Edit ${task.title}`}
-                            disabled={!!editor || !!retiring}
+                            disabled={!!retiring}
                             onClick={() => setEditor({ kind: "edit", task })}
                           >
                             Edit
@@ -220,7 +204,7 @@ export function AdminTasks() {
                           <button
                             type="button"
                             className={styles.danger}
-                            disabled={!!editor || !!retiring}
+                            disabled={!!retiring}
                             aria-label={`Retire ${task.title}`}
                             onClick={() => void retire(task)}
                           >
@@ -236,19 +220,21 @@ export function AdminTasks() {
           <button
             type="button"
             className={styles.quiet}
-            onClick={() => {
-              if (
-                !editor ||
-                window.confirm("Discard this unsaved task edit and refresh?")
-              ) {
-                setEditor(null);
-                void reload();
-              }
-            }}
+            onClick={() => void reload()}
           >
             Refresh tasks
           </button>
         </>
+      )}
+      {editor && state.status === "ready" && (
+        <AdminTaskForm
+          key={editor.kind === "new" ? "new" : editor.task.id}
+          task={editor.kind === "edit" ? editor.task : undefined}
+          members={state.data.members}
+          today={state.data.tasks.today}
+          onSaved={() => saved("Task saved.")}
+          onCancel={() => setEditor(null)}
+        />
       )}
     </div>
   );

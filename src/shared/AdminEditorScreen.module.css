@@ -1,0 +1,122 @@
+.screen {
+  position: fixed;
+  inset: auto 0 0;
+  width: 100%;
+  max-width: none;
+  height: 90dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -8px 40px #263d3626;
+  color: #263d36;
+  background: #f6f8f5;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.screen[open] {
+  display: flex;
+  flex-direction: column;
+  animation: enter 240ms ease-out;
+}
+
+.screen::backdrop {
+  background: #10271f55;
+  animation: backdrop-in 240ms ease-out both;
+}
+
+.screen[data-phase="closing"]::backdrop {
+  animation: backdrop-out 220ms ease-in both;
+}
+
+.navigation {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 60px;
+  padding: 4px max(12px, env(safe-area-inset-right)) 0
+    max(12px, env(safe-area-inset-left));
+  border-bottom: 1px solid #d6e0d7;
+  background: #f6f8f5;
+}
+
+.screen .navigation h1 {
+  grid-column: 2;
+  grid-row: 1;
+  font-family: var(--font-nunito), sans-serif;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: center;
+  outline: none;
+}
+
+.screen .back {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #e2eddf;
+  color: #285d4d;
+  font-weight: 600;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 24px max(18px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+}
+
+.content {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+@keyframes enter {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen[open],
+  .screen::backdrop,
+  .screen[data-phase="closing"]::backdrop {
+    animation: none;
+  }
+}

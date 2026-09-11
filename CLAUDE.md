@@ -44,6 +44,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Design contracts: `.cursor/skills/familyos-design/readme.md`
 - Wall Pi / OSK: `docs/kiosk.md` · machine-local: `docs/kiosk.local.md` (gitignored)
 - Decision records: `docs/adr/`
+- Mobile browser previews or access from a remote PC: `docs/agents/mobile-preview.md`
 
 ## Agent skills
 

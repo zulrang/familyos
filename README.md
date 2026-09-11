@@ -3,11 +3,11 @@
 A locally hosted kitchen-wall command center for one household and multiple
 paired displays. The implemented product surfaces are a rolling five-day
 calendar, selected Google Tasks lists, household Tasks, a Google Photos
-slideshow, Settings, and the fixed navigation rail. Rewards, Meals, Recipes,
+slideshow, Rewards, Settings, and the fixed navigation rail. Meals, Recipes,
 and Sleep remain stubs.
 
 You run one FamilyOS server on a computer you control; wall panels connect over
-the local network. Parents can manage local Tasks, Members, and star corrections
+the local network. Parents can manage local Tasks, Members, Rewards, and star balances
 from the separate mobile interface at `/admin`.
 
 ![FamilyOS calendar](docs/calendar.png)
@@ -39,8 +39,16 @@ Open [http://localhost:3001](http://localhost:3001) → pair the Display →
 Set a six-digit `FAMILYOS_ADMIN_PIN` in the server's environment or `.env.local`
 and restart. Open `/admin` on home Wi-Fi; display pairing is not required.
 Safari's **Share → Add to Home Screen** provides standalone access. Sessions
-lock after 15 minutes of inactivity. Setup, editing behavior, and task-storage
-migration details: [docs/admin.md](docs/admin.md).
+lock after 15 minutes of inactivity; the header's lock icon locks immediately.
+
+Manage Tasks, Members, Rewards, completion corrections, and star balances.
+Create/edit forms and star adjustments open in 90%-height drawers with their own
+scrolling area and a circular down-chevron close button. The list stays visible
+underneath.
+
+See the [admin guide and mobile screenshots](docs/admin.md) for workflows, access
+rules, and storage behavior, or the [remote mobile preview runbook](docs/agents/mobile-preview.md)
+to preview changes from another computer.
 
 ## Touchscreen
 
@@ -54,6 +62,7 @@ The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.
 - [INSTALL.md](INSTALL.md) — clone, Google OAuth, wall kiosk, touchscreen
 - [docs/SSD.md](docs/SSD.md) — architecture, boundaries, and remaining gaps
 - [docs/kiosk.md](docs/kiosk.md) — FullPageOS Chromium, OSK extension, idle dim
+- [docs/admin.md](docs/admin.md) — parent admin setup, workflows, and mobile screenshots
 - [docs/photos.md](docs/photos.md) — Google Photos setup and slideshow behavior
 - [docs/requirements.md](docs/requirements.md) — v1 scope
 - [docs/code-design-principles.md](docs/code-design-principles.md) — coding standards for humans and agents

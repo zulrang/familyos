@@ -257,10 +257,25 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 ## 8. Future Direction
 
 - Tasks is designed and ready to build: `docs/design/tasks-design-spec.md` (member columns per the design-skill kit, minus TimeOfDayTabs and the points pill). Keep shell/calendar/lists code from depending on the remaining feature modules.
-- Companion surfaces (phone/tablet) are mentioned in the design skill and are not v1. Don’t add a responsive breakpoint architecture “for later.”
+- The parent admin is a separate mobile surface; the wall layout remains kiosk-oriented. Other companion surfaces are deferred.
 
 ## Rewards
 
 The `/rewards` wall screen and `/admin/rewards` catalog are implemented. Mobile
 `/admin/stars` uses the approved Manage stars layout. Domain, storage, access,
 and deferred fulfillment details are in [rewards.md](rewards.md).
+
+
+## Parent admin
+
+`/admin` has a separate mobile shell and PIN session gate, without display
+pairing. App routes compose the Tasks, Members, Stars, and Rewards slices.
+`src/shared/AdminEditorScreen.tsx` supplies the shared modal drawer: 90% viewport
+height, independent scrolling, a round down-chevron close control, coordinated
+drawer/backdrop animation, and reduced-motion support. Feature pages keep their
+lists mounted underneath; forms own validation, saving, and cancellation.
+
+Task/member/reward editors and star balance adjustments use the drawer.
+Completion corrections remain inline. The shell's lock icon revokes the session.
+See [Parent admin](admin.md) for setup, access rules, workflows, screenshots,
+and the reusable component's interface.

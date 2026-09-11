@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import styles from "@/shared/Admin.module.css";
+import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import {
   adminRequest,
   adminRequestId,
@@ -47,52 +48,60 @@ function MemberForm({
     }
   }
   return (
-    <form className={`${styles.card} ${styles.form}`} onSubmit={submit}>
-      <h2>{member ? "Edit member" : "Add a member"}</h2>
-      <label>
-        Name
-        <input
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          required
-          maxLength={100}
-          autoComplete="off"
-        />
-      </label>
-      {member?.status !== "retired" && (
-        <label>
-          Member color
-          <input
-            type="color"
-            value={color}
-            onChange={(event) => setColor(event.target.value)}
-          />
-        </label>
+    <AdminEditorScreen
+      title={member ? "Edit member" : "Add a member"}
+      backLabel="Members"
+      onBack={onCancel}
+      busy={save.status === "saving"}
+    >
+      {(close) => (
+        <form className={`${styles.card} ${styles.form}`} onSubmit={submit}>
+          <label>
+            Name
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              maxLength={100}
+              autoComplete="off"
+            />
+          </label>
+          {member?.status !== "retired" && (
+            <label>
+              Member color
+              <input
+                type="color"
+                value={color}
+                onChange={(event) => setColor(event.target.value)}
+              />
+            </label>
+          )}
+          <p className={styles.muted}>
+            {member?.status === "retired"
+              ? "This member is retired. Their identity and history are preserved."
+              : "Up to six active members, each with their own color."}
+          </p>
+          {save.error && (
+            <p className={styles.error} role="alert">
+              {save.error}
+            </p>
+          )}
+          <div className={styles.actions}>
+            <button type="submit" disabled={save.status === "saving"}>
+              {save.status === "saving" ? "Saving…" : "Save member"}
+            </button>
+            <button
+              type="button"
+              className={styles.quiet}
+              disabled={save.status === "saving"}
+              onClick={close}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
       )}
-      <p className={styles.muted}>
-        {member?.status === "retired"
-          ? "This member is retired. Their identity and history are preserved."
-          : "Up to six active members, each with their own color."}
-      </p>
-      {save.error && (
-        <p className={styles.error} role="alert">
-          {save.error}
-        </p>
-      )}
-      <div className={styles.actions}>
-        <button type="submit" disabled={save.status === "saving"}>
-          {save.status === "saving" ? "Saving…" : "Save member"}
-        </button>
-        <button
-          type="button"
-          className={styles.quiet}
-          disabled={save.status === "saving"}
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+    </AdminEditorScreen>
   );
 }
 
@@ -160,23 +169,9 @@ export function AdminMembers() {
       )}
       {state.status === "ready" && (
         <>
-          {editor ? (
-            <MemberForm
-              key={editor.kind === "new" ? "new" : editor.member.id}
-              member={editor.kind === "edit" ? editor.member : undefined}
-              version={state.data.version}
-              onCancel={() => setEditor(null)}
-              onSaved={() => {
-                setEditor(null);
-                setNotice({ kind: "success", message: "Member saved." });
-                void reload();
-              }}
-            />
-          ) : (
-            <button type="button" onClick={() => setEditor({ kind: "new" })}>
-              Add member
-            </button>
-          )}
+          <button type="button" onClick={() => setEditor({ kind: "new" })}>
+            Add member
+          </button>
           {!state.data.members.length && (
             <p className={styles.card}>Add your first member to get started.</p>
           )}
@@ -199,7 +194,7 @@ export function AdminMembers() {
                 <button
                   type="button"
                   className={styles.quiet}
-                  disabled={!!editor || !!retiring}
+                  disabled={!!retiring}
                   onClick={() => setEditor({ kind: "edit", member })}
                   aria-label={`Edit ${member.name}`}
                 >
@@ -209,7 +204,7 @@ export function AdminMembers() {
                   <button
                     type="button"
                     className={styles.danger}
-                    disabled={!!editor || !!retiring}
+                    disabled={!!retiring}
                     onClick={() => void retire(member, state.data.version)}
                     aria-label={`Retire ${member.name}`}
                   >
@@ -222,19 +217,24 @@ export function AdminMembers() {
           <button
             type="button"
             className={styles.quiet}
-            onClick={() => {
-              if (
-                !editor ||
-                window.confirm("Discard this unsaved member edit and refresh?")
-              ) {
-                setEditor(null);
-                void reload();
-              }
-            }}
+            onClick={() => void reload()}
           >
             Refresh members
           </button>
         </>
+      )}
+      {editor && state.status === "ready" && (
+        <MemberForm
+          key={editor.kind === "new" ? "new" : editor.member.id}
+          member={editor.kind === "edit" ? editor.member : undefined}
+          version={state.data.version}
+          onCancel={() => setEditor(null)}
+          onSaved={() => {
+            setEditor(null);
+            setNotice({ kind: "success", message: "Member saved." });
+            void reload();
+          }}
+        />
       )}
     </div>
   );

@@ -188,6 +188,13 @@ const ICONS: Record<string, ReactNode> = {
   ),
   "chevron-left": <path d="m15 18-6-6 6-6" />,
   "chevron-right": <path d="m9 18 6-6-6-6" />,
+  "chevron-down": <path d="m6 9 6 6 6-6" />,
+  lock: (
+    <>
+      <rect x="4" y="10" width="16" height="11" rx="2" />
+      <path d="M8 10V6a4 4 0 0 1 8 0v4" />
+    </>
+  ),
   "log-out": (
     <>
       <path d="m16 17 5-5-5-5" />
