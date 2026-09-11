@@ -1,5 +1,6 @@
 import Link from "next/link";
 import styles from "@/shared/Admin.module.css";
+import { Icon } from "@/shared/ui/Icon";
 
 export default function AdminHome() {
   return (
@@ -63,6 +64,13 @@ export default function AdminHome() {
           href="/admin/rewards"
           className={`${styles.card} ${styles.cardLink}`}
         >
+          <span
+            aria-hidden="true"
+            className={styles.tile}
+            style={{ background: "#d6ece9" }}
+          >
+            <Icon name="gift" size={28} />
+          </span>
           <div>
             <h2>Rewards</h2>
             <p>
