@@ -5,6 +5,7 @@ import {
   currentBountyInterval,
   parseRecurringBountySchedule,
   type RecurringBountySchedule,
+  sameBountyRecurrence,
 } from "./bounty-calendar";
 import { parseLocalDate } from "./types";
 
@@ -57,6 +58,24 @@ describe("recurring Bounty schedule parsing", () => {
         startsOn: "2026-09-13",
         cadence: { kind: "monthly", day: 28 },
       },
+    );
+  });
+
+  test("compares selected weekdays as a set", () => {
+    assert.equal(
+      sameBountyRecurrence(
+        schedule({
+          kind: "recurring",
+          startsOn: "2026-09-13",
+          cadence: { kind: "weekly", days: ["mon", "fri"] },
+        }),
+        schedule({
+          kind: "recurring",
+          startsOn: "2026-09-13",
+          cadence: { kind: "weekly", days: ["fri", "mon"] },
+        }),
+      ),
+      true,
     );
   });
 

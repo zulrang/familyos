@@ -114,6 +114,37 @@ export function parseBountyRecurrence(raw: unknown): BountyRecurrence | null {
   return parseRecurringBountySchedule(raw);
 }
 
+export function sameBountyRecurrence(
+  left: BountyRecurrence,
+  right: BountyRecurrence,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "once" || right.kind === "once") return true;
+  if (
+    left.startsOn !== right.startsOn ||
+    left.cadence.kind !== right.cadence.kind
+  ) {
+    return false;
+  }
+  switch (left.cadence.kind) {
+    case "daily":
+      return right.cadence.kind === "daily";
+    case "monthly":
+      return (
+        right.cadence.kind === "monthly" &&
+        left.cadence.day === right.cadence.day
+      );
+    case "weekly": {
+      if (right.cadence.kind !== "weekly") return false;
+      const rightDays = right.cadence.days;
+      return (
+        left.cadence.days.length === rightDays.length &&
+        left.cadence.days.every((day) => rightDays.includes(day))
+      );
+    }
+  }
+}
+
 function weekdayIndex(date: LocalDate): number {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay();

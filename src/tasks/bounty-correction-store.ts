@@ -24,19 +24,31 @@ import {
 
 export class BountyCorrectionStoreError extends Error {}
 
-type CorrectedClaimState = "reopened" | "completed" | "released";
+type CorrectedClaim<S extends "reopened" | "completed" | "released"> =
+  Readonly<{
+    id: ClaimId;
+    revision: ClaimRevision;
+    state: S;
+  }>;
 
 export type BountyCorrectionReceipt = Readonly<{
   status: "accepted" | "already-applied";
-  result: Readonly<{
-    kind: "undone" | "restored" | "reassigned";
-    correction: BountyCompletionCorrection;
-    claim: Readonly<{
-      id: ClaimId;
-      revision: ClaimRevision;
-      state: CorrectedClaimState;
-    }>;
-  }>;
+  result:
+    | Readonly<{
+        kind: "undone";
+        correction: Extract<BountyCompletionCorrection, { kind: "undo" }>;
+        claim: CorrectedClaim<"reopened" | "released">;
+      }>
+    | Readonly<{
+        kind: "restored";
+        correction: Extract<BountyCompletionCorrection, { kind: "restore" }>;
+        claim: CorrectedClaim<"completed">;
+      }>
+    | Readonly<{
+        kind: "reassigned";
+        correction: Extract<BountyCompletionCorrection, { kind: "reassign" }>;
+        claim: CorrectedClaim<"completed">;
+      }>;
 }>;
 
 function correctionFromRow(
@@ -88,19 +100,53 @@ function correctionFromRow(
   ) {
     throw new Error("corrupt Bounty completion correction");
   }
-  return {
+  const fields = {
     id,
-    kind,
     claim,
     completion,
     predecessor,
-    fromMember,
-    toMember,
     creditedStars,
     creditProvenance,
     reason: row.reason,
     at,
   };
+  if (kind === "undo" && fromMember && toMember === null)
+    return { ...fields, kind, fromMember, toMember };
+  if (kind === "restore" && fromMember === null && toMember)
+    return { ...fields, kind, fromMember, toMember };
+  if (kind === "reassign" && fromMember && toMember)
+    return { ...fields, kind, fromMember, toMember };
+  throw new Error("corrupt Bounty completion correction");
+}
+
+function receiptResult(
+  kind: "undone" | "restored" | "reassigned",
+  correction: BountyCompletionCorrection,
+  claim: CorrectedClaim<"reopened" | "completed" | "released">,
+): BountyCorrectionReceipt["result"] | null {
+  if (
+    kind === "undone" &&
+    correction.kind === "undo" &&
+    (claim.state === "reopened" || claim.state === "released")
+  )
+    return {
+      kind,
+      correction,
+      claim: { ...claim, state: claim.state },
+    };
+  if (
+    kind === "restored" &&
+    correction.kind === "restore" &&
+    claim.state === "completed"
+  )
+    return { kind, correction, claim: { ...claim, state: claim.state } };
+  if (
+    kind === "reassigned" &&
+    correction.kind === "reassign" &&
+    claim.state === "completed"
+  )
+    return { kind, correction, claim: { ...claim, state: claim.state } };
+  return null;
 }
 
 export function loadBountyCompletionCorrections(
@@ -153,12 +199,13 @@ function parseReceipt(raw: unknown): BountyCorrectionReceipt | null {
   } catch {
     return null;
   }
-  return claim && revision !== null && state
-    ? {
-        status: "accepted",
-        result: { kind, correction, claim: { id: claim, revision, state } },
-      }
-    : null;
+  if (!claim || revision === null || !state) return null;
+  const result = receiptResult(kind, correction, {
+    id: claim,
+    revision,
+    state,
+  });
+  return result ? { status: "accepted", result } : null;
 }
 
 function priorReceipt(
@@ -229,19 +276,22 @@ function changeBalance(
   ).run(member, next);
 }
 
-function insertCorrection(input: {
+type NewCorrection = {
   db: DatabaseSync;
   id: BountyCorrectionId;
-  kind: BountyCompletionCorrection["kind"];
   claim: ClaimId;
   completion: BountyCompletionCorrection["completion"];
   predecessor: BountyCorrectionId | null;
-  fromMember: MemberId | null;
-  toMember: MemberId | null;
   creditedStars: BountyCompletionCorrection["creditedStars"];
   creditProvenance: BountyCreditProvenance;
   reason: string;
-}): BountyCompletionCorrection {
+} & (
+  | { kind: "undo"; fromMember: MemberId; toMember: null }
+  | { kind: "restore"; fromMember: null; toMember: MemberId }
+  | { kind: "reassign"; fromMember: MemberId; toMember: MemberId }
+);
+
+function insertCorrection(input: NewCorrection): BountyCompletionCorrection {
   const at = nowInstant();
   input.db
     .prepare(
@@ -263,19 +313,39 @@ function insertCorrection(input: {
       input.reason,
       at,
     );
-  return {
+  const fields = {
     id: input.id,
-    kind: input.kind,
     claim: input.claim,
     completion: input.completion,
     predecessor: input.predecessor,
-    fromMember: input.fromMember,
-    toMember: input.toMember,
     creditedStars: input.creditedStars,
     creditProvenance: input.creditProvenance,
     reason: input.reason,
     at,
   };
+  switch (input.kind) {
+    case "undo":
+      return {
+        ...fields,
+        kind: input.kind,
+        fromMember: input.fromMember,
+        toMember: input.toMember,
+      };
+    case "restore":
+      return {
+        ...fields,
+        kind: input.kind,
+        fromMember: input.fromMember,
+        toMember: input.toMember,
+      };
+    case "reassign":
+      return {
+        ...fields,
+        kind: input.kind,
+        fromMember: input.fromMember,
+        toMember: input.toMember,
+      };
+  }
 }
 
 function effectiveCredit(
@@ -515,9 +585,12 @@ export function correctBountyCompletion(input: {
       .prepare("SELECT id, revision, state FROM bounty_claims WHERE id = ?")
       .get(command.claim);
     if (!isRecord(updated)) throw new Error("missing corrected Bounty claim");
+    const claim = claimResult(updated);
+    const result = receiptResult(kind, correction, claim);
+    if (!result) throw new Error("invalid Bounty correction result");
     const receipt: BountyCorrectionReceipt = {
       status: "accepted",
-      result: { kind, correction, claim: claimResult(updated) },
+      result,
     };
     saveReceipt(db, command, receipt);
     db.exec("COMMIT");

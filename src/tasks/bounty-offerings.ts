@@ -10,6 +10,13 @@ export function currentOfferingKey(
     return { kind: "once", definition: definition.id };
   }
   const interval = currentBountyInterval(definition.recurrence, today);
+  if (
+    interval &&
+    definition.offerFrom !== null &&
+    interval.start < definition.offerFrom
+  ) {
+    return null;
+  }
   return interval
     ? {
         kind: "recurring",

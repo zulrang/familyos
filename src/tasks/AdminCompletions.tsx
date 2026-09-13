@@ -4,8 +4,11 @@ import { type FormEvent, useRef, useState } from "react";
 import type { HouseholdMember } from "@/members/members";
 import styles from "@/shared/Admin.module.css";
 import { adminRequest, adminRequestId } from "@/shared/admin-client";
-import type { TaskAdminRead } from "./admin-types";
-import type { ClaimedBounty, TaskEvent } from "./types";
+import type {
+  BountyCompletionCorrectionCommand,
+  TaskAdminRead,
+} from "./admin-types";
+import type { BountyCompletion, ClaimedBounty, TaskEvent } from "./types";
 
 function CorrectionForm({
   event,
@@ -104,6 +107,38 @@ type CorrectableBounty = ClaimedBounty & {
   state: Extract<ClaimedBounty["state"], { kind: "completed" | "reopened" }>;
 };
 
+type BountyCorrectionAction = "undo" | "restore" | "reassign";
+
+function bountyCorrectionCommand(input: {
+  action: BountyCorrectionAction;
+  row: CorrectableBounty;
+  completion: BountyCompletion;
+  member: string;
+  reason: string;
+}): BountyCompletionCorrectionCommand {
+  const fields = {
+    requestId:
+      adminRequestId() as BountyCompletionCorrectionCommand["requestId"],
+    claim: input.row.claim.id,
+    revision: input.row.revision,
+    completion: input.completion.id,
+    predecessor: input.row.state.correction,
+    reason: input.reason,
+  };
+  switch (input.action) {
+    case "undo":
+      return { kind: "undo-bounty-completion", ...fields };
+    case "restore":
+      return { kind: "restore-bounty-completion", ...fields };
+    case "reassign":
+      return {
+        kind: "reassign-bounty-completion",
+        ...fields,
+        member: input.member,
+      };
+  }
+}
+
 function BountyCorrectionForm({
   row,
   members,
@@ -119,8 +154,7 @@ function BountyCorrectionForm({
   const completed = state.kind === "completed";
   const completion =
     state.kind === "completed" ? state.completion : state.undoneCompletion;
-  const [requestId] = useState(adminRequestId);
-  const [action, setAction] = useState<"undo" | "restore" | "reassign">(
+  const [action, setAction] = useState<BountyCorrectionAction>(
     completed ? "undo" : "restore",
   );
   const [member, setMember] = useState(
@@ -128,10 +162,33 @@ function BountyCorrectionForm({
   );
   const [reason, setReason] = useState("");
   const pending = useRef(false);
-  const [save, setSave] = useState<{
-    status: "idle" | "saving";
-    error?: string;
-  }>({ status: "idle" });
+  const [save, setSave] = useState<
+    | { status: "idle" }
+    | { status: "sending"; command: BountyCompletionCorrectionCommand }
+    | {
+        status: "retry";
+        command: BountyCompletionCorrectionCommand;
+        error: string;
+      }
+  >({ status: "idle" });
+
+  async function send(command: BountyCompletionCorrectionCommand) {
+    if (pending.current) return;
+    pending.current = true;
+    setSave({ status: "sending", command });
+    try {
+      await adminRequest("tasks", command);
+      onSaved();
+    } catch (error) {
+      setSave({
+        status: "retry",
+        command,
+        error: (error as Error).message,
+      });
+    } finally {
+      pending.current = false;
+    }
+  }
 
   async function submit(submission: FormEvent) {
     submission.preventDefault();
@@ -142,24 +199,9 @@ function BountyCorrectionForm({
       )
     )
       return;
-    pending.current = true;
-    setSave({ status: "saving" });
-    try {
-      await adminRequest("tasks", {
-        kind: `${action}-bounty-completion`,
-        requestId,
-        claim: row.claim.id,
-        revision: row.revision,
-        completion: completion.id,
-        predecessor: row.state.correction,
-        ...(action === "reassign" ? { member } : {}),
-        reason,
-      });
-      onSaved();
-    } catch (error) {
-      pending.current = false;
-      setSave({ status: "idle", error: (error as Error).message });
-    }
+    await send(
+      bountyCorrectionCommand({ action, row, completion, member, reason }),
+    );
   }
 
   return (
@@ -168,9 +210,9 @@ function BountyCorrectionForm({
         Correction
         <select
           value={action}
-          disabled={save.status === "saving"}
+          disabled={save.status !== "idle"}
           onChange={(event) =>
-            setAction(event.target.value as "undo" | "restore" | "reassign")
+            setAction(event.target.value as BountyCorrectionAction)
           }
         >
           {completed ? (
@@ -188,7 +230,7 @@ function BountyCorrectionForm({
           Credit to
           <select
             value={member}
-            disabled={save.status === "saving"}
+            disabled={save.status !== "idle"}
             onChange={(event) => setMember(event.target.value)}
           >
             {members.map((candidate) => (
@@ -206,28 +248,43 @@ function BountyCorrectionForm({
           required
           maxLength={1000}
           value={reason}
-          disabled={save.status === "saving"}
+          disabled={save.status !== "idle"}
           onChange={(event) => setReason(event.target.value)}
           placeholder="What needs correcting?"
         />
       </label>
-      {save.error ? (
+      {save.status === "retry" ? (
         <p role="alert" className={styles.error}>
           {save.error}
         </p>
       ) : null}
       <div className={styles.actions}>
-        <button type="submit" disabled={save.status === "saving"}>
-          {save.status === "saving" ? "Saving…" : "Record Bounty correction"}
-        </button>
-        <button
-          type="button"
-          className={styles.quiet}
-          disabled={save.status === "saving"}
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
+        {save.status === "retry" ? (
+          <>
+            <button type="button" onClick={() => void send(save.command)}>
+              Retry Bounty correction
+            </button>
+            <button type="button" className={styles.quiet} onClick={onSaved}>
+              Cancel and refresh
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="submit" disabled={save.status === "sending"}>
+              {save.status === "sending"
+                ? "Saving…"
+                : "Record Bounty correction"}
+            </button>
+            <button
+              type="button"
+              className={styles.quiet}
+              disabled={save.status === "sending"}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     </form>
   );

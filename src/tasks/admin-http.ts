@@ -23,6 +23,7 @@ import {
   loadBountyClaims,
   loadBountyCompletions,
   loadBountyDefinitions,
+  replaceDefinition,
 } from "./bounty-store";
 import {
   loadCompletionCorrections,
@@ -65,8 +66,15 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   const command = parseTaskAdminCommand(await request.json().catch(() => null));
   if (!command)
     return adminJson({ error: "Check the task fields and try again." }, 400);
-  if (command.kind === "create" || command.kind === "edit") {
-    const assignment = command.draft.assignment;
+  const assignedDraft =
+    command.kind === "create" || command.kind === "edit"
+      ? command.draft
+      : command.kind === "replace-definition" &&
+          command.replacement.kind === "assigned"
+        ? command.replacement
+        : null;
+  if (assignedDraft) {
+    const assignment = assignedDraft.assignment;
     const assigned =
       assignment.kind === "fixed"
         ? [assignment.member]
@@ -126,6 +134,14 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
             db: tasksDatabase(),
             command,
             members: household.members,
+          }),
+        });
+      case "replace-definition":
+        return adminJson({
+          receipt: replaceDefinition({
+            db: tasksDatabase(),
+            command,
+            today,
           }),
         });
       case "correct":

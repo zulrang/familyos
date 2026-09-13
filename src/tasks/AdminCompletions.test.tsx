@@ -79,9 +79,47 @@ function read(
   };
 }
 
-describe("AdminCompletions", () => {
-  afterEach(cleanup);
+function completedBountyRead(): TaskAdminRead {
+  const completion = {
+    id: "c".repeat(32),
+    claim: "b".repeat(32) as never,
+    by: "dad",
+    at: "2026-09-08T12:00:00Z",
+    creditedStars: 4,
+    creditProvenance: "recorded" as const,
+  };
+  return {
+    ...read([], []),
+    bountyClaims: [
+      {
+        kind: "claimed-bounty",
+        claim: {
+          id: "b".repeat(32) as never,
+          offering: { kind: "once", definition: "a".repeat(32) as TaskId },
+          member: "dad",
+          scheduledOn: "2026-09-08" as LocalDate,
+          title: "Wash car" as never,
+          stars: 4 as never,
+        },
+        revision: 1 as never,
+        state: {
+          kind: "completed",
+          completion: completion as never,
+          creditedTo: "dad",
+          correction: null,
+        },
+      },
+    ],
+    bountyCompletions: [completion as never],
+  };
+}
 
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("AdminCompletions", () => {
   test("search matches the corrected assignee, not only the original", () => {
     render(
       <AdminCompletions
@@ -155,42 +193,9 @@ test("Bounty correction actions are state-specific and submit only once", async 
   vi.stubGlobal("fetch", fetch);
   vi.stubGlobal("confirm", () => true);
   const onSaved = vi.fn();
-  const completion = {
-    id: "c".repeat(32),
-    claim: "b".repeat(32) as never,
-    by: "dad",
-    at: "2026-09-08T12:00:00Z",
-    creditedStars: 4,
-    creditProvenance: "recorded" as const,
-  };
-  const data: TaskAdminRead = {
-    ...read([], []),
-    bountyClaims: [
-      {
-        kind: "claimed-bounty",
-        claim: {
-          id: "b".repeat(32) as never,
-          offering: { kind: "once", definition: "a".repeat(32) as TaskId },
-          member: "dad",
-          scheduledOn: "2026-09-08" as LocalDate,
-          title: "Wash car" as never,
-          stars: 4 as never,
-        },
-        revision: 1 as never,
-        state: {
-          kind: "completed",
-          completion: completion as never,
-          creditedTo: "dad",
-          correction: null,
-        },
-      },
-    ],
-    bountyCompletions: [completion as never],
-  };
-
   render(
     <AdminCompletions
-      data={data}
+      data={completedBountyRead()}
       members={members}
       onSaved={onSaved}
       query=""
@@ -224,5 +229,51 @@ test("Bounty correction actions are state-specific and submit only once", async 
   });
   finishRequest?.(Response.json({ receipt: { status: "accepted" } }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
-  vi.unstubAllGlobals();
+});
+
+test("a lost response retries the exact Bounty correction command", async () => {
+  const user = userEvent.setup();
+  let calls = 0;
+  const fetch = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) throw new Error("response lost");
+      return Response.json({ receipt: { status: "already-applied" } });
+    },
+  );
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("confirm", () => true);
+  const onSaved = vi.fn();
+  render(
+    <AdminCompletions
+      data={completedBountyRead()}
+      members={members}
+      onSaved={onSaved}
+      query=""
+    />,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Correct Bounty completion" }),
+  );
+  await user.selectOptions(screen.getByLabelText("Correction"), "reassign");
+  await user.selectOptions(screen.getByLabelText("Credit to"), "ellie");
+  await user.type(screen.getByLabelText("Reason"), "Ellie did it");
+  await user.click(
+    screen.getByRole("button", { name: "Record Bounty correction" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Cannot reach FamilyOS",
+  );
+  expect(screen.getByLabelText("Correction")).toBeDisabled();
+  expect(screen.getByLabelText("Credit to")).toBeDisabled();
+  expect(screen.getByLabelText("Reason")).toBeDisabled();
+  const firstBody = (fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.body;
+  await user.click(
+    screen.getByRole("button", { name: "Retry Bounty correction" }),
+  );
+  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect((fetch.mock.calls[1]?.[1] as RequestInit | undefined)?.body).toBe(
+    firstBody,
+  );
 });

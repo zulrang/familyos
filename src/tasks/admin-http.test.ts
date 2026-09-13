@@ -8,7 +8,7 @@ import { readHousehold, writeHousehold } from "@/settings/settings";
 import { handleAdminSession } from "@/shared/admin-auth";
 import { handleAdminTasks } from "./admin-http";
 import { correctAdminCompletion } from "./admin-store";
-import type { TaskAdminRead } from "./admin-types";
+import { parseTaskAdminCommand, type TaskAdminRead } from "./admin-types";
 import {
   claimBounty,
   completeBounty,
@@ -17,9 +17,11 @@ import {
   loadBountyClaims,
   loadBountyDefinitions,
   releaseBounty,
+  replaceDefinition,
 } from "./bounty-store";
 import {
   applyEvent,
+  closeTasksDatabase,
   loadDefinitions,
   loadEvents,
   loadStoredStarBalances,
@@ -289,6 +291,277 @@ describe("parent administration", () => {
     expect(loadBountyClaims(tasksDatabase())[0]?.claim).toMatchObject({
       title: "Polish car",
       stars: 7,
+    });
+  });
+  test("definition replacement preserves lineage and accepts only legal conversions", async () => {
+    const serverToday = (await snapshot()).today;
+    const bountyDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Wash car",
+      stars: 4,
+      recurrence: { kind: "once" },
+    });
+    expect(bountyDraft?.kind).toBe("bounty");
+    if (!bountyDraft || bountyDraft.kind !== "bounty") return;
+    const bounty = createBounty(tasksDatabase(), bountyDraft, serverToday);
+    const requestId = crypto.randomUUID();
+    const convertToAssigned = {
+      kind: "replace-definition",
+      requestId,
+      source: {
+        kind: "bounty",
+        definition: bounty.id,
+        revision: bounty.revision,
+      },
+      replacement: {
+        kind: "assigned",
+        title: "Wash car",
+        type: "chore",
+        recurrence: { kind: "weekly", days: ["sun"] },
+        assignment: { kind: "fixed", member: "a" },
+        time: "10:00",
+        stars: 4,
+      },
+    };
+    const converted = await tasks(convertToAssigned);
+    expect(converted.status).toBe(200);
+    const receipt = (await converted.json()).receipt;
+    expect(receipt).toMatchObject({
+      status: "accepted",
+      replacement: { kind: "assigned", lineage: bounty.lineage },
+    });
+    expect((await tasks(convertToAssigned)).status).toBe(200);
+    expect(
+      (
+        await tasks({
+          ...convertToAssigned,
+          replacement: { ...convertToAssigned.replacement, stars: 5 },
+        })
+      ).status,
+    ).toBe(409);
+    const assigned = loadDefinitions().find(
+      (definition) => definition.id === receipt.replacement.id,
+    );
+    expect(assigned).toMatchObject({
+      lineage: bounty.lineage,
+      retiredAt: null,
+      assignment: { kind: "fixed", member: "a" },
+    });
+    expect(
+      loadBountyDefinitions(tasksDatabase()).find(
+        (definition) => definition.id === bounty.id,
+      ),
+    ).toMatchObject({ retiredAt: serverToday });
+
+    const back = await tasks({
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: { kind: "assigned", definition: assigned?.id },
+      replacement: {
+        kind: "bounty",
+        title: "Wash car",
+        stars: 6,
+        recurrence: { kind: "once" },
+      },
+    });
+    expect(back.status).toBe(200);
+    expect((await back.json()).receipt).toMatchObject({
+      status: "accepted",
+      replacement: { kind: "bounty", lineage: bounty.lineage },
+    });
+
+    for (const replacement of [
+      { ...convertToAssigned.replacement, kind: "typo" },
+      {
+        ...convertToAssigned.replacement,
+        assignment: { kind: "open" },
+      },
+      {
+        kind: "bounty",
+        title: "Mixed",
+        stars: 1,
+        recurrence: { kind: "once" },
+        assignment: { kind: "fixed", member: "a" },
+      },
+    ]) {
+      expect(
+        (
+          await tasks({
+            ...convertToAssigned,
+            requestId: crypto.randomUUID(),
+            replacement,
+          })
+        ).status,
+      ).toBe(400);
+    }
+  });
+
+  test("new open Routines are rejected at the administration boundary", async () => {
+    expect(
+      (
+        await tasks({
+          kind: "create",
+          id: crypto.randomUUID(),
+          draft: {
+            ...draft,
+            type: "routine",
+            assignment: { kind: "open" },
+          },
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  test("schedule replacement waits for the next matching interval and preserves old claims", async () => {
+    const members = (await readHousehold()).members;
+    const sourceDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Bins",
+      stars: 3,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-01",
+        cadence: { kind: "weekly", days: ["mon"] },
+      },
+    });
+    expect(sourceDraft?.kind).toBe("bounty");
+    if (!sourceDraft || sourceDraft.kind !== "bounty") return;
+    const source = createBounty(tasksDatabase(), sourceDraft, today);
+    const offered = loadAvailableBounties(tasksDatabase(), today)[0];
+    const claim = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: offered?.offering,
+      member: "a",
+      definitionRevision: offered?.definitionRevision,
+    });
+    expect(claim?.kind).toBe("claim-bounty");
+    if (!claim || claim.kind !== "claim-bounty") return;
+    const claimReceipt = claimBounty({
+      db: tasksDatabase(),
+      command: claim,
+      today,
+      members,
+    });
+    if (!("result" in claimReceipt) || claimReceipt.result.kind !== "claimed")
+      return;
+
+    const replacementCommand = parseTaskAdminCommand({
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: {
+        kind: "bounty",
+        definition: source.id,
+        revision: source.revision,
+      },
+      replacement: {
+        kind: "bounty",
+        title: "Bins",
+        stars: 3,
+        recurrence: {
+          kind: "recurring",
+          startsOn: "2026-09-01",
+          cadence: { kind: "weekly", days: ["mon", "fri"] },
+        },
+      },
+    });
+    expect(replacementCommand?.kind).toBe("replace-definition");
+    if (!replacementCommand || replacementCommand.kind !== "replace-definition")
+      return;
+    const replacement = replaceDefinition({
+      db: tasksDatabase(),
+      command: replacementCommand,
+      today,
+    });
+    expect(replacement.replacement.id).not.toBe(source.id);
+    expect(replacement.replacement.lineage).toBe(source.lineage);
+    expect(loadAvailableBounties(tasksDatabase(), today)).toHaveLength(0);
+    const beforeFriday = parseLocalDate("2026-09-10");
+    const friday = parseLocalDate("2026-09-11");
+    expect(beforeFriday).not.toBeNull();
+    expect(friday).not.toBeNull();
+    if (!beforeFriday || !friday) return;
+    expect(loadAvailableBounties(tasksDatabase(), beforeFriday)).toHaveLength(
+      0,
+    );
+    expect(loadAvailableBounties(tasksDatabase(), friday)).toContainEqual(
+      expect.objectContaining({
+        offering: expect.objectContaining({
+          definition: replacement.replacement.id,
+          intervalStart: friday,
+        }),
+      }),
+    );
+
+    const release = parseBountyCommand({
+      kind: "release-bounty",
+      requestId: crypto.randomUUID(),
+      claim: claimReceipt.result.claim.id,
+      revision: claimReceipt.result.revision,
+    });
+    expect(release?.kind).toBe("release-bounty");
+    if (!release || release.kind !== "release-bounty") return;
+    releaseBounty({ db: tasksDatabase(), command: release });
+    expect(
+      loadAvailableBounties(tasksDatabase(), today).some(
+        (item) => item.offering.definition === source.id,
+      ),
+    ).toBe(false);
+  });
+
+  test("semantically unchanged recurrence edits keep definition and offering identity", () => {
+    const sourceDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Plants",
+      stars: 2,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-01",
+        cadence: { kind: "weekly", days: ["mon", "fri"] },
+      },
+    });
+    expect(sourceDraft?.kind).toBe("bounty");
+    if (!sourceDraft || sourceDraft.kind !== "bounty") return;
+    const source = createBounty(tasksDatabase(), sourceDraft, today);
+    const offering = loadAvailableBounties(tasksDatabase(), today)[0];
+    const command = parseTaskAdminCommand({
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: {
+        kind: "bounty",
+        definition: source.id,
+        revision: source.revision,
+      },
+      replacement: {
+        kind: "bounty",
+        title: "Healthy plants",
+        stars: 5,
+        recurrence: {
+          kind: "recurring",
+          startsOn: "2026-09-01",
+          cadence: { kind: "weekly", days: ["fri", "mon"] },
+        },
+      },
+    });
+    expect(command?.kind).toBe("replace-definition");
+    if (!command || command.kind !== "replace-definition") return;
+    expect(
+      replaceDefinition({ db: tasksDatabase(), command, today }),
+    ).toMatchObject({
+      status: "accepted",
+      replacement: { id: source.id },
+    });
+    expect(loadBountyDefinitions(tasksDatabase())).toHaveLength(1);
+    expect(loadBountyDefinitions(tasksDatabase())[0]).toMatchObject({
+      id: source.id,
+      title: "Healthy plants",
+      stars: 5,
+      revision: 1,
+      retiredAt: null,
+    });
+    expect(loadAvailableBounties(tasksDatabase(), today)[0]).toMatchObject({
+      id: offering?.id,
+      offering: { definition: source.id },
     });
   });
   test("retiring a Bounty preserves claims while stopping every reopened offering", async () => {
@@ -716,6 +989,7 @@ describe("parent administration", () => {
       }),
     );
 
+    closeTasksDatabase();
     const replay = await tasks(undo);
     expect(replay.status).toBe(200);
     expect((await replay.json()).receipt.status).toBe("already-applied");
