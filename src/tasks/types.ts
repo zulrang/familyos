@@ -29,6 +29,7 @@ export type LineageId = Brand<string, "LineageId">;
 export type OfferingId = Brand<string, "OfferingId">;
 export type ClaimId = Brand<string, "ClaimId">;
 export type CompletionId = Brand<string, "CompletionId">;
+export type BountyCorrectionId = Brand<string, "BountyCorrectionId">;
 export type BountyCommandId = Brand<string, "BountyCommandId">;
 export type StarAmount = Brand<number, "StarAmount">;
 export type DefinitionRevision = Brand<number, "DefinitionRevision">;
@@ -114,9 +115,35 @@ export type ClaimedBounty = Readonly<{
   revision: ClaimRevision;
   state:
     | { kind: "unfinished" }
-    | { kind: "completed"; completion: BountyCompletion }
+    | {
+        kind: "reopened";
+        undoneCompletion: BountyCompletion;
+        correction: BountyCorrectionId;
+      }
+    | {
+        kind: "completed";
+        completion: BountyCompletion;
+        creditedTo: MemberId;
+        correction: BountyCorrectionId | null;
+      }
     | { kind: "released" };
 }>;
+
+export function isUnfinishedBountyClaim(
+  row: ClaimedBounty,
+): row is ClaimedBounty & {
+  state:
+    | { kind: "unfinished" }
+    | {
+        kind: "reopened";
+        undoneCompletion: BountyCompletion;
+        correction: BountyCorrectionId;
+      };
+} {
+  return row.state.kind === "unfinished" || row.state.kind === "reopened";
+}
+
+export type BountyCreditProvenance = "recorded" | "legacy-missing";
 
 export type BountyCompletion = Readonly<{
   id: CompletionId;
@@ -124,6 +151,21 @@ export type BountyCompletion = Readonly<{
   by: MemberId;
   at: Instant;
   creditedStars: StarAmount;
+  creditProvenance: BountyCreditProvenance;
+}>;
+
+export type BountyCompletionCorrection = Readonly<{
+  id: BountyCorrectionId;
+  kind: "undo" | "restore" | "reassign";
+  claim: ClaimId;
+  completion: CompletionId;
+  predecessor: BountyCorrectionId | null;
+  fromMember: MemberId | null;
+  toMember: MemberId | null;
+  creditedStars: StarAmount;
+  creditProvenance: BountyCreditProvenance;
+  reason: string;
+  at: Instant;
 }>;
 
 export type CreateBountyDraft = Readonly<{
@@ -346,6 +388,10 @@ export function newCompletionId(): CompletionId {
   return crypto.randomUUID() as CompletionId;
 }
 
+export function newBountyCorrectionId(): BountyCorrectionId {
+  return crypto.randomUUID() as BountyCorrectionId;
+}
+
 function parseBrandedId<B extends string>(
   raw: unknown,
 ): Brand<string, B> | null {
@@ -363,6 +409,12 @@ export function parseClaimId(raw: unknown): ClaimId | null {
 
 export function parseCompletionId(raw: unknown): CompletionId | null {
   return parseBrandedId<"CompletionId">(raw);
+}
+
+export function parseBountyCorrectionId(
+  raw: unknown,
+): BountyCorrectionId | null {
+  return parseBrandedId<"BountyCorrectionId">(raw);
 }
 
 export function parseBountyCommandId(raw: unknown): BountyCommandId | null {
@@ -680,7 +732,7 @@ function parseBountyCompletion(raw: unknown): BountyCompletion | null {
     !isRecord(raw) ||
     !hasOnlyKnownKeys(
       raw,
-      new Set(["id", "claim", "by", "at", "creditedStars"]),
+      new Set(["id", "claim", "by", "at", "creditedStars", "creditProvenance"]),
     )
   ) {
     return null;
@@ -690,8 +742,22 @@ function parseBountyCompletion(raw: unknown): BountyCompletion | null {
   const by = nonEmptyString(raw.by);
   const at = parseInstant(raw.at);
   const creditedStars = parseStarAmount(raw.creditedStars);
-  if (!id || !claim || !by || !at || creditedStars === null) return null;
-  return { id, claim, by, at, creditedStars };
+  const creditProvenance =
+    raw.creditProvenance === undefined || raw.creditProvenance === "recorded"
+      ? "recorded"
+      : raw.creditProvenance === "legacy-missing"
+        ? "legacy-missing"
+        : null;
+  if (
+    !id ||
+    !claim ||
+    !by ||
+    !at ||
+    creditedStars === null ||
+    !creditProvenance
+  )
+    return null;
+  return { id, claim, by, at, creditedStars, creditProvenance };
 }
 
 export function parseBountyCommandReceipt(

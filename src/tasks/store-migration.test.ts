@@ -4,6 +4,7 @@ import { parseTaskAdminCommand } from "./admin-types";
 import {
   administerBountyDefinition,
   claimBounty,
+  completeBounty,
   createBounty,
   loadAvailableBounties,
   migrateBountyStore,
@@ -84,14 +85,14 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
     expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
       9,
     );
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
     expect(
       db
         .prepare(
           "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'bounty_%'",
         )
         .get()?.count,
-    ).toBe(6);
+    ).toBe(8);
   } finally {
     db.close();
   }
@@ -107,9 +108,21 @@ test("version-three claims and durable receipts survive the release expansion", 
   };
   const command = parseBountyCommand(legacyPayload);
   const today = parseLocalDate("2026-09-13");
+  const completionCommand = parseBountyCommand({
+    kind: "complete-bounty",
+    requestId: "accepted-v3-completion",
+    claim: "completed-claim",
+    revision: 0,
+  });
   expect(command?.kind).toBe("claim-bounty");
   expect(today).not.toBeNull();
-  if (!command || command.kind !== "claim-bounty" || !today) {
+  if (
+    !command ||
+    command.kind !== "claim-bounty" ||
+    !completionCommand ||
+    completionCommand.kind !== "complete-bounty" ||
+    !today
+  ) {
     throw new Error("invalid test fixture");
   }
   try {
@@ -142,6 +155,10 @@ test("version-three claims and durable receipts survive the release expansion", 
       INSERT INTO bounty_definitions VALUES (1, 'bounty', 'lineage', 'Wash car', 'chore', 'once', 5, NULL);
       INSERT INTO bounty_offerings VALUES ('offering', 'bounty', 'once');
       INSERT INTO bounty_claims VALUES ('claim', 'offering', 'bounty', 'dad', '2026-09-13', 'Wash car', 5, 0, 'unfinished', '2026-09-13T12:00:00Z');
+      INSERT INTO bounty_definitions VALUES (2, 'completed-bounty', 'completed-lineage', 'Mow lawn', 'chore', 'once', 3, NULL);
+      INSERT INTO bounty_offerings VALUES ('completed-offering', 'completed-bounty', 'once');
+      INSERT INTO bounty_claims VALUES ('completed-claim', 'completed-offering', 'completed-bounty', 'dad', '2026-09-13', 'Mow lawn', 3, 1, 'completed', '2026-09-13T12:00:00Z');
+      INSERT INTO bounty_completions VALUES ('v3-completion', 'completed-claim', 'accepted-v3-completion', 'dad', '2026-09-13T13:00:00Z', 3);
       PRAGMA user_version = 3;
     `);
     db.prepare("INSERT INTO bounty_command_receipts VALUES (?, ?, ?, ?)").run(
@@ -150,11 +167,29 @@ test("version-three claims and durable receipts survive the release expansion", 
       JSON.stringify(legacyPayload),
       response,
     );
+    db.prepare("INSERT INTO bounty_command_receipts VALUES (?, ?, ?, ?)").run(
+      completionCommand.requestId,
+      completionCommand.kind,
+      JSON.stringify(completionCommand),
+      JSON.stringify({
+        status: "accepted",
+        result: {
+          kind: "completed",
+          completion: {
+            id: "v3-completion",
+            claim: "completed-claim",
+            by: "dad",
+            at: "2026-09-13T13:00:00Z",
+            creditedStars: 3,
+          },
+        },
+      }),
+    );
 
     migrateBountyStore(db);
     migrateBountyStore(db);
 
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
     expect(
       db
         .prepare("SELECT revision FROM bounty_definitions WHERE id='bounty'")
@@ -190,6 +225,20 @@ test("version-three claims and durable receipts survive the release expansion", 
           stars: 5,
         },
         revision: 0,
+      },
+    });
+    expect(completeBounty({ db, command: completionCommand })).toEqual({
+      status: "already-applied",
+      result: {
+        kind: "completed",
+        completion: {
+          id: "v3-completion",
+          claim: "completed-claim",
+          by: "dad",
+          at: "2026-09-13T13:00:00Z",
+          creditedStars: 3,
+          creditProvenance: "recorded",
+        },
       },
     });
     const edit = parseTaskAdminCommand({

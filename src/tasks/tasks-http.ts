@@ -31,6 +31,7 @@ import {
 import {
   type AssignmentPolicy,
   createDefinition,
+  isUnfinishedBountyClaim,
   parseBountyCommand,
   parseEventBatch,
   parseLocalDate,
@@ -81,7 +82,7 @@ export async function handleGetTasks(
   const availableBounties = loadAvailableBounties(db, today);
   const bountyClaims = loadBountyClaims(db).filter(
     (row) =>
-      row.state.kind === "unfinished" ||
+      isUnfinishedBountyClaim(row) ||
       (row.state.kind === "completed" &&
         msToZonedDate(
           Date.parse(row.state.completion.at),

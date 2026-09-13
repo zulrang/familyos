@@ -1,5 +1,8 @@
 import {
   type BountyCommandId,
+  type BountyCompletion,
+  type BountyCompletionCorrection,
+  type BountyCorrectionId,
   type BountyDefinition,
   type ClaimedBounty,
   type CreateTaskDraft,
@@ -9,6 +12,10 @@ import {
   type LegacyTaskDefinition,
   type LocalDate,
   parseBountyCommandId,
+  parseBountyCorrectionId,
+  parseClaimId,
+  parseClaimRevision,
+  parseCompletionId,
   parseCreateTaskDraft,
   parseDefinitionRevision,
   parseLocalDate,
@@ -25,6 +32,8 @@ export type TaskAdminRead = {
   definitions: LegacyTaskDefinition[];
   bountyDefinitions: BountyDefinition[];
   bountyClaims: ClaimedBounty[];
+  bountyCompletions: BountyCompletion[];
+  bountyCompletionCorrections: BountyCompletionCorrection[];
   events: TaskEvent[];
   originalEvents: TaskEvent[];
   corrections: CompletionCorrection[];
@@ -32,6 +41,36 @@ export type TaskAdminRead = {
   balances: StarBalance[];
   today: LocalDate;
 };
+
+export type BountyCompletionCorrectionCommand =
+  | Readonly<{
+      kind: "undo-bounty-completion";
+      requestId: BountyCommandId;
+      claim: ClaimedBounty["claim"]["id"];
+      revision: ClaimedBounty["revision"];
+      completion: BountyCompletionCorrection["completion"];
+      predecessor: BountyCorrectionId | null;
+      reason: string;
+    }>
+  | Readonly<{
+      kind: "restore-bounty-completion";
+      requestId: BountyCommandId;
+      claim: ClaimedBounty["claim"]["id"];
+      revision: ClaimedBounty["revision"];
+      completion: BountyCompletionCorrection["completion"];
+      predecessor: BountyCorrectionId | null;
+      reason: string;
+    }>
+  | Readonly<{
+      kind: "reassign-bounty-completion";
+      requestId: BountyCommandId;
+      claim: ClaimedBounty["claim"]["id"];
+      revision: ClaimedBounty["revision"];
+      completion: BountyCompletionCorrection["completion"];
+      predecessor: BountyCorrectionId | null;
+      member: string;
+      reason: string;
+    }>;
 
 export type BountyDefinitionDraft = Readonly<{
   title: BountyDefinition["title"];
@@ -68,6 +107,7 @@ export type TaskAdminCommand =
   | { kind: "edit"; task: TaskId; draft: CreateTaskDraft }
   | { kind: "retire"; task: TaskId }
   | BountyAdminCommand
+  | BountyCompletionCorrectionCommand
   | { kind: "correct"; correction: Omit<CompletionCorrection, "at"> }
   | {
       kind: "adjust-stars";
@@ -104,6 +144,65 @@ export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
           reason: raw.reason.trim(),
         }
       : null;
+  }
+  if (
+    raw.kind === "undo-bounty-completion" ||
+    raw.kind === "restore-bounty-completion" ||
+    raw.kind === "reassign-bounty-completion"
+  ) {
+    const requestId = parseBountyCommandId(raw.requestId);
+    const claim = parseClaimId(raw.claim);
+    const revision = parseClaimRevision(raw.revision);
+    const completion = parseCompletionId(raw.completion);
+    const predecessor =
+      raw.predecessor === null
+        ? null
+        : parseBountyCorrectionId(raw.predecessor);
+    const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
+    const keys = [
+      "kind",
+      "requestId",
+      "claim",
+      "revision",
+      "completion",
+      "predecessor",
+      "reason",
+      ...(raw.kind === "reassign-bounty-completion" ? ["member"] : []),
+    ];
+    if (
+      !Object.keys(raw).every((key) => keys.includes(key)) ||
+      !requestId ||
+      !claim ||
+      revision === null ||
+      !completion ||
+      (raw.predecessor !== null && !predecessor) ||
+      !reason
+    ) {
+      return null;
+    }
+    if (raw.kind === "reassign-bounty-completion") {
+      return typeof raw.member === "string" && raw.member
+        ? {
+            kind: raw.kind,
+            requestId,
+            claim,
+            revision,
+            completion,
+            predecessor,
+            member: raw.member,
+            reason,
+          }
+        : null;
+    }
+    return {
+      kind: raw.kind,
+      requestId,
+      claim,
+      revision,
+      completion,
+      predecessor,
+      reason,
+    };
   }
   if (raw.kind === "edit-bounty" || raw.kind === "retire-bounty") {
     const requestId = parseBountyCommandId(raw.requestId);

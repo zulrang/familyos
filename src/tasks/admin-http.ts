@@ -13,9 +13,15 @@ import {
 } from "./admin-store";
 import { parseTaskAdminCommand } from "./admin-types";
 import {
+  BountyCorrectionStoreError,
+  correctBountyCompletion,
+  loadBountyCompletionCorrections,
+} from "./bounty-correction-store";
+import {
   administerBountyDefinition,
   BountyAdminStoreError,
   loadBountyClaims,
+  loadBountyCompletions,
   loadBountyDefinitions,
 } from "./bounty-store";
 import {
@@ -48,6 +54,8 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
       ...store,
       bountyDefinitions: loadBountyDefinitions(db),
       bountyClaims: loadBountyClaims(db),
+      bountyCompletions: loadBountyCompletions(db),
+      bountyCompletionCorrections: loadBountyCompletionCorrections(db),
       originalEvents: loadEvents(),
       corrections: loadCompletionCorrections(),
       balances: loadStoredStarBalances(),
@@ -83,6 +91,11 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     !memberById(household.members, command.correction.by)
   )
     return adminJson({ error: "Member not found." }, 400);
+  if (
+    command.kind === "reassign-bounty-completion" &&
+    !memberById(household.members, command.member)
+  )
+    return adminJson({ error: "Member not found." }, 400);
   try {
     switch (command.kind) {
       case "create":
@@ -105,6 +118,16 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
             today,
           }),
         });
+      case "undo-bounty-completion":
+      case "restore-bounty-completion":
+      case "reassign-bounty-completion":
+        return adminJson({
+          receipt: correctBountyCompletion({
+            db: tasksDatabase(),
+            command,
+            members: household.members,
+          }),
+        });
       case "correct":
         correctAdminCompletion({ ...command.correction, at: nowInstant() });
         break;
@@ -116,7 +139,8 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   } catch (error) {
     if (
       error instanceof TaskAdminError ||
-      error instanceof BountyAdminStoreError
+      error instanceof BountyAdminStoreError ||
+      error instanceof BountyCorrectionStoreError
     )
       return adminJson({ error: error.message }, 409);
     throw error;

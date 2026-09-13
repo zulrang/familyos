@@ -6,6 +6,7 @@ import {
   parseBountyRecurrence,
 } from "./bounty-calendar";
 import { currentOfferingKey, sameOfferingKey } from "./bounty-offerings";
+import { migrateBountyLifecycleToV8 } from "./bounty-schema";
 import {
   type AvailableBounty,
   type BountyClaim,
@@ -26,6 +27,7 @@ import {
   nowInstant,
   type OfferingKey,
   parseBountyCommandReceipt,
+  parseBountyCorrectionId,
   parseBountyDefinition,
   parseClaimId,
   parseClaimRevision,
@@ -343,19 +345,20 @@ export function migrateBountyStore(db: DatabaseSync): void {
     .get()?.sql;
   if (typeof claimsSql !== "string") {
     createBountyStore(db);
-    return;
+  } else {
+    if (!claimsSql.includes("'released'")) migrateBountyClaimsToV4(db);
+    const hasDefinitionRevision = db
+      .prepare("PRAGMA table_info(bounty_definitions)")
+      .all()
+      .some((column) => column.name === "revision");
+    if (!hasDefinitionRevision) migrateBountyDefinitionsToV5(db);
+    const hasIntervalStart = db
+      .prepare("PRAGMA table_info(bounty_offerings)")
+      .all()
+      .some((column) => column.name === "interval_start");
+    if (!hasIntervalStart) migrateBountyDefinitionsAndOfferingsToV6(db);
   }
-  if (!claimsSql.includes("'released'")) migrateBountyClaimsToV4(db);
-  const hasDefinitionRevision = db
-    .prepare("PRAGMA table_info(bounty_definitions)")
-    .all()
-    .some((column) => column.name === "revision");
-  if (!hasDefinitionRevision) migrateBountyDefinitionsToV5(db);
-  const hasIntervalStart = db
-    .prepare("PRAGMA table_info(bounty_offerings)")
-    .all()
-    .some((column) => column.name === "interval_start");
-  if (!hasIntervalStart) migrateBountyDefinitionsAndOfferingsToV6(db);
+  migrateBountyLifecycleToV8(db);
 }
 
 function bountyDefinitionFromRow(
@@ -453,17 +456,23 @@ function completionFromRow(row: Record<string, unknown>): BountyCompletion {
   const claim = parseClaimId(row.claim_id);
   const at = parseInstant(row.completed_at);
   const creditedStars = parseStarAmount(row.credited_stars);
+  const creditProvenance =
+    row.credit_provenance === "recorded" ||
+    row.credit_provenance === "legacy-missing"
+      ? row.credit_provenance
+      : null;
   if (
     !id ||
     !claim ||
     !at ||
     typeof row.member !== "string" ||
     !row.member ||
-    creditedStars === null
+    creditedStars === null ||
+    !creditProvenance
   ) {
     throw new Error("corrupt Bounty completion row");
   }
-  return { id, claim, by: row.member, at, creditedStars };
+  return { id, claim, by: row.member, at, creditedStars, creditProvenance };
 }
 
 function materializeCurrentOffering(
@@ -701,10 +710,17 @@ export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
   return db
     .prepare(
       `SELECT c.*, o.kind AS offering_kind, o.interval_start,
-              x.id AS completion_id, x.completed_at, x.credited_stars
+              x.id AS completion_id, x.member AS completion_member,
+              x.completed_at, x.credited_stars, x.credit_provenance,
+              u.id AS undone_completion_id,
+              u.member AS undone_completion_member,
+              u.completed_at AS undone_completed_at,
+              u.credited_stars AS undone_credited_stars,
+              u.credit_provenance AS undone_credit_provenance
        FROM bounty_claims c
        JOIN bounty_offerings o ON o.id = c.offering_id
-       LEFT JOIN bounty_completions x ON x.claim_id = c.id
+       LEFT JOIN bounty_completions x ON x.id = c.effective_completion_id
+       LEFT JOIN bounty_completions u ON u.id = c.restorable_completion_id
        ORDER BY c.rowid`,
     )
     .all()
@@ -727,21 +743,74 @@ export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
           state: { kind: "released" as const },
         };
       }
-      if (row.state !== "completed")
+      if (row.state === "reopened" && row.undone_completion_id !== null) {
+        const correction = parseBountyCorrectionId(row.correction_id);
+        if (!correction) throw new Error("corrupt reopened Bounty claim");
+        return {
+          kind: "claimed-bounty" as const,
+          claim,
+          revision,
+          state: {
+            kind: "reopened" as const,
+            undoneCompletion: completionFromRow({
+              id: row.undone_completion_id,
+              claim_id: row.id,
+              member: row.undone_completion_member,
+              completed_at: row.undone_completed_at,
+              credited_stars: row.undone_credited_stars,
+              credit_provenance: row.undone_credit_provenance,
+            }),
+            correction,
+          },
+        };
+      }
+      if (row.state !== "completed" || row.completion_id === null)
         throw new Error("corrupt Bounty claim state");
       const completion = completionFromRow({
         id: row.completion_id,
         claim_id: row.id,
-        member: row.member,
+        member: row.completion_member,
         completed_at: row.completed_at,
         credited_stars: row.credited_stars,
+        credit_provenance: row.credit_provenance,
       });
+      const correction =
+        row.correction_id === null
+          ? null
+          : parseBountyCorrectionId(row.correction_id);
+      if (row.correction_id !== null && !correction)
+        throw new Error("corrupt Bounty correction identity");
+      const creditedTo =
+        row.correction_id === null
+          ? completion.by
+          : db
+              .prepare(
+                "SELECT to_member FROM bounty_completion_corrections WHERE id = ?",
+              )
+              .get(row.correction_id)?.to_member;
+      if (typeof creditedTo !== "string" || !creditedTo)
+        throw new Error("corrupt effective Bounty credit");
       return {
         kind: "claimed-bounty" as const,
         claim,
         revision,
-        state: { kind: "completed" as const, completion },
+        state: {
+          kind: "completed" as const,
+          completion,
+          creditedTo,
+          correction,
+        },
       };
+    });
+}
+
+export function loadBountyCompletions(db: DatabaseSync): BountyCompletion[] {
+  return db
+    .prepare("SELECT * FROM bounty_completions ORDER BY completed_at, rowid")
+    .all()
+    .map((row) => {
+      if (!isRecord(row)) throw new Error("corrupt Bounty completion row");
+      return completionFromRow(row);
     });
 }
 
@@ -913,7 +982,7 @@ export function completeBounty(input: {
       .get(command.claim);
     if (
       !row ||
-      row.state !== "unfinished" ||
+      (row.state !== "unfinished" && row.state !== "reopened") ||
       row.revision !== command.revision
     ) {
       throw new BountyStoreError(
@@ -935,12 +1004,16 @@ export function completeBounty(input: {
     const at = nowInstant();
     db.prepare(
       `INSERT INTO bounty_completions
-        (id, claim_id, request_id, member, completed_at, credited_stars)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+        (id, claim_id, request_id, member, completed_at, credited_stars, credit_provenance)
+       VALUES (?, ?, ?, ?, ?, ?, 'recorded')`,
     ).run(completionId, command.claim, command.requestId, member, at, stars);
     db.prepare(
-      "UPDATE bounty_claims SET state = 'completed', revision = revision + 1 WHERE id = ?",
-    ).run(command.claim);
+      `UPDATE bounty_claims
+       SET state = 'completed', revision = revision + 1,
+           effective_completion_id = ?, restorable_completion_id = NULL,
+           correction_id = NULL
+       WHERE id = ?`,
+    ).run(completionId, command.claim);
     db.prepare(
       `INSERT INTO star_balances (member, balance) VALUES (?, ?)
        ON CONFLICT(member) DO UPDATE SET balance = excluded.balance`,
@@ -972,7 +1045,11 @@ function releaseClaimRow(
 } {
   const current = claimFromRow(row);
   db.prepare(
-    "UPDATE bounty_claims SET state = 'released', revision = revision + 1 WHERE id = ?",
+    `UPDATE bounty_claims
+     SET state = 'released', revision = revision + 1,
+         effective_completion_id = NULL, restorable_completion_id = NULL,
+         correction_id = NULL
+     WHERE id = ?`,
   ).run(current.claim.id);
   const released = claimFromRow(
     db
@@ -1007,7 +1084,7 @@ export function releaseBounty(input: {
       .get(command.claim);
     if (
       !row ||
-      row.state !== "unfinished" ||
+      (row.state !== "unfinished" && row.state !== "reopened") ||
       row.revision !== command.revision
     ) {
       throw new BountyStoreError(
@@ -1042,7 +1119,7 @@ export function releaseBountiesForRetiredMembers(
     .prepare(
       `SELECT c.*, o.kind AS offering_kind, o.interval_start
        FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
-       WHERE c.state = 'unfinished'`,
+       WHERE c.state IN ('unfinished', 'reopened')`,
     )
     .all()
     .filter((row) => retiredMembers.has(String(row.member)));
