@@ -360,11 +360,11 @@ export function parseTaskTitle(raw: unknown): TaskTitle | null {
   return title ? (title as TaskTitle) : null;
 }
 
-function parseWeekday(raw: unknown): Weekday | null {
+export function parseWeekday(raw: unknown): Weekday | null {
   return typeof raw === "string" && WEEKDAYS.has(raw) ? (raw as Weekday) : null;
 }
 
-function parseDayOfMonth(raw: unknown): DayOfMonth | null {
+export function parseDayOfMonth(raw: unknown): DayOfMonth | null {
   if (
     typeof raw !== "number" ||
     !Number.isInteger(raw) ||
