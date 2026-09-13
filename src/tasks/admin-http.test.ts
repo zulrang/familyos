@@ -226,7 +226,7 @@ describe("parent administration", () => {
       db: tasksDatabase(),
       command: claimCommand,
       today,
-      memberIsActive: true,
+      members: (await readHousehold()).members,
     });
     expect(
       (

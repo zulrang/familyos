@@ -147,7 +147,14 @@ test("version-three claims and durable receipts survive the release expansion", 
     expect(
       db.prepare("PRAGMA foreign_key_list(bounty_completions)").get()?.table,
     ).toBe("bounty_claims");
-    expect(claimBounty({ db, command, today, memberIsActive: false })).toEqual({
+    expect(
+      claimBounty({
+        db,
+        command,
+        today,
+        members: [{ id: "dad", name: "Dad", status: "retired" }],
+      }),
+    ).toEqual({
       status: "already-applied",
       result: {
         kind: "claimed",
@@ -207,7 +214,19 @@ test("a corrupt durable Bounty receipt is rejected before replay", () => {
     );
 
     expect(() =>
-      claimBounty({ db, command, today, memberIsActive: true }),
+      claimBounty({
+        db,
+        command,
+        today,
+        members: [
+          {
+            id: "dad",
+            name: "Dad",
+            status: "active",
+            color: "#a9d8d2",
+          },
+        ],
+      }),
     ).toThrow("corrupt Bounty command receipt");
   } finally {
     db.close();

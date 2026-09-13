@@ -2188,23 +2188,98 @@ describe("daily completion celebration", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
     const checkbox = await screen.findByRole("checkbox", {
       name: "Polish table",
     });
+    const release = screen.getByRole("button", {
+      name: "Release Polish table",
+    });
 
     fireEvent.click(checkbox);
-    fireEvent.click(checkbox);
+    fireEvent.click(release);
 
     expect(checkbox).toBeDisabled();
+    expect(release).toBeDisabled();
     expect(patchCount).toBe(1);
     if (!settleFirst) throw new Error("Missing deferred response resolver");
     settleFirst(json({ error: "stale claim revision" }, 409));
     await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(release).toBeEnabled();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Could not complete Bounty.",
     );
 
     await user.click(checkbox);
+    await waitFor(() => expect(patchCount).toBe(2));
+  });
+
+  test("guards a Bounty release per Claim while its request and refresh are pending", async () => {
+    const user = userEvent.setup();
+    const { store, claimed } = bountyTask();
+    store.bountyClaims.push({
+      ...claimed,
+      claim: {
+        ...claimed.claim,
+        id: "other-pending-claim" as ClaimedBounty["claim"]["id"],
+        title: "Dust shelves" as ClaimedBounty["claim"]["title"],
+      },
+    });
+    store.progress = [{ member: "dad", done: 0, total: 2 }];
+    let settleFirst: ((response: Response) => void) | undefined;
+    const firstPatch = new Promise<Response>((resolve) => {
+      settleFirst = resolve;
+    });
+    let patchCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/tasks")) {
+          return json(store);
+        }
+        if (method === "PATCH" && url.endsWith("/api/tasks")) {
+          patchCount += 1;
+          return patchCount === 1
+            ? firstPatch
+            : json({ error: "stale claim revision" }, 409);
+        }
+        throw new Error(`Unexpected ${method} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    const release = screen.getByRole("button", {
+      name: "Release Polish table",
+    });
+    const checkbox = screen.getByRole("checkbox", { name: "Polish table" });
+
+    fireEvent.click(release);
+    fireEvent.click(release);
+
+    expect(release).toBeDisabled();
+    expect(checkbox).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Release Dust shelves" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("checkbox", { name: "Dust shelves" }),
+    ).toBeEnabled();
+    expect(patchCount).toBe(1);
+    if (!settleFirst) throw new Error("Missing deferred response resolver");
+    settleFirst(json({ error: "stale claim revision" }, 409));
+    await waitFor(() => expect(release).toBeEnabled());
+    expect(checkbox).toBeEnabled();
+
+    await user.click(release);
     await waitFor(() => expect(patchCount).toBe(2));
   });
 });

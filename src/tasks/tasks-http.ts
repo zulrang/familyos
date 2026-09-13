@@ -214,8 +214,7 @@ export async function handleBountyCommand(
         db: tasksDatabase(),
         command,
         today,
-        memberIsActive:
-          memberById(household.members, command.member)?.status === "active",
+        members: household.members,
       });
       return Response.json({ receipt });
     }
