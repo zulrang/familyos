@@ -4,10 +4,16 @@ import { parseTaskAdminCommand } from "./admin-types";
 import {
   administerBountyDefinition,
   claimBounty,
+  createBounty,
+  loadAvailableBounties,
   migrateBountyStore,
 } from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
-import { parseBountyCommand, parseLocalDate } from "./types";
+import {
+  parseBountyCommand,
+  parseLocalDate,
+  parseTaskCreateDraft,
+} from "./types";
 
 test("version-one data survives migration; balances start at zero and new credits apply once", () => {
   const db = new DatabaseSync(":memory:");
@@ -78,7 +84,7 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
     expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
       9,
     );
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
     expect(
       db
         .prepare(
@@ -148,7 +154,7 @@ test("version-three claims and durable receipts survive the release expansion", 
     migrateBountyStore(db);
     migrateBountyStore(db);
 
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
     expect(
       db
         .prepare("SELECT revision FROM bounty_definitions WHERE id='bounty'")
@@ -158,6 +164,12 @@ test("version-three claims and durable receipts survive the release expansion", 
     expect(
       db.prepare("PRAGMA foreign_key_list(bounty_completions)").get()?.table,
     ).toBe("bounty_claims");
+    expect(
+      db
+        .prepare("PRAGMA table_info(bounty_offerings)")
+        .all()
+        .some((column) => column.name === "interval_start"),
+    ).toBe(true);
     expect(
       claimBounty({
         db,
@@ -206,6 +218,39 @@ test("version-three claims and durable receipts survive the release expansion", 
         .prepare("SELECT title, stars FROM bounty_claims WHERE id='claim'")
         .get(),
     ).toEqual({ title: "Wash car", stars: 5 });
+
+    const recurringDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Water plants",
+      stars: 2,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-14",
+        cadence: { kind: "weekly", days: ["mon"] },
+      },
+    });
+    expect(recurringDraft?.kind).toBe("bounty");
+    if (!recurringDraft || recurringDraft.kind !== "bounty") {
+      throw new Error("invalid recurring fixture");
+    }
+    const recurring = createBounty(db, recurringDraft, today);
+    expect(
+      loadAvailableBounties(db, today).some(
+        (offering) => offering.offering.definition === recurring.id,
+      ),
+    ).toBe(false);
+    const monday = parseLocalDate("2026-09-14");
+    expect(monday).not.toBeNull();
+    if (!monday) throw new Error("invalid Monday fixture");
+    expect(loadAvailableBounties(db, monday)).toContainEqual(
+      expect.objectContaining({
+        offering: {
+          kind: "recurring",
+          definition: recurring.id,
+          intervalStart: monday,
+        },
+      }),
+    );
   } finally {
     db.close();
   }
