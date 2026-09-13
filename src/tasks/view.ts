@@ -1,11 +1,11 @@
 import {
   addLocalDays,
+  type LegacyTaskDefinition,
   type LocalDate,
   type Occurrence,
   type Recurrence,
   type StarAdjustment,
   type StarBalance,
-  type TaskDefinition,
   type TaskEvent,
   type TaskId,
   type Weekday,
@@ -36,7 +36,7 @@ function eventMap(events: readonly TaskEvent[]): Map<string, TaskEvent> {
 }
 
 function foldOccurrence(
-  definition: TaskDefinition,
+  definition: LegacyTaskDefinition,
   window: LocalDate,
   fallbackState: "pending" | "expired",
   events: Map<string, TaskEvent>,
@@ -202,7 +202,7 @@ export function occurrencesForColumn(
 }
 
 export function view(
-  definitions: readonly TaskDefinition[],
+  definitions: readonly LegacyTaskDefinition[],
   events: readonly TaskEvent[],
   today: LocalDate,
 ): Occurrence[] {
@@ -246,7 +246,7 @@ export function view(
 }
 
 export function starBalances(
-  definitions: readonly TaskDefinition[],
+  definitions: readonly LegacyTaskDefinition[],
   events: readonly TaskEvent[],
   adjustments: readonly StarAdjustment[],
 ): StarBalance[] {

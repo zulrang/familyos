@@ -19,10 +19,13 @@ import { TaskCelebration } from "./TaskCelebration";
 import styles from "./TaskEditor.module.css";
 import { TasksBoard } from "./TasksBoard";
 import {
+  type AvailableBounty,
+  type ClaimedBounty,
+  type ClaimId,
+  type LegacyTaskDefinition,
   nowInstant,
   type Occurrence,
   type Recurrence,
-  type TaskDefinition,
   type TaskId,
   type TasksViewRead,
   type TaskType,
@@ -54,6 +57,9 @@ function emptyView(): TasksViewRead {
     progress: [],
     starBalances: [],
     definitions: [],
+    bountyDefinitions: [],
+    availableBounties: [],
+    bountyClaims: [],
     today: "1970-01-01" as TasksViewRead["today"],
     generatedAt: nowInstant(),
   };
@@ -88,6 +94,12 @@ type Draft = DraftFields & {
   assignment: DraftAssignment;
   task: TaskId | null;
 };
+
+type BountyDraft = { title: string; stars: string };
+
+type EditorState =
+  | { kind: "assigned"; draft: Draft }
+  | { kind: "bounty"; draft: BountyDraft };
 
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
@@ -146,7 +158,7 @@ function toDraftRecurrence(recurrence: Recurrence): DraftRecurrence {
   }
 }
 
-function sheetFromDefinition(definition: TaskDefinition): Draft {
+function sheetFromDefinition(definition: LegacyTaskDefinition): Draft {
   return {
     task: definition.id,
     title: definition.title,
@@ -160,7 +172,8 @@ function sheetFromDefinition(definition: TaskDefinition): Draft {
 
 type MemberAction =
   | { kind: "claim"; occurrence: Occurrence }
-  | { kind: "complete"; occurrence: Occurrence };
+  | { kind: "complete"; occurrence: Occurrence }
+  | { kind: "claim-bounty"; bounty: AvailableBounty };
 
 const SKIP_PRESETS = ["Away", "Sick", "Not needed"] as const;
 
@@ -280,7 +293,7 @@ export function TasksScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
-  const [sheet, setSheet] = useState<Draft | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
   const [skipping, setSkipping] = useState<Occurrence | null>(null);
   const [skipNote, setSkipNote] = useState("");
@@ -291,6 +304,10 @@ export function TasksScreen() {
     date: TasksViewRead["today"];
   } | null>(null);
   const celebrated = useRef(new Set<string>());
+  const pendingBountyMutationIds = useRef(new Set<ClaimId>());
+  const [mutatingBountyClaims, setMutatingBountyClaims] = useState<
+    ReadonlySet<ClaimId>
+  >(new Set());
   const dismissCelebration = useCallback(() => setCelebration(null), []);
 
   const load = useCallback(async () => {
@@ -328,9 +345,46 @@ export function TasksScreen() {
 
   const members = settings ? activeMembers(settings.members) : [];
 
+  function beginBountyMutation(claim: ClaimId): boolean {
+    if (pendingBountyMutationIds.current.has(claim)) return false;
+    pendingBountyMutationIds.current.add(claim);
+    setMutatingBountyClaims(new Set(pendingBountyMutationIds.current));
+    return true;
+  }
+
+  function endBountyMutation(claim: ClaimId): void {
+    pendingBountyMutationIds.current.delete(claim);
+    setMutatingBountyClaims(new Set(pendingBountyMutationIds.current));
+  }
+
+  function celebrateIfDayComplete(
+    confirmed: TasksViewRead | undefined,
+    member: string,
+    completionConfirmed: boolean,
+  ) {
+    const person = members.find((candidate) => candidate.id === member);
+    const progress = confirmed?.progress.find((row) => row.member === member);
+    const receipt = `${confirmed?.today}:${member}`;
+    if (
+      confirmed &&
+      person &&
+      confirmed.today === tasks.today &&
+      completionConfirmed &&
+      progress &&
+      progress.total > 0 &&
+      progress.done === progress.total &&
+      !celebrated.current.has(receipt)
+    ) {
+      celebrated.current.add(receipt);
+      setCelebration({ member: person, date: confirmed.today });
+    }
+  }
+
   function openEditor(row: Occurrence) {
     const definition = tasks.definitions.find((item) => item.id === row.task);
-    if (definition) setSheet(sheetFromDefinition(definition));
+    if (definition) {
+      setEditor({ kind: "assigned", draft: sheetFromDefinition(definition) });
+    }
   }
 
   async function complete(occ: Occurrence, member = occ.assignee) {
@@ -360,30 +414,21 @@ export function TasksScreen() {
         setError("Could not complete task.");
       }
       const confirmed = await load();
-      const person = members.find((candidate) => candidate.id === member);
-      const progress = confirmed?.progress.find((row) => row.member === member);
-      const receipt = `${confirmed?.today}:${member}`;
-      if (
+      celebrateIfDayComplete(
+        confirmed,
+        member,
         res.ok &&
-        confirmed &&
-        person &&
-        confirmed.today === tasks.today &&
-        occ.state !== "done" &&
-        confirmed.occurrences.some(
-          (row) =>
-            row.task === occ.task &&
-            row.window === occ.window &&
-            row.state === "done" &&
-            row.by === member,
-        ) &&
-        progress &&
-        progress.total > 0 &&
-        progress.done === progress.total &&
-        !celebrated.current.has(receipt)
-      ) {
-        celebrated.current.add(receipt);
-        setCelebration({ member: person, date: confirmed.today });
-      }
+          occ.state !== "done" &&
+          Boolean(
+            confirmed?.occurrences.some(
+              (row) =>
+                row.task === occ.task &&
+                row.window === occ.window &&
+                row.state === "done" &&
+                row.by === member,
+            ),
+          ),
+      );
     } catch {
       setError("Could not complete task.");
       await load();
@@ -422,6 +467,126 @@ export function TasksScreen() {
     }
   }
 
+  async function claimBountyOffering(bounty: AvailableBounty, member?: string) {
+    if (!member) {
+      setMemberAction({ kind: "claim-bounty", bounty });
+      return;
+    }
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: bounty.offering,
+          member,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      const failure = !res.ok ? "Could not claim Bounty." : null;
+      await load();
+      if (failure) setError(failure);
+    } catch {
+      await load().catch(() => undefined);
+      setError("Could not claim Bounty.");
+    }
+  }
+
+  async function completeBountyClaim(row: ClaimedBounty) {
+    if (row.state.kind !== "unfinished") return;
+    if (!beginBountyMutation(row.claim.id)) return;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "complete-bounty",
+          requestId: crypto.randomUUID(),
+          claim: row.claim.id,
+          revision: row.revision,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      const failure = !res.ok ? "Could not complete Bounty." : null;
+      const confirmed = await load();
+      if (failure) setError(failure);
+      celebrateIfDayComplete(
+        confirmed,
+        row.claim.member,
+        res.ok &&
+          Boolean(
+            confirmed?.bountyClaims.some(
+              (candidate) =>
+                candidate.claim.id === row.claim.id &&
+                candidate.state.kind === "completed",
+            ),
+          ),
+      );
+    } catch {
+      await load().catch(() => undefined);
+      setError("Could not complete Bounty.");
+    } finally {
+      endBountyMutation(row.claim.id);
+    }
+  }
+
+  async function releaseBountyClaim(row: ClaimedBounty) {
+    if (row.state.kind !== "unfinished") return;
+    if (!beginBountyMutation(row.claim.id)) return;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "release-bounty",
+          requestId: crypto.randomUUID(),
+          claim: row.claim.id,
+          revision: row.revision,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      const failure = !res.ok ? "Could not release Bounty." : null;
+      await load();
+      if (failure) setError(failure);
+    } catch {
+      await load().catch(() => undefined);
+      setError("Could not release Bounty.");
+    } finally {
+      endBountyMutation(row.claim.id);
+    }
+  }
+
+  async function saveBounty() {
+    if (editor?.kind !== "bounty") return;
+    const title = editor.draft.title.trim();
+    const stars = Number(editor.draft.stars);
+    if (!title || !Number.isSafeInteger(stars) || stars < 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "bounty",
+          type: "chore",
+          title,
+          stars,
+          recurrence: { kind: "once" },
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) {
+        setError("Could not create Bounty.");
+        return;
+      }
+      setEditor(null);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function skip(occ: Occurrence, reason: string | null) {
     setSkipping(null);
     setSkipNote("");
@@ -453,7 +618,8 @@ export function TasksScreen() {
   }
 
   async function saveTask() {
-    if (!sheet) return;
+    if (editor?.kind !== "assigned") return;
+    const sheet = editor.draft;
     const title = sheet.title.trim();
     const recurrence = parseDraftRecurrence(sheet.recurrence);
     const stars = Number(sheet.stars);
@@ -490,7 +656,7 @@ export function TasksScreen() {
         );
         return;
       }
-      setSheet(null);
+      setEditor(null);
       await load();
     } finally {
       setBusy(false);
@@ -521,6 +687,7 @@ export function TasksScreen() {
       ) : null}
       {error ? (
         <div
+          role="alert"
           style={{
             padding: "0 24px 12px",
             font: "var(--type-card-meta)",
@@ -530,21 +697,7 @@ export function TasksScreen() {
           {error}
         </div>
       ) : null}
-      {members.length === 0 && settings ? (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            font: "var(--type-section)",
-            color: "var(--text-faint)",
-          }}
-        >
-          Add household members under Settings
-        </div>
-      ) : null}
-      {members.length > 0 ? (
+      {settings ? (
         <TasksBoard
           members={members}
           tasks={tasks}
@@ -555,6 +708,13 @@ export function TasksScreen() {
             setSkipping(row);
           }}
           onEdit={openEditor}
+          onClaimBounty={(row) => claimBountyOffering(row).catch(() => {})}
+          onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
+          onReleaseBounty={(row) => releaseBountyClaim(row).catch(() => {})}
+          mutatingBountyClaims={mutatingBountyClaims}
+          onAddBounty={() =>
+            setEditor({ kind: "bounty", draft: { title: "", stars: "0" } })
+          }
           claimSelection={
             memberAction?.kind === "claim"
               ? {
@@ -574,29 +734,41 @@ export function TasksScreen() {
         <Fab
           label="Add task"
           onClick={() =>
-            setSheet({
-              task: null,
-              title: "",
-              type: "chore",
-              recurrence: { kind: "daily" },
-              assignment: {
-                kind: "fixed",
-                member: members[0]?.id ?? "",
+            setEditor({
+              kind: "assigned",
+              draft: {
+                task: null,
+                title: "",
+                type: "chore",
+                recurrence: { kind: "daily" },
+                assignment: {
+                  kind: "fixed",
+                  member: members[0]?.id ?? "",
+                },
+                time: "",
+                stars: "0",
               },
-              time: "",
-              stars: "0",
             })
           }
         />
       ) : null}
-      {sheet ? (
+      {editor?.kind === "assigned" ? (
         <CreateSheet
-          draft={sheet}
+          draft={editor.draft}
           members={members}
           busy={busy}
-          onChange={setSheet}
-          onClose={() => setSheet(null)}
+          onChange={(draft) => setEditor({ kind: "assigned", draft })}
+          onClose={() => setEditor(null)}
           onSave={saveTask}
+        />
+      ) : null}
+      {editor?.kind === "bounty" ? (
+        <BountySheet
+          draft={editor.draft}
+          busy={busy}
+          onChange={(draft) => setEditor({ kind: "bounty", draft })}
+          onClose={() => setEditor(null)}
+          onSave={saveBounty}
         />
       ) : null}
       {memberAction?.kind === "complete" ? (
@@ -608,6 +780,18 @@ export function TasksScreen() {
             const action = memberAction;
             setMemberAction(null);
             complete(action.occurrence, member.id).catch(() => {});
+          }}
+        />
+      ) : null}
+      {memberAction?.kind === "claim-bounty" ? (
+        <MemberPicker
+          action={memberAction.kind}
+          members={members}
+          onClose={() => setMemberAction(null)}
+          onPick={(member) => {
+            const bounty = memberAction.bounty;
+            setMemberAction(null);
+            claimBountyOffering(bounty, member.id).catch(() => {});
           }}
         />
       ) : null}
@@ -625,6 +809,92 @@ export function TasksScreen() {
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+function BountySheet({
+  draft,
+  busy,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  draft: BountyDraft;
+  busy: boolean;
+  onChange: (draft: BountyDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const stars = Number(draft.stars);
+  const canSave =
+    draft.title.trim().length > 0 && Number.isSafeInteger(stars) && stars >= 0;
+  return (
+    <div className={styles.overlay}>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className={styles.backdrop}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bounty-editor-title"
+        className={styles.panel}
+      >
+        <div className={styles.header}>
+          <h2
+            id="bounty-editor-title"
+            style={{ font: "var(--type-section)", flex: 1 }}
+          >
+            New Bounty
+          </h2>
+          <IconButton icon="x" label="Close" onClick={onClose} />
+        </div>
+        <div className={styles.body}>
+          <label className={styles.title}>
+            Bounty title
+            <input
+              className="fos-input"
+              aria-label="Bounty title"
+              value={draft.title}
+              onChange={(event) =>
+                onChange({ ...draft, title: event.target.value })
+              }
+            />
+          </label>
+          <section className={styles.details}>
+            <h3>Reward</h3>
+            <label>
+              Stars
+              <input
+                className="fos-input"
+                inputMode="numeric"
+                type="text"
+                pattern="[0-9]*"
+                aria-label="Stars"
+                value={draft.stars}
+                onFocus={(event) => event.currentTarget.select()}
+                onClick={(event) => event.currentTarget.select()}
+                onChange={(event) =>
+                  onChange({ ...draft, stars: event.target.value })
+                }
+              />
+            </label>
+          </section>
+        </div>
+        <div className={styles.footer}>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy || !canSave}
+            onClick={onSave}
+          >
+            Add Bounty
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1034,7 +1304,12 @@ function MemberPicker({
   onClose: () => void;
   onPick: (member: ActiveMember) => void;
 }) {
-  const title = action === "claim" ? "Claim task" : "Complete task";
+  const title =
+    action === "claim-bounty"
+      ? "Claim Bounty"
+      : action === "claim"
+        ? "Claim task"
+        : "Complete task";
   return (
     <div
       style={{
@@ -1085,6 +1360,9 @@ function MemberPicker({
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {members.length === 0 ? (
+            <p>Add an Active Member under Settings before claiming a Bounty.</p>
+          ) : null}
           {members.map((member) => {
             const surface = memberSurface(member.color);
             return (

@@ -2,19 +2,19 @@ import {
   type CreateTaskDraft,
   type Instant,
   isRecord,
+  type LegacyTaskDefinition,
   type LocalDate,
   parseCreateTaskDraft,
   parseLocalDate,
   parseTaskId,
   type StarAdjustment,
   type StarBalance,
-  type TaskDefinition,
   type TaskEvent,
   type TaskId,
 } from "./types";
 
 export type TaskAdminRead = {
-  definitions: TaskDefinition[];
+  definitions: LegacyTaskDefinition[];
   events: TaskEvent[];
   originalEvents: TaskEvent[];
   corrections: CompletionCorrection[];

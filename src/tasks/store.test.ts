@@ -16,10 +16,10 @@ import {
 import type {
   CreateTaskDraft,
   Instant,
+  LegacyTaskDefinition,
   LineageId,
   LocalDate,
   LocalTime,
-  TaskDefinition,
   TaskEvent,
   TaskId,
 } from "./types";
@@ -37,7 +37,9 @@ describe("tasks sqlite store", () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
 
-  function definition(overrides: Partial<TaskDefinition> = {}): TaskDefinition {
+  function definition(
+    overrides: Partial<LegacyTaskDefinition> = {},
+  ): LegacyTaskDefinition {
     return {
       id: crypto.randomUUID() as TaskId,
       lineage: crypto.randomUUID() as LineageId,
@@ -53,7 +55,7 @@ describe("tasks sqlite store", () => {
   }
 
   function draftFrom(
-    def: TaskDefinition,
+    def: LegacyTaskDefinition,
     overrides: Partial<CreateTaskDraft> = {},
   ): CreateTaskDraft {
     return {
@@ -67,7 +69,7 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("task history, balances, and correction tables exist at schema version 2", () => {
+  test("assigned Task and Bounty tables exist at schema version 3", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -79,6 +81,11 @@ describe("tasks sqlite store", () => {
         .map((row) => row.name)
         .filter((name) => !name.startsWith("sqlite_")),
       [
+        "bounty_claims",
+        "bounty_command_receipts",
+        "bounty_completions",
+        "bounty_definitions",
+        "bounty_offerings",
         "completion_corrections",
         "completion_credits",
         "definitions",
@@ -90,7 +97,7 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 2);
+    assert.equal(version.user_version, 4);
   });
 
   test("persists full recurrence and assignment unions", () => {

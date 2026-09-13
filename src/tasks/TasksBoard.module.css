@@ -26,6 +26,49 @@
 .boardHeading p {
   color: var(--neutral-600);
 }
+.bountiesEntry,
+.bountyHeader .rowAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: #fff3c4;
+  color: var(--text-body);
+  font: var(--fw-bold) 17px / 1.3 var(--font-sans);
+  cursor: pointer;
+}
+.bountyFocus {
+  max-width: 920px;
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 24px;
+  background: var(--surface-panel);
+}
+.bountyHeader,
+.manageBounties {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px 26px;
+  background: #fff3c4;
+}
+.bountyHeader h2,
+.manageBounties h2 {
+  font: var(--type-section);
+}
+.bountyHeader p,
+.manageBounties p {
+  margin-top: 5px;
+  font: var(--type-card-meta);
+}
+.manageBounties {
+  border-top: 1px solid var(--surface-sunken);
+  background: var(--surface-sunken);
+}
 .scroll {
   flex: 1;
   min-height: 0;

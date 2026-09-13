@@ -7,8 +7,8 @@ import { AdminCompletions } from "./AdminCompletions";
 import type { CompletionCorrection, TaskAdminRead } from "./admin-types";
 import type {
   Instant,
+  LegacyTaskDefinition,
   LocalDate,
-  TaskDefinition,
   TaskEvent,
   TaskId,
 } from "./types";
@@ -18,10 +18,10 @@ const members: HouseholdMember[] = [
   { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
 ];
 
-function definition(id: string, title: string): TaskDefinition {
+function definition(id: string, title: string): LegacyTaskDefinition {
   return {
-    id: id as TaskDefinition["id"],
-    lineage: `${id}-lineage` as TaskDefinition["lineage"],
+    id: id as LegacyTaskDefinition["id"],
+    lineage: `${id}-lineage` as LegacyTaskDefinition["lineage"],
     title,
     type: "chore",
     recurrence: { kind: "daily" },

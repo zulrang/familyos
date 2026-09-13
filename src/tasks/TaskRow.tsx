@@ -20,19 +20,25 @@ export type TaskRowStatus =
 export function TaskRow({
   label,
   time,
+  stars,
   status,
   onComplete,
+  mutationPending = false,
   onClaim,
   onCancelClaim,
+  onRelease,
   onSkip,
   onEdit,
 }: {
   label: string;
   time?: LocalTime | null;
+  stars?: number;
   status: TaskRowStatus;
   onComplete?: () => void;
+  mutationPending?: boolean;
   onClaim?: () => void;
   onCancelClaim?: () => void;
+  onRelease?: () => void;
   onSkip?: () => void;
   onEdit?: () => void;
 }) {
@@ -44,7 +50,7 @@ export function TaskRow({
           <input
             type="checkbox"
             checked={done}
-            disabled={done}
+            disabled={done || mutationPending}
             aria-label={label}
             onChange={onComplete}
           />
@@ -67,6 +73,11 @@ export function TaskRow({
         {time ? (
           <span className={styles.taskMeta}>{formatTaskTime(time)}</span>
         ) : null}
+        {stars !== undefined ? (
+          <span className={styles.taskMeta}>
+            {stars} {stars === 1 ? "Star" : "Stars"}
+          </span>
+        ) : null}
         {status.kind === "skipped" ? (
           <span className={styles.taskMeta}>{status.reason ?? "Skipped"}</span>
         ) : null}
@@ -88,6 +99,17 @@ export function TaskRow({
           className={styles.rowAction}
         >
           Claim
+        </button>
+      ) : null}
+      {onRelease ? (
+        <button
+          type="button"
+          aria-label={`Release ${label}`}
+          onClick={onRelease}
+          disabled={mutationPending}
+          className={styles.skip}
+        >
+          Release
         </button>
       ) : null}
       {onSkip ? (

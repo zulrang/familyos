@@ -8,6 +8,13 @@
   padding: 16px;
   background: rgb(30 50 65 / 18%);
 }
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
 
 .panel {
   position: relative;
