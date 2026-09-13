@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type CSSProperties, useRef, useState } from "react";
 import {
   type ActiveMember,
@@ -549,13 +550,14 @@ export function TasksBoard({
               )}
             </div>
             <div className={styles.manageBounties}>
-              <h2>Manage Bounties</h2>
-              <p>
-                {tasks.bountyDefinitions.length} Bounty{" "}
-                {tasks.bountyDefinitions.length === 1
-                  ? "definition"
-                  : "definitions"}
-              </p>
+              <div>
+                <h2>Manage Bounties</h2>
+                <p>Edit rewards, retire old work, and review history.</p>
+              </div>
+              <Link className={styles.rowAction} href="/admin/bounties">
+                Manage
+                <Icon name="chevron-right" size={20} />
+              </Link>
             </div>
           </section>
         ) : null}

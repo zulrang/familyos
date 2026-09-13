@@ -1,6 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
-import { claimBounty, migrateBountyStore } from "./bounty-store";
+import { parseTaskAdminCommand } from "./admin-types";
+import {
+  administerBountyDefinition,
+  claimBounty,
+  migrateBountyStore,
+} from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
 import { parseBountyCommand, parseLocalDate } from "./types";
 
@@ -73,14 +78,14 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
     expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
       9,
     );
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(4);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
     expect(
       db
         .prepare(
           "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'bounty_%'",
         )
         .get()?.count,
-    ).toBe(5);
+    ).toBe(6);
   } finally {
     db.close();
   }
@@ -88,12 +93,13 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
 
 test("version-three claims and durable receipts survive the release expansion", () => {
   const db = new DatabaseSync(":memory:");
-  const command = parseBountyCommand({
+  const legacyPayload = {
     kind: "claim-bounty",
     requestId: "accepted-v3-claim",
     offering: { kind: "once", definition: "bounty" },
     member: "dad",
-  });
+  };
+  const command = parseBountyCommand(legacyPayload);
   const today = parseLocalDate("2026-09-13");
   expect(command?.kind).toBe("claim-bounty");
   expect(today).not.toBeNull();
@@ -135,14 +141,19 @@ test("version-three claims and durable receipts survive the release expansion", 
     db.prepare("INSERT INTO bounty_command_receipts VALUES (?, ?, ?, ?)").run(
       command.requestId,
       command.kind,
-      JSON.stringify(command),
+      JSON.stringify(legacyPayload),
       response,
     );
 
     migrateBountyStore(db);
     migrateBountyStore(db);
 
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(4);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(5);
+    expect(
+      db
+        .prepare("SELECT revision FROM bounty_definitions WHERE id='bounty'")
+        .get()?.revision,
+    ).toBe(0);
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(
       db.prepare("PRAGMA foreign_key_list(bounty_completions)").get()?.table,
@@ -162,6 +173,32 @@ test("version-three claims and durable receipts survive the release expansion", 
         revision: 0,
       },
     });
+    const edit = parseTaskAdminCommand({
+      kind: "edit-bounty",
+      requestId: "e".repeat(32),
+      definition: "bounty",
+      revision: 0,
+      draft: { title: "Polish car", stars: 8 },
+    });
+    expect(edit?.kind).toBe("edit-bounty");
+    if (!edit || edit.kind !== "edit-bounty") throw new Error("invalid edit");
+    expect(
+      administerBountyDefinition({ db, command: edit, today }),
+    ).toMatchObject({
+      status: "accepted",
+      definition: { title: "Polish car", revision: 1 },
+    });
+    expect(
+      administerBountyDefinition({ db, command: edit, today }),
+    ).toMatchObject({
+      status: "already-applied",
+      definition: { title: "Polish car" },
+    });
+    expect(
+      db
+        .prepare("SELECT title, stars FROM bounty_claims WHERE id='claim'")
+        .get(),
+    ).toEqual({ title: "Wash car", stars: 5 });
   } finally {
     db.close();
   }
@@ -171,12 +208,13 @@ test("a corrupt durable Bounty receipt is rejected before replay", () => {
   const db = new DatabaseSync(":memory:");
   try {
     migrateBountyStore(db);
-    const command = parseBountyCommand({
+    const legacyPayload = {
       kind: "claim-bounty",
       requestId: "corrupt-receipt-request",
       offering: { kind: "once", definition: "missing-definition" },
       member: "dad",
-    });
+    };
+    const command = parseBountyCommand(legacyPayload);
     const today = parseLocalDate("2026-09-13");
     expect(command).not.toBeNull();
     expect(today).not.toBeNull();
@@ -188,7 +226,7 @@ test("a corrupt durable Bounty receipt is rejected before replay", () => {
     ).run(
       command.requestId,
       command.kind,
-      JSON.stringify(command),
+      JSON.stringify(legacyPayload),
       JSON.stringify({
         status: "accepted",
         result: {

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { MemberId } from "@/members/members";
+import type { BountyAdminCommand } from "./admin-types";
 import {
   type AvailableBounty,
   type BountyClaim,
@@ -19,9 +20,11 @@ import {
   newOfferingId,
   nowInstant,
   parseBountyCommandReceipt,
+  parseBountyDefinition,
   parseClaimId,
   parseClaimRevision,
   parseCompletionId,
+  parseDefinitionRevision,
   parseInstant,
   parseLineageId,
   parseLocalDate,
@@ -34,6 +37,12 @@ import {
 
 export class BountyStoreError extends Error {}
 export class InactiveBountyMemberError extends Error {}
+export class BountyAdminStoreError extends Error {}
+
+export type BountyAdminReceipt = Readonly<{
+  status: "accepted" | "already-applied";
+  definition: BountyDefinition;
+}>;
 
 const BOUNTY_CLAIMS_V4 = `
     CREATE TABLE bounty_claims (
@@ -79,6 +88,40 @@ const BOUNTY_RECEIPTS_V4 = `
     );
 `;
 
+const BOUNTY_DEFINITION_TRIGGERS_V5 = `
+    CREATE TRIGGER bounty_definitions_update_guard BEFORE UPDATE ON bounty_definitions
+    BEGIN
+      SELECT RAISE(ABORT, 'Bounty identity and recurrence are immutable') WHERE
+        NEW.creation_order IS NOT OLD.creation_order OR NEW.id IS NOT OLD.id
+        OR NEW.lineage IS NOT OLD.lineage OR NEW.type IS NOT OLD.type
+        OR NEW.recurrence IS NOT OLD.recurrence;
+      SELECT RAISE(ABORT, 'retired Bounty definition is frozen')
+        WHERE OLD.retired_at IS NOT NULL;
+      SELECT RAISE(ABORT, 'invalid Bounty definition revision')
+        WHERE NEW.revision != OLD.revision + 1;
+      SELECT RAISE(ABORT, 'retire must not change Bounty details') WHERE
+        NEW.retired_at IS NOT NULL
+        AND (NEW.title IS NOT OLD.title OR NEW.stars IS NOT OLD.stars);
+    END;
+    CREATE TRIGGER bounty_definitions_no_delete BEFORE DELETE ON bounty_definitions
+      BEGIN SELECT RAISE(ABORT, 'bounty definitions cannot be deleted'); END;
+`;
+
+const BOUNTY_ADMIN_RECEIPTS_V5 = `
+    CREATE TABLE bounty_admin_command_receipts (
+      request_id TEXT NOT NULL PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('edit-bounty', 'retire-bounty')),
+      payload TEXT NOT NULL,
+      response TEXT NOT NULL
+    );
+    CREATE TRIGGER bounty_admin_receipts_no_update
+      BEFORE UPDATE ON bounty_admin_command_receipts
+      BEGIN SELECT RAISE(ABORT, 'Bounty admin receipts are immutable'); END;
+    CREATE TRIGGER bounty_admin_receipts_no_delete
+      BEFORE DELETE ON bounty_admin_command_receipts
+      BEGIN SELECT RAISE(ABORT, 'Bounty admin receipts are immutable'); END;
+`;
+
 function createBountyStore(db: DatabaseSync): void {
   db.exec(`BEGIN IMMEDIATE;
     CREATE TABLE bounty_definitions (
@@ -89,6 +132,7 @@ function createBountyStore(db: DatabaseSync): void {
       type TEXT NOT NULL CHECK (type = 'chore'),
       recurrence TEXT NOT NULL CHECK (recurrence = 'once'),
       stars INTEGER NOT NULL CHECK (stars >= 0 AND stars <= 9007199254740991),
+      revision INTEGER NOT NULL CHECK (revision >= 0),
       retired_at TEXT
     );
     CREATE TABLE bounty_offerings (
@@ -108,20 +152,8 @@ function createBountyStore(db: DatabaseSync): void {
       FOREIGN KEY (claim_id) REFERENCES bounty_claims(id)
     );
     ${BOUNTY_RECEIPTS_V4}
-    CREATE TRIGGER bounty_definitions_update_guard BEFORE UPDATE ON bounty_definitions
-    BEGIN
-      SELECT RAISE(ABORT, 'bounty identity and recurrence are immutable') WHERE
-        NEW.creation_order IS NOT OLD.creation_order OR NEW.id IS NOT OLD.id
-        OR NEW.lineage IS NOT OLD.lineage OR NEW.type IS NOT OLD.type
-        OR NEW.recurrence IS NOT OLD.recurrence;
-      SELECT RAISE(ABORT, 'retired Bounty definition is frozen')
-        WHERE OLD.retired_at IS NOT NULL;
-      SELECT RAISE(ABORT, 'retire must not change Bounty details') WHERE
-        NEW.retired_at IS NOT NULL
-        AND (NEW.title IS NOT OLD.title OR NEW.stars IS NOT OLD.stars);
-    END;
-    CREATE TRIGGER bounty_definitions_no_delete BEFORE DELETE ON bounty_definitions
-      BEGIN SELECT RAISE(ABORT, 'bounty definitions cannot be deleted'); END;
+    ${BOUNTY_ADMIN_RECEIPTS_V5}
+    ${BOUNTY_DEFINITION_TRIGGERS_V5}
     CREATE TRIGGER bounty_offerings_no_update BEFORE UPDATE ON bounty_offerings
       BEGIN SELECT RAISE(ABORT, 'bounty offerings are immutable'); END;
     CREATE TRIGGER bounty_offerings_no_delete BEFORE DELETE ON bounty_offerings
@@ -135,9 +167,27 @@ function createBountyStore(db: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'bounty receipts are immutable'); END;
     CREATE TRIGGER bounty_receipts_no_delete BEFORE DELETE ON bounty_command_receipts
       BEGIN SELECT RAISE(ABORT, 'bounty receipts are immutable'); END;
-    PRAGMA user_version = 4;
+    PRAGMA user_version = 5;
     COMMIT;
   `);
+}
+
+function migrateBountyDefinitionsToV5(db: DatabaseSync): void {
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      DROP TRIGGER IF EXISTS bounty_definitions_update_guard;
+      DROP TRIGGER IF EXISTS bounty_definitions_no_delete;
+      ALTER TABLE bounty_definitions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0
+        CHECK (revision >= 0);
+      ${BOUNTY_ADMIN_RECEIPTS_V5}
+      ${BOUNTY_DEFINITION_TRIGGERS_V5}
+      PRAGMA user_version = 5;
+      COMMIT;
+    `);
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function migrateBountyClaimsToV4(db: DatabaseSync): void {
@@ -210,6 +260,11 @@ export function migrateBountyStore(db: DatabaseSync): void {
     return;
   }
   if (!claimsSql.includes("'released'")) migrateBountyClaimsToV4(db);
+  const hasDefinitionRevision = db
+    .prepare("PRAGMA table_info(bounty_definitions)")
+    .all()
+    .some((column) => column.name === "revision");
+  if (!hasDefinitionRevision) migrateBountyDefinitionsToV5(db);
 }
 
 function bountyDefinitionFromRow(
@@ -221,6 +276,7 @@ function bountyDefinitionFromRow(
     row.retired_at === null ? null : parseLocalDate(row.retired_at);
   const title = parseTaskTitle(row.title);
   const stars = parseStarAmount(row.stars);
+  const revision = parseDefinitionRevision(row.revision);
   if (
     !id ||
     !lineage ||
@@ -228,6 +284,7 @@ function bountyDefinitionFromRow(
     row.type !== "chore" ||
     row.recurrence !== "once" ||
     stars === null ||
+    revision === null ||
     (row.retired_at !== null && !retiredAt)
   ) {
     throw new Error("corrupt Bounty definition row");
@@ -240,6 +297,7 @@ function bountyDefinitionFromRow(
     type: "chore",
     stars,
     recurrence: { kind: "once" },
+    revision,
     retiredAt,
   };
 }
@@ -307,8 +365,8 @@ export function createBounty(
   try {
     db.prepare(
       `INSERT INTO bounty_definitions
-        (id, lineage, title, type, recurrence, stars, retired_at)
-       VALUES (?, ?, ?, 'chore', 'once', ?, NULL)`,
+        (id, lineage, title, type, recurrence, stars, revision, retired_at)
+       VALUES (?, ?, ?, 'chore', 'once', ?, 0, NULL)`,
     ).run(
       definition.id,
       definition.lineage,
@@ -336,6 +394,93 @@ export function loadBountyDefinitions(db: DatabaseSync): BountyDefinition[] {
     });
 }
 
+function priorAdminReceipt(
+  db: DatabaseSync,
+  command: BountyAdminCommand,
+): BountyAdminReceipt | null {
+  const row = db
+    .prepare(
+      "SELECT kind, payload, response FROM bounty_admin_command_receipts WHERE request_id = ?",
+    )
+    .get(command.requestId);
+  if (!row) return null;
+  const payload = JSON.stringify(command);
+  if (row.kind !== command.kind || row.payload !== payload) {
+    throw new BountyAdminStoreError(
+      "That request identity was already used for a different Bounty change.",
+    );
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(row.response));
+  } catch {
+    throw new Error("corrupt Bounty administration receipt");
+  }
+  const definition = parseBountyDefinition(raw);
+  if (!definition) throw new Error("corrupt Bounty administration receipt");
+  return { status: "already-applied", definition };
+}
+
+export function administerBountyDefinition(input: {
+  db: DatabaseSync;
+  command: BountyAdminCommand;
+  today: LocalDate;
+}): BountyAdminReceipt {
+  const { db, command, today } = input;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const replay = priorAdminReceipt(db, command);
+    if (replay) {
+      db.exec("COMMIT");
+      return replay;
+    }
+    const current = db
+      .prepare("SELECT * FROM bounty_definitions WHERE id = ?")
+      .get(command.definition);
+    if (
+      !current ||
+      current.retired_at !== null ||
+      current.revision !== command.revision
+    ) {
+      throw new BountyAdminStoreError(
+        "This Bounty changed or was retired. Refresh before saving.",
+      );
+    }
+    if (command.kind === "edit-bounty") {
+      db.prepare(
+        `UPDATE bounty_definitions
+         SET title = ?, stars = ?, revision = revision + 1
+         WHERE id = ?`,
+      ).run(command.draft.title, command.draft.stars, command.definition);
+    } else {
+      db.prepare(
+        `UPDATE bounty_definitions
+         SET retired_at = ?, revision = revision + 1
+         WHERE id = ?`,
+      ).run(today, command.definition);
+    }
+    const updated = bountyDefinitionFromRow(
+      db
+        .prepare("SELECT * FROM bounty_definitions WHERE id = ?")
+        .get(command.definition) as Record<string, unknown>,
+    );
+    db.prepare(
+      `INSERT INTO bounty_admin_command_receipts
+        (request_id, kind, payload, response) VALUES (?, ?, ?, ?)`,
+    ).run(
+      command.requestId,
+      command.kind,
+      JSON.stringify(command),
+      JSON.stringify(updated),
+    );
+    db.exec("COMMIT");
+    return { status: "accepted", definition: updated };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function taskDefinitions(
   assigned: readonly LegacyTaskDefinition[],
   bounties: readonly BountyDefinition[],
@@ -352,7 +497,7 @@ export function taskDefinitions(
 export function loadAvailableBounties(db: DatabaseSync): AvailableBounty[] {
   return db
     .prepare(
-      `SELECT o.id, o.definition_id, d.title, d.stars
+      `SELECT o.id, o.definition_id, d.title, d.stars, d.revision
        FROM bounty_offerings o
        JOIN bounty_definitions d ON d.id = o.definition_id
        WHERE d.retired_at IS NULL AND NOT EXISTS (
@@ -367,7 +512,14 @@ export function loadAvailableBounties(db: DatabaseSync): AvailableBounty[] {
       const definition = parseTaskId(row.definition_id);
       const title = parseTaskTitle(row.title);
       const stars = parseStarAmount(row.stars);
-      if (!id || !definition || !title || stars === null) {
+      const definitionRevision = parseDefinitionRevision(row.revision);
+      if (
+        !id ||
+        !definition ||
+        !title ||
+        stars === null ||
+        definitionRevision === null
+      ) {
         throw new Error("corrupt Bounty offering row");
       }
       return {
@@ -376,6 +528,7 @@ export function loadAvailableBounties(db: DatabaseSync): AvailableBounty[] {
         offering: { kind: "once" as const, definition },
         title,
         stars,
+        definitionRevision,
       };
     });
 }
@@ -433,6 +586,10 @@ export function isBountyDefinition(db: DatabaseSync, id: string): boolean {
 }
 
 function normalizedPayload(command: BountyCommand): string {
+  if (command.kind === "claim-bounty" && "compatibility" in command) {
+    const { compatibility: _compatibility, ...v4Payload } = command;
+    return JSON.stringify(v4Payload);
+  }
   return JSON.stringify(command);
 }
 
@@ -492,6 +649,11 @@ export function claimBounty(input: {
       db.exec("COMMIT");
       return replay;
     }
+    if ("compatibility" in command) {
+      throw new BountyStoreError(
+        "This Bounty changed. Refresh before claiming it.",
+      );
+    }
     if (!memberIsActive) {
       throw new InactiveBountyMemberError("active member required");
     }
@@ -500,12 +662,12 @@ export function claimBounty(input: {
         `SELECT o.id AS offering_id, d.id AS definition_id, d.title, d.stars
          FROM bounty_offerings o
          JOIN bounty_definitions d ON d.id = o.definition_id
-         WHERE d.id = ? AND d.retired_at IS NULL AND NOT EXISTS (
+         WHERE d.id = ? AND d.revision = ? AND d.retired_at IS NULL AND NOT EXISTS (
            SELECT 1 FROM bounty_claims c
            WHERE c.offering_id = o.id AND c.state != 'released'
          )`,
       )
-      .get(command.offering.definition);
+      .get(command.offering.definition, command.definitionRevision);
     if (!row) throw new BountyStoreError("This Bounty is no longer available.");
     const claimId = newClaimId();
     db.prepare(

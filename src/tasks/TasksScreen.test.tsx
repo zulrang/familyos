@@ -374,6 +374,7 @@ describe("TasksScreen", () => {
       title: "Wipe table",
       stars: 0,
       recurrence: { kind: "once" },
+      revision: 0,
       retiredAt: null,
     } as BountyDefinition;
     const available = {
@@ -382,6 +383,7 @@ describe("TasksScreen", () => {
       offering: { kind: "once", definition: definition.id },
       title: definition.title,
       stars: definition.stars,
+      definitionRevision: definition.revision,
     } as AvailableBounty;
     initial.bountyDefinitions = [definition];
     initial.availableBounties = [available];
@@ -393,6 +395,7 @@ describe("TasksScreen", () => {
       title: "Take bins out",
       stars: 3,
       recurrence: { kind: "once" },
+      revision: 0,
       retiredAt: null,
     } as BountyDefinition;
     const createdOffering = {
@@ -401,6 +404,7 @@ describe("TasksScreen", () => {
       offering: { kind: "once", definition: createdDefinition.id },
       title: createdDefinition.title,
       stars: createdDefinition.stars,
+      definitionRevision: createdDefinition.revision,
     } as AvailableBounty;
     const claimed = {
       kind: "claimed-bounty",
@@ -463,6 +467,10 @@ describe("TasksScreen", () => {
     expect(screen.getByText("Wipe table")).toBeVisible();
     expect(screen.getByText("0 Stars")).toBeVisible();
     expect(screen.getByText("Manage Bounties")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute(
+      "href",
+      "/admin/bounties",
+    );
     await user.click(screen.getByRole("button", { name: "Add Bounty" }));
     const dialog = screen.getByRole("dialog", { name: "New Bounty" });
     expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
@@ -534,6 +542,7 @@ describe("TasksScreen", () => {
       title: "Sweep steps",
       stars: 5,
       recurrence: { kind: "once" },
+      revision: 0,
       retiredAt: null,
     } as BountyDefinition;
     const offering = {
@@ -542,6 +551,7 @@ describe("TasksScreen", () => {
       offering: { kind: "once", definition: definition.id },
       title: definition.title,
       stars: definition.stars,
+      definitionRevision: definition.revision,
     } as AvailableBounty;
     const firstClaim = {
       kind: "claimed-bounty",
@@ -655,6 +665,7 @@ describe("TasksScreen", () => {
       kind: "claim-bounty",
       offering: offering.offering,
       member: "ellie",
+      definitionRevision: offering.definitionRevision,
     });
     expect(patches[2]).toMatchObject({
       kind: "complete-bounty",
@@ -674,6 +685,7 @@ describe("TasksScreen", () => {
       title: "Clear porch",
       stars: 2,
       recurrence: { kind: "once" },
+      revision: 0,
       retiredAt: null,
     } as BountyDefinition;
     store.bountyDefinitions = [definition];
@@ -684,6 +696,7 @@ describe("TasksScreen", () => {
         offering: { kind: "once", definition: definition.id },
         title: definition.title,
         stars: definition.stars,
+        definitionRevision: definition.revision,
       } as AvailableBounty,
     ];
     installFetch(store, {
@@ -722,6 +735,7 @@ describe("TasksScreen", () => {
       title: "Claimed elsewhere",
       stars: 1,
       recurrence: { kind: "once" },
+      revision: 0,
       retiredAt: null,
     } as BountyDefinition;
     initial.bountyDefinitions = [definition];
@@ -732,6 +746,7 @@ describe("TasksScreen", () => {
         offering: { kind: "once", definition: definition.id },
         title: definition.title,
         stars: definition.stars,
+        definitionRevision: definition.revision,
       } as AvailableBounty,
     ];
     installScriptedBountyFetch(
