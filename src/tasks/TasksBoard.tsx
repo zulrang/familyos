@@ -12,22 +12,30 @@ import { Avatar } from "@/shared/ui/Avatar";
 import { Icon } from "@/shared/ui/Icon";
 import { TaskRow, type TaskRowStatus } from "./TaskRow";
 import styles from "./TasksBoard.module.css";
-import type { Occurrence, TasksViewRead } from "./types";
+import type {
+  AvailableBounty,
+  ClaimedBounty,
+  ClaimId,
+  Occurrence,
+  TasksViewRead,
+} from "./types";
 import { occurrencesForColumn } from "./view";
 
 type BoardLocation =
   | { kind: "board" }
   | { kind: "member"; member: MemberId }
-  | { kind: "household" };
+  | { kind: "household" }
+  | { kind: "bounties" };
 
 type TaskGroup = {
-  location: Exclude<BoardLocation, { kind: "board" }>;
+  location: Extract<BoardLocation, { kind: "member" | "household" }>;
   key: string;
   name: string;
   palette: MemberTaskPalette;
   done: number;
   total: number;
   rows: Occurrence[];
+  bounties: ClaimedBounty[];
 };
 
 type ClaimSelection = {
@@ -41,6 +49,11 @@ type TaskActions = {
   onClaim: (row: Occurrence) => void;
   onSkip: (row: Occurrence) => void;
   onEdit: (row: Occurrence) => void;
+  onCompleteBounty: (row: ClaimedBounty) => void;
+  onReleaseBounty: (row: ClaimedBounty) => void;
+  onClaimBounty: (row: AvailableBounty) => void;
+  onAddBounty: () => void;
+  mutatingBountyClaims: ReadonlySet<ClaimId>;
 };
 
 const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
@@ -101,6 +114,9 @@ function GroupTasks({
   onClaim,
   onSkip,
   onEdit,
+  onCompleteBounty,
+  onReleaseBounty,
+  mutatingBountyClaims,
 }: TaskActions & {
   group: TaskGroup;
   claimSelection: ClaimSelection | null;
@@ -113,7 +129,19 @@ function GroupTasks({
   const finished = group.rows.filter(
     (row) => row.state === "done" || row.state === "skipped",
   );
-  const visible = preview ? remaining.slice(0, BOARD_PREVIEW_COUNT) : remaining;
+  const unfinishedBounties = group.bounties.filter(
+    (row) => row.state.kind === "unfinished",
+  );
+  const completedBounties = group.bounties.filter(
+    (row) => row.state.kind === "completed",
+  );
+  const remainingWork = [
+    ...unfinishedBounties.map((row) => ({ kind: "bounty" as const, row })),
+    ...remaining.map((row) => ({ kind: "assigned" as const, row })),
+  ];
+  const visibleWork = preview
+    ? remainingWork.slice(0, BOARD_PREVIEW_COUNT)
+    : remainingWork;
   const taskRow = (row: Occurrence) => (
     <TaskRow
       key={`${row.task}:${row.window}`}
@@ -142,35 +170,57 @@ function GroupTasks({
   );
   return (
     <div className={styles.groupTasks}>
-      {remaining.length === 0 ? (
+      {remaining.length === 0 && unfinishedBounties.length === 0 ? (
         <div className={styles.empty}>
           <Icon name="check" size={32} />
           <p>
             {group.total > 0 && group.done === group.total
               ? "All done for today"
-              : group.rows.length > 0
+              : group.rows.length > 0 || group.bounties.length > 0
                 ? "Nothing left to do"
                 : "No tasks today"}
           </p>
         </div>
       ) : (
-        visible.map(taskRow)
+        visibleWork.map((work) =>
+          work.kind === "assigned" ? (
+            taskRow(work.row)
+          ) : (
+            <TaskRow
+              key={work.row.claim.id}
+              label={work.row.claim.title}
+              stars={work.row.claim.stars}
+              status={{ kind: "open" }}
+              mutationPending={mutatingBountyClaims.has(work.row.claim.id)}
+              onComplete={() => onCompleteBounty(work.row)}
+              onRelease={!preview ? () => onReleaseBounty(work.row) : undefined}
+            />
+          ),
+        )
       )}
       <div className={styles.taskFooter}>
-        {preview && remaining.length > visible.length ? (
+        {preview && remainingWork.length > visibleWork.length ? (
           <button type="button" className={styles.more} onClick={onOpen}>
-            {remaining.length - visible.length} more{" "}
-            {remaining.length - visible.length === 1 ? "task" : "tasks"}
+            {remainingWork.length - visibleWork.length} more{" "}
+            {remainingWork.length - visibleWork.length === 1 ? "task" : "tasks"}
             <Icon name="chevron-right" size={20} />
           </button>
         ) : null}
-        {finished.length > 0 ? (
+        {finished.length + completedBounties.length > 0 ? (
           <details className={styles.finished}>
             <summary>
-              {finished.length} completed or skipped
+              {finished.length + completedBounties.length} completed or skipped
               <Icon name="chevron-right" size={20} />
             </summary>
             {finished.map(taskRow)}
+            {completedBounties.map((row) => (
+              <TaskRow
+                key={row.claim.id}
+                label={row.claim.title}
+                stars={row.claim.stars}
+                status={{ kind: "done" }}
+              />
+            ))}
           </details>
         ) : null}
       </div>
@@ -208,6 +258,9 @@ export function TasksBoard({
           (row) => row.assignee === member.id && row.state !== "expired",
         ),
       ),
+      bounties: tasks.bountyClaims.filter(
+        (row) => row.claim.member === member.id,
+      ),
     };
   });
   const householdRows = occurrencesForColumn(
@@ -226,6 +279,7 @@ export function TasksBoard({
       done: 0,
       total: householdRows.length,
       rows: householdRows,
+      bounties: [],
     });
   }
   const selected = groups.find((group) =>
@@ -234,13 +288,25 @@ export function TasksBoard({
         group.location.member === location.member
       : location.kind === "household" && group.location.kind === "household",
   );
+  const bountySelected = location.kind === "bounties";
 
   function open(group: TaskGroup) {
-    if (!selected) {
+    if (!selected && !bountySelected) {
       boardScroll.current = scrollRef.current?.scrollTop ?? 0;
       returnKey.current = group.key;
     }
     setLocation(group.location);
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      backRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function openBounties() {
+    if (!selected && !bountySelected) {
+      boardScroll.current = scrollRef.current?.scrollTop ?? 0;
+    }
+    setLocation({ kind: "bounties" });
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
       backRef.current?.focus({ preventScroll: true });
@@ -277,7 +343,7 @@ export function TasksBoard({
 
   return (
     <div className={styles.boardScreen}>
-      {selected ? (
+      {selected || bountySelected ? (
         <div className={styles.focusNavigation}>
           <button
             ref={backRef}
@@ -294,7 +360,7 @@ export function TasksBoard({
                   type="button"
                   className={styles.memberChoice}
                   aria-label={`View tasks for ${group.name}`}
-                  aria-pressed={selected.key === group.key}
+                  aria-pressed={selected?.key === group.key}
                   onClick={() => open(group)}
                 >
                   <GroupAvatar group={group} />
@@ -303,12 +369,28 @@ export function TasksBoard({
                 {claimButton(group)}
               </div>
             ))}
+            <button
+              type="button"
+              className={styles.memberChoice}
+              aria-label="Bounties"
+              aria-pressed={bountySelected}
+              onClick={openBounties}
+            >
+              <Icon name="star" size={22} />
+              <span>Bounties</span>
+            </button>
           </nav>
         </div>
       ) : (
         <div className={styles.boardHeading}>
           <h2>Family Board</h2>
-          <p>Tap a name for all their tasks</p>
+          <button
+            type="button"
+            className={styles.bountiesEntry}
+            onClick={openBounties}
+          >
+            <Icon name="star" size={22} /> Bounties
+          </button>
         </div>
       )}
       {claimSelection ? (
@@ -326,7 +408,7 @@ export function TasksBoard({
         </div>
       ) : null}
       <div ref={scrollRef} className={styles.scroll}>
-        {!selected ? (
+        {!selected && !bountySelected ? (
           <div className={styles.board}>
             {groups.map((group) => (
               <section
@@ -385,12 +467,13 @@ export function TasksBoard({
                       : `${selected.name}’s tasks`}
                   </h2>
                   <p>
-                    {
-                      selected.rows.filter(
-                        (row) =>
-                          row.state === "pending" || row.state === "claimed",
-                      ).length
-                    }{" "}
+                    {selected.rows.filter(
+                      (row) =>
+                        row.state === "pending" || row.state === "claimed",
+                    ).length +
+                      selected.bounties.filter(
+                        (row) => row.state.kind === "unfinished",
+                      ).length}{" "}
                     remaining
                   </p>
                 </div>
@@ -431,6 +514,50 @@ export function TasksBoard({
               ) : null}
             </aside>
           </div>
+        ) : null}
+        {bountySelected ? (
+          <section className={styles.bountyFocus} aria-label="Bounties">
+            <header className={styles.bountyHeader}>
+              <div>
+                <h2>Available Bounties</h2>
+                <p>Pick some work and choose who will take it.</p>
+              </div>
+              <button
+                type="button"
+                className={styles.rowAction}
+                onClick={actions.onAddBounty}
+              >
+                Add Bounty
+              </button>
+            </header>
+            <div className={styles.groupTasks}>
+              {tasks.availableBounties.length === 0 ? (
+                <div className={styles.empty}>
+                  <Icon name="star" size={32} />
+                  <p>No Bounties available</p>
+                </div>
+              ) : (
+                tasks.availableBounties.map((row) => (
+                  <TaskRow
+                    key={row.id}
+                    label={row.title}
+                    stars={row.stars}
+                    status={{ kind: "open" }}
+                    onClaim={() => actions.onClaimBounty(row)}
+                  />
+                ))
+              )}
+            </div>
+            <div className={styles.manageBounties}>
+              <h2>Manage Bounties</h2>
+              <p>
+                {tasks.bountyDefinitions.length} Bounty{" "}
+                {tasks.bountyDefinitions.length === 1
+                  ? "definition"
+                  : "definitions"}
+              </p>
+            </div>
+          </section>
         ) : null}
       </div>
     </div>

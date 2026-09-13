@@ -1,5 +1,6 @@
 import type { HouseholdMember } from "@/members/members";
 import type { CompletionCorrection } from "./admin-types";
+import { releaseBountiesForRetiredMembers } from "./bounty-store";
 import {
   insertDefinition,
   loadCompletionCorrections,
@@ -14,11 +15,11 @@ import {
   type AssignmentPolicy,
   type CreateTaskDraft,
   createDefinition,
+  type LegacyTaskDefinition,
   type LocalDate,
   type NonEmpty,
   newTaskId,
   type StarAdjustment,
-  type TaskDefinition,
   type TaskId,
 } from "./types";
 
@@ -80,7 +81,7 @@ function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
   const completed = loadEffectiveEvents().filter(
     (event) => event.task === task && event.kind === "completed",
   ).length;
-  const replacement: TaskDefinition = {
+  const replacement: LegacyTaskDefinition = {
     ...draft,
     id: newTaskId(),
     lineage: previous.lineage,
@@ -156,6 +157,7 @@ export function reconcileRetiredMembers(
           today,
         );
     }
+    releaseBountiesForRetiredMembers(tasksDatabase(), retired);
   });
 }
 

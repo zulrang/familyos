@@ -3,6 +3,7 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -18,7 +19,14 @@ import {
   skipOccurrence,
   TasksScreen,
 } from "./TasksScreen";
-import type { Occurrence, TaskDefinition, TasksViewRead } from "./types";
+import type {
+  AvailableBounty,
+  BountyDefinition,
+  ClaimedBounty,
+  LegacyTaskDefinition,
+  Occurrence,
+  TasksViewRead,
+} from "./types";
 
 // jsdom does not implement the native modal dialog methods.
 beforeEach(() => {
@@ -77,19 +85,25 @@ function emptyView(): TasksViewRead {
     ],
     starBalances: [],
     definitions: [],
+    bountyDefinitions: [],
+    availableBounties: [],
+    bountyClaims: [],
     today: "2026-08-25" as TasksViewRead["today"],
     generatedAt: "2026-08-25T16:00:00Z" as TasksViewRead["generatedAt"],
   };
 }
 
-function installFetch(store: TasksViewRead) {
+function installFetch(
+  store: TasksViewRead,
+  settingsResponse: PublicSettings = settings,
+) {
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = urlOf(input);
       const method = (init?.method ?? "GET").toUpperCase();
 
       if (method === "GET" && url.endsWith("/api/settings")) {
-        return json(settings);
+        return json(settingsResponse);
       }
       if (method === "GET" && url.endsWith("/api/tasks")) {
         return json(store);
@@ -99,11 +113,15 @@ function installFetch(store: TasksViewRead) {
         url.endsWith("/api/tasks") &&
         !url.includes("/events")
       ) {
-        const body = JSON.parse(String(init?.body ?? "{}")) as {
+        const rawBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        const body = rawBody as unknown as {
           title: string;
           type: "chore" | "routine";
-          recurrence: TaskDefinition["recurrence"];
-          assignment: TaskDefinition["assignment"];
+          recurrence: LegacyTaskDefinition["recurrence"];
+          assignment: LegacyTaskDefinition["assignment"];
           time?: string;
           stars: number;
         };
@@ -161,8 +179,8 @@ function installFetch(store: TasksViewRead) {
           id: string;
           title: string;
           type: "chore" | "routine";
-          recurrence: TaskDefinition["recurrence"];
-          assignment: TaskDefinition["assignment"];
+          recurrence: LegacyTaskDefinition["recurrence"];
+          assignment: LegacyTaskDefinition["assignment"];
           time?: string;
           stars: number;
         };
@@ -201,8 +219,8 @@ function installFetch(store: TasksViewRead) {
             definition: store.definitions.find((row) => row.id === body.id),
           });
         }
-        const replacement: TaskDefinition = {
-          id: `task-${store.definitions.length + 1}` as TaskDefinition["id"],
+        const replacement: LegacyTaskDefinition = {
+          id: `task-${store.definitions.length + 1}` as LegacyTaskDefinition["id"],
           lineage: current.lineage,
           title: body.title,
           type: body.type,
@@ -287,6 +305,50 @@ function installFetch(store: TasksViewRead) {
   return fetchMock;
 }
 
+type ScriptedMutation = {
+  method: "POST" | "PATCH";
+  response: unknown;
+  status?: number;
+};
+
+function installScriptedBountyFetch(
+  taskReads: readonly TasksViewRead[],
+  mutations: readonly ScriptedMutation[],
+  settingsResponse: PublicSettings = settings,
+) {
+  let readIndex = 0;
+  let mutationIndex = 0;
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = urlOf(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.endsWith("/api/settings")) {
+        return json(settingsResponse);
+      }
+      if (method === "GET" && url.endsWith("/api/tasks")) {
+        const response = taskReads[Math.min(readIndex, taskReads.length - 1)];
+        readIndex += 1;
+        if (!response) throw new Error("Missing scripted Tasks read response");
+        return json(response);
+      }
+      if (
+        url.endsWith("/api/tasks") &&
+        (method === "POST" || method === "PATCH")
+      ) {
+        const mutation = mutations[mutationIndex];
+        mutationIndex += 1;
+        if (!mutation || mutation.method !== method) {
+          throw new Error(`Unexpected ${method} Bounty request`);
+        }
+        return json(mutation.response, mutation.status);
+      }
+      throw new Error(`Unexpected ${method} ${url}`);
+    },
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 function submittedRecurrence(
   fetchMock: ReturnType<typeof installFetch>,
 ): unknown {
@@ -301,6 +363,472 @@ function submittedRecurrence(
 }
 
 describe("TasksScreen", () => {
+  test("Bounties focus creates, advertises, claims, and completes zero-Star work", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-zero",
+      lineage: "bounty-lineage",
+      type: "chore",
+      title: "Wipe table",
+      stars: 0,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    const available = {
+      kind: "available",
+      id: "offering-zero",
+      offering: { kind: "once", definition: definition.id },
+      title: definition.title,
+      stars: definition.stars,
+    } as AvailableBounty;
+    initial.bountyDefinitions = [definition];
+    initial.availableBounties = [available];
+    const createdDefinition = {
+      kind: "bounty",
+      id: "bounty-bins",
+      lineage: "bounty-bins-lineage",
+      type: "chore",
+      title: "Take bins out",
+      stars: 3,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    const createdOffering = {
+      kind: "available",
+      id: "offering-bins",
+      offering: { kind: "once", definition: createdDefinition.id },
+      title: createdDefinition.title,
+      stars: createdDefinition.stars,
+    } as AvailableBounty;
+    const claimed = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "claim-zero",
+        offering: available.offering,
+        member: "dad",
+        scheduledOn: initial.today,
+        title: available.title,
+        stars: available.stars,
+      },
+      revision: 0,
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    const afterCreate: TasksViewRead = {
+      ...initial,
+      bountyDefinitions: [definition, createdDefinition],
+      availableBounties: [available, createdOffering],
+    };
+    const afterClaim: TasksViewRead = {
+      ...afterCreate,
+      availableBounties: [createdOffering],
+      bountyClaims: [claimed],
+      progress: afterCreate.progress.map((row) =>
+        row.member === "dad" ? { ...row, total: 1 } : row,
+      ),
+    };
+    const afterComplete: TasksViewRead = {
+      ...afterClaim,
+      bountyClaims: [
+        {
+          ...claimed,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "completion-zero",
+              claim: claimed.claim.id,
+              by: "dad",
+              at: initial.generatedAt,
+              creditedStars: claimed.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: afterClaim.progress.map((row) =>
+        row.member === "dad" ? { ...row, done: 1 } : row,
+      ),
+    };
+    const fetchMock = installScriptedBountyFetch(
+      [initial, afterCreate, afterClaim, afterComplete],
+      [
+        { method: "POST", response: { definition: createdDefinition } },
+        { method: "PATCH", response: { status: "accepted" } },
+        { method: "PATCH", response: { status: "accepted" } },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    expect(screen.getByText("Wipe table")).toBeVisible();
+    expect(screen.getByText("0 Stars")).toBeVisible();
+    expect(screen.getByText("Manage Bounties")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add Bounty" }));
+    const dialog = screen.getByRole("dialog", { name: "New Bounty" });
+    expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Time")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Fixed")).not.toBeInTheDocument();
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Bounty title" }),
+      "Take bins out",
+    );
+    const stars = within(dialog).getByRole("textbox", { name: "Stars" });
+    await user.click(stars);
+    await user.keyboard("3");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add Bounty" }),
+    );
+    expect(await screen.findByText("Take bins out")).toBeVisible();
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") && init?.method === "POST",
+    );
+    const createdBody = JSON.parse(String(createCall?.[1]?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(createdBody).toEqual({
+      kind: "bounty",
+      type: "chore",
+      title: "Take bins out",
+      stars: 3,
+      recurrence: { kind: "once" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Claim Wipe table" }));
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+    await user.click(screen.getByRole("button", { name: "Family Board" }));
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(screen.getByText("Wipe table")).toBeVisible();
+    expect(screen.getByText("0 Stars")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Skip Wipe table" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Wipe table" }));
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Bounties" }));
+    expect(screen.queryByText("Wipe table")).not.toBeInTheDocument();
+    expect(await screen.findByText("Take bins out")).toBeVisible();
+  });
+
+  test("Bounties focus has an empty state before the first offering", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    expect(screen.getByText("No Bounties available")).toBeVisible();
+  });
+
+  test("a member releases a Bounty and another member can claim the same offering", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-release",
+      lineage: "bounty-release-lineage",
+      type: "chore",
+      title: "Sweep steps",
+      stars: 5,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    const offering = {
+      kind: "available",
+      id: "offering-release",
+      offering: { kind: "once", definition: definition.id },
+      title: definition.title,
+      stars: definition.stars,
+    } as AvailableBounty;
+    const firstClaim = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "claim-release-first",
+        offering: offering.offering,
+        member: "dad",
+        scheduledOn: initial.today,
+        title: offering.title,
+        stars: offering.stars,
+      },
+      revision: 0,
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    initial.bountyDefinitions = [definition];
+    initial.bountyClaims = [firstClaim];
+    initial.progress = initial.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 1 } : row,
+    );
+    const afterRelease: TasksViewRead = {
+      ...initial,
+      availableBounties: [offering],
+      bountyClaims: [],
+      progress: initial.progress.map((row) =>
+        row.member === "dad" ? { ...row, total: 0 } : row,
+      ),
+    };
+    const replacement = {
+      kind: "claimed-bounty",
+      claim: {
+        ...firstClaim.claim,
+        id: "claim-release-second",
+        member: "ellie",
+      },
+      revision: 0,
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    const afterReclaim: TasksViewRead = {
+      ...afterRelease,
+      availableBounties: [],
+      bountyClaims: [replacement],
+      progress: afterRelease.progress.map((row) =>
+        row.member === "ellie" ? { ...row, total: 1 } : row,
+      ),
+    };
+    const afterComplete: TasksViewRead = {
+      ...afterReclaim,
+      bountyClaims: [
+        {
+          ...replacement,
+          revision: 1,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "completion-release-second",
+              claim: replacement.claim.id,
+              by: "ellie",
+              at: initial.generatedAt,
+              creditedStars: replacement.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: afterReclaim.progress.map((row) =>
+        row.member === "ellie" ? { ...row, done: 1 } : row,
+      ),
+    };
+    const fetchMock = installScriptedBountyFetch(
+      [initial, afterRelease, afterReclaim, afterComplete],
+      [
+        { method: "PATCH", response: { receipt: { status: "accepted" } } },
+        { method: "PATCH", response: { receipt: { status: "accepted" } } },
+        { method: "PATCH", response: { receipt: { status: "accepted" } } },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Skip Sweep steps" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Release Sweep steps" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Bounties" }));
+    expect(await screen.findByText("Sweep steps")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Claim Sweep steps" }));
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Ellie" }),
+    );
+    expect(await screen.findByText("Sweep steps")).toBeVisible();
+    await user.click(screen.getByRole("checkbox", { name: "Sweep steps" }));
+    expect(
+      screen.queryByRole("checkbox", { name: "Sweep steps" }),
+    ).not.toBeInTheDocument();
+
+    const patches = fetchMock.mock.calls
+      .filter(([, init]) => init?.method === "PATCH")
+      .map(
+        ([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>,
+      );
+    expect(patches[0]).toMatchObject({
+      kind: "release-bounty",
+      claim: firstClaim.claim.id,
+      revision: 0,
+    });
+    expect(patches[1]).toMatchObject({
+      kind: "claim-bounty",
+      offering: offering.offering,
+      member: "ellie",
+    });
+    expect(patches[2]).toMatchObject({
+      kind: "complete-bounty",
+      claim: replacement.claim.id,
+      revision: 0,
+    });
+  });
+
+  test("Bounties stay available without Active Members and explain the claim requirement", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-empty-roster",
+      lineage: "lineage-empty-roster",
+      type: "chore",
+      title: "Clear porch",
+      stars: 2,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    store.bountyDefinitions = [definition];
+    store.availableBounties = [
+      {
+        kind: "available",
+        id: "offering-empty-roster",
+        offering: { kind: "once", definition: definition.id },
+        title: definition.title,
+        stars: definition.stars,
+      } as AvailableBounty,
+    ];
+    installFetch(store, {
+      ...settings,
+      members: [{ id: "former", name: "Former", status: "retired" }],
+    });
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    await user.click(screen.getByRole("button", { name: "Claim Clear porch" }));
+    expect(
+      screen.getByText(
+        "Add an Active Member under Settings before claiming a Bounty.",
+      ),
+    ).toBeVisible();
+    const closeButton = within(
+      screen.getByRole("dialog", { name: "Claim Bounty" }),
+    )
+      .getAllByRole("button", { name: "Close" })
+      .at(-1);
+    expect(closeButton).toBeDefined();
+    if (!closeButton) throw new Error("Missing close button");
+    await user.click(closeButton);
+    await user.click(screen.getByRole("button", { name: "Add Bounty" }));
+    expect(screen.getByRole("dialog", { name: "New Bounty" })).toBeVisible();
+  });
+
+  test("a competing Bounty claim remains visible as an error after refresh", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-competing",
+      lineage: "lineage-competing",
+      type: "chore",
+      title: "Claimed elsewhere",
+      stars: 1,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    initial.bountyDefinitions = [definition];
+    initial.availableBounties = [
+      {
+        kind: "available",
+        id: "offering-competing",
+        offering: { kind: "once", definition: definition.id },
+        title: definition.title,
+        stars: definition.stars,
+      } as AvailableBounty,
+    ];
+    installScriptedBountyFetch(
+      [initial, { ...initial, availableBounties: [] }],
+      [
+        {
+          method: "PATCH",
+          status: 409,
+          response: { error: "Bounty already claimed" },
+        },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claim Claimed elsewhere" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not claim Bounty.",
+    );
+    expect(screen.queryByText("Claimed elsewhere")).not.toBeInTheDocument();
+  });
+
+  test("a stale Bounty completion remains visible as an error after refresh", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const claim = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "claim-stale",
+        offering: { kind: "once", definition: "bounty-stale" },
+        member: "dad",
+        scheduledOn: initial.today,
+        title: "Already finished",
+        stars: 2,
+      },
+      revision: 0,
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    initial.bountyClaims = [claim];
+    initial.progress = initial.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 1 } : row,
+    );
+    const refreshed: TasksViewRead = {
+      ...initial,
+      bountyClaims: [
+        {
+          ...claim,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "completion-stale",
+              claim: claim.claim.id,
+              by: "dad",
+              at: initial.generatedAt,
+              creditedStars: claim.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: initial.progress.map((row) =>
+        row.member === "dad" ? { ...row, done: 1 } : row,
+      ),
+    };
+    installScriptedBountyFetch(
+      [initial, refreshed],
+      [
+        {
+          method: "PATCH",
+          status: 409,
+          response: { error: "stale claim revision" },
+        },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Already finished" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not complete Bounty.",
+    );
+    expect(
+      screen.queryByRole("checkbox", { name: "Already finished" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
+    ).not.toBeInTheDocument();
+  });
+
   test("Stars requests a numeric keyboard and replaces its value when tapped", async () => {
     const user = userEvent.setup();
     installFetch(emptyView());
@@ -1183,9 +1711,9 @@ describe("TasksScreen", () => {
   });
 
   function seedFixed(store: TasksViewRead, title: string, member: string) {
-    const definition: TaskDefinition = {
-      id: "edit-me" as TaskDefinition["id"],
-      lineage: "lin-edit" as TaskDefinition["lineage"],
+    const definition: LegacyTaskDefinition = {
+      id: "edit-me" as LegacyTaskDefinition["id"],
+      lineage: "lin-edit" as LegacyTaskDefinition["lineage"],
       title,
       type: "chore",
       recurrence: { kind: "daily" },
@@ -1349,6 +1877,77 @@ describe("Family Board navigation", () => {
     );
   });
 
+  test("opening Bounties resets the board scroll position", async () => {
+    const user = userEvent.setup();
+    installFetch(boardView());
+    render(<TasksScreen />);
+    const heading = await screen.findByRole("heading", {
+      name: "Family Board",
+    });
+    const scroll = heading.parentElement?.nextElementSibling;
+    expect(scroll).toBeInstanceOf(HTMLElement);
+    if (!(scroll instanceof HTMLElement))
+      throw new Error("Missing board scroll");
+    scroll.scrollTop = 240;
+
+    await user.click(screen.getByRole("button", { name: "Bounties" }));
+
+    await waitFor(() => expect(scroll.scrollTop).toBe(0));
+  });
+
+  test("the board caps the combined assigned and claimed Bounty preview", async () => {
+    const user = userEvent.setup();
+    const store = boardView();
+    store.bountyClaims = ["Wash car", "Mow lawn"].map(
+      (title, index) =>
+        ({
+          kind: "claimed-bounty",
+          claim: {
+            id: `board-claim-${index}`,
+            offering: {
+              kind: "once",
+              definition: `board-bounty-${index}`,
+            },
+            member: "dad",
+            scheduledOn: store.today,
+            title,
+            stars: index,
+          },
+          revision: 0,
+          state: { kind: "unfinished" },
+        }) as ClaimedBounty,
+    );
+    store.progress = store.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 6 } : row,
+    );
+    installFetch(store);
+    render(<TasksScreen />);
+
+    await screen.findByRole("button", { name: "View tasks for Dad" });
+    const dadPreview = screen.getByRole("region", { name: "Dad tasks" });
+    expect(within(dadPreview).getAllByRole("checkbox")).toHaveLength(3);
+    expect(
+      within(dadPreview).getByRole("button", { name: "3 more tasks" }),
+    ).toBeVisible();
+
+    await user.click(
+      within(dadPreview).getByRole("button", { name: "3 more tasks" }),
+    );
+    expect(screen.getByRole("heading", { name: "Dad’s tasks" })).toBeVisible();
+    expect(screen.getByText("6 remaining")).toBeVisible();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(6);
+    for (const title of [
+      "Wash car",
+      "Mow lawn",
+      "Dishes",
+      "Laundry",
+      "Water plants",
+      "Pack lunch",
+    ]) {
+      expect(screen.getByRole("checkbox", { name: title })).toBeVisible();
+    }
+  });
+
   test("member switching keeps the focus view and shows an empty member accurately", async () => {
     const user = userEvent.setup();
     installFetch(boardView());
@@ -1437,6 +2036,26 @@ describe("daily completion celebration", () => {
     return store;
   }
 
+  function bountyTask() {
+    const store = emptyView();
+    const claimed = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "celebration-claim",
+        offering: { kind: "once", definition: "celebration-bounty" },
+        member: "dad",
+        scheduledOn: store.today,
+        title: "Polish table",
+        stars: 2,
+      },
+      revision: 0,
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    store.bountyClaims = [claimed];
+    store.progress = [{ member: "dad", done: 0, total: 1 }];
+    return { store, claimed };
+  }
+
   test("celebrates only the last confirmed task and can be dismissed", async () => {
     const user = userEvent.setup();
     installFetch(dailyTasks());
@@ -1501,5 +2120,166 @@ describe("daily completion celebration", () => {
     expect(
       screen.queryByRole("dialog", { name: "All done!" }),
     ).not.toBeInTheDocument();
+  });
+
+  test("celebrates when a confirmed Bounty completes the member's last work", async () => {
+    const user = userEvent.setup();
+    const { store, claimed } = bountyTask();
+    const completed: TasksViewRead = {
+      ...store,
+      bountyClaims: [
+        {
+          ...claimed,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "celebration-completion",
+              claim: claimed.claim.id,
+              by: "dad",
+              at: store.generatedAt,
+              creditedStars: claimed.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: [{ member: "dad", done: 1, total: 1 }],
+    };
+    installScriptedBountyFetch(
+      [store, completed],
+      [{ method: "PATCH", response: { receipt: { status: "accepted" } } }],
+    );
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Polish table" }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "All done!" }),
+    ).toHaveTextContent("You did it, Dad!");
+  });
+
+  test("guards a Bounty completion while its request and refresh are pending", async () => {
+    const user = userEvent.setup();
+    const { store } = bountyTask();
+    let settleFirst: ((response: Response) => void) | undefined;
+    const firstPatch = new Promise<Response>((resolve) => {
+      settleFirst = resolve;
+    });
+    let patchCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/tasks")) {
+          return json(store);
+        }
+        if (method === "PATCH" && url.endsWith("/api/tasks")) {
+          patchCount += 1;
+          return patchCount === 1
+            ? firstPatch
+            : json({ error: "stale claim revision" }, 409);
+        }
+        throw new Error(`Unexpected ${method} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Polish table",
+    });
+    const release = screen.getByRole("button", {
+      name: "Release Polish table",
+    });
+
+    fireEvent.click(checkbox);
+    fireEvent.click(release);
+
+    expect(checkbox).toBeDisabled();
+    expect(release).toBeDisabled();
+    expect(patchCount).toBe(1);
+    if (!settleFirst) throw new Error("Missing deferred response resolver");
+    settleFirst(json({ error: "stale claim revision" }, 409));
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(release).toBeEnabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not complete Bounty.",
+    );
+
+    await user.click(checkbox);
+    await waitFor(() => expect(patchCount).toBe(2));
+  });
+
+  test("guards a Bounty release per Claim while its request and refresh are pending", async () => {
+    const user = userEvent.setup();
+    const { store, claimed } = bountyTask();
+    store.bountyClaims.push({
+      ...claimed,
+      claim: {
+        ...claimed.claim,
+        id: "other-pending-claim" as ClaimedBounty["claim"]["id"],
+        title: "Dust shelves" as ClaimedBounty["claim"]["title"],
+      },
+    });
+    store.progress = [{ member: "dad", done: 0, total: 2 }];
+    let settleFirst: ((response: Response) => void) | undefined;
+    const firstPatch = new Promise<Response>((resolve) => {
+      settleFirst = resolve;
+    });
+    let patchCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/tasks")) {
+          return json(store);
+        }
+        if (method === "PATCH" && url.endsWith("/api/tasks")) {
+          patchCount += 1;
+          return patchCount === 1
+            ? firstPatch
+            : json({ error: "stale claim revision" }, 409);
+        }
+        throw new Error(`Unexpected ${method} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TasksScreen />);
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    const release = screen.getByRole("button", {
+      name: "Release Polish table",
+    });
+    const checkbox = screen.getByRole("checkbox", { name: "Polish table" });
+
+    fireEvent.click(release);
+    fireEvent.click(release);
+
+    expect(release).toBeDisabled();
+    expect(checkbox).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Release Dust shelves" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("checkbox", { name: "Dust shelves" }),
+    ).toBeEnabled();
+    expect(patchCount).toBe(1);
+    if (!settleFirst) throw new Error("Missing deferred response resolver");
+    settleFirst(json({ error: "stale claim revision" }, 409));
+    await waitFor(() => expect(release).toBeEnabled());
+    expect(checkbox).toBeEnabled();
+
+    await user.click(release);
+    await waitFor(() => expect(patchCount).toBe(2));
   });
 });

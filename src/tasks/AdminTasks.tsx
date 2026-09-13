@@ -6,7 +6,7 @@ import { adminRequest, useAdminData } from "@/shared/admin-client";
 import { AdminCompletions } from "./AdminCompletions";
 import { AdminTaskForm } from "./AdminTaskForm";
 import { readTaskAdminData } from "./admin-client";
-import type { TaskDefinition } from "./types";
+import type { LegacyTaskDefinition } from "./types";
 
 export function AdminTasks() {
   const { state, reload } = useAdminData(readTaskAdminData);
@@ -14,7 +14,7 @@ export function AdminTasks() {
     "definitions",
   );
   const [editor, setEditor] = useState<
-    { kind: "new" } | { kind: "edit"; task: TaskDefinition } | null
+    { kind: "new" } | { kind: "edit"; task: LegacyTaskDefinition } | null
   >(null);
   const [query, setQuery] = useState("");
   const [retired, setRetired] = useState(false);
@@ -28,7 +28,7 @@ export function AdminTasks() {
     setNotice({ kind: "success", message });
     void reload();
   }
-  async function retire(task: TaskDefinition) {
+  async function retire(task: LegacyTaskDefinition) {
     if (
       !window.confirm(
         `Retire “${task.title}”? It will leave the task board. Its history and earned stars will stay.`,
