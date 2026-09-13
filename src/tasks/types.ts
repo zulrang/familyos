@@ -76,6 +76,7 @@ export type BountyDefinition = Readonly<{
   title: TaskTitle;
   stars: StarAmount;
   recurrence: BountyRecurrence;
+  offerFrom: LocalDate | null;
   revision: DefinitionRevision;
   retiredAt: LocalDate | null;
 }>;
@@ -571,7 +572,13 @@ export function parseTaskCreateDraft(raw: unknown): TaskCreateDraft | null {
   if (isRecord(raw) && raw.kind === "bounty")
     return parseCreateBountyDraft(raw);
   const assigned = parseCreateTaskDraft(raw);
-  return assigned ? { kind: "assigned", ...assigned } : null;
+  if (
+    !assigned ||
+    (assigned.type === "routine" && assigned.assignment.kind === "open")
+  ) {
+    return null;
+  }
+  return { kind: "assigned", ...assigned };
 }
 
 function hasOnlyKnownKeys(
@@ -769,6 +776,7 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
         "title",
         "stars",
         "recurrence",
+        "offerFrom",
         "revision",
         "retiredAt",
       ]),
@@ -784,6 +792,10 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
   const stars = parseStarAmount(raw.stars);
   const revision = parseDefinitionRevision(raw.revision);
   const recurrence = parseBountyRecurrence(raw.recurrence);
+  const offerFrom =
+    raw.offerFrom === undefined || raw.offerFrom === null
+      ? null
+      : parseLocalDate(raw.offerFrom);
   const retiredAt =
     raw.retiredAt === null ? null : parseLocalDate(raw.retiredAt);
   return id &&
@@ -792,6 +804,7 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
     stars !== null &&
     revision !== null &&
     recurrence &&
+    (raw.offerFrom === undefined || raw.offerFrom === null || offerFrom) &&
     (raw.retiredAt === null || retiredAt)
     ? {
         kind: "bounty",
@@ -801,6 +814,7 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
         title,
         stars,
         recurrence,
+        offerFrom,
         revision,
         retiredAt,
       }
@@ -832,6 +846,7 @@ export function createBountyDefinition(
     title: draft.title,
     stars: draft.stars,
     recurrence: draft.recurrence,
+    offerFrom: null,
     revision: 0 as DefinitionRevision,
     retiredAt: null,
   };

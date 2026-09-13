@@ -84,7 +84,7 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
     expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
       9,
     );
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
     expect(
       db
         .prepare(
@@ -154,7 +154,7 @@ test("version-three claims and durable receipts survive the release expansion", 
     migrateBountyStore(db);
     migrateBountyStore(db);
 
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(6);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
     expect(
       db
         .prepare("SELECT revision FROM bounty_definitions WHERE id='bounty'")
