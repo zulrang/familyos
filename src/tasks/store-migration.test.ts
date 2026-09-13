@@ -364,3 +364,83 @@ test("a corrupt durable Bounty receipt is rejected before replay", () => {
     db.close();
   }
 });
+
+test("version-six admin receipts replay after activation-bound migration", () => {
+  const db = new DatabaseSync(":memory:");
+  const today = parseLocalDate("2026-09-13");
+  expect(today).not.toBeNull();
+  if (!today) return;
+  try {
+    migrateBountyStore(db);
+    const draft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Wash car",
+      stars: 4,
+      recurrence: { kind: "once" },
+    });
+    expect(draft?.kind).toBe("bounty");
+    if (!draft || draft.kind !== "bounty") return;
+    const bounty = createBounty(db, draft, today);
+    const command = parseTaskAdminCommand({
+      kind: "edit-bounty",
+      requestId: "historic-admin-receipt",
+      definition: bounty.id,
+      revision: 0,
+      draft: { title: "Polish car", stars: 6 },
+    });
+    expect(command?.kind).toBe("edit-bounty");
+    if (!command || command.kind !== "edit-bounty") return;
+    db.exec(`
+      UPDATE bounty_definitions
+      SET title = 'Polish car', stars = 6, revision = 1
+      WHERE id = '${bounty.id}';
+      DROP TRIGGER bounty_admin_receipts_no_update;
+      DROP TRIGGER bounty_admin_receipts_no_delete;
+      DROP TABLE bounty_admin_command_receipts;
+      CREATE TABLE bounty_admin_command_receipts (
+        request_id TEXT PRIMARY KEY,
+        kind TEXT CHECK (kind IN ('edit-bounty', 'retire-bounty')),
+        payload TEXT,
+        response TEXT
+      );
+    `);
+    const historicalResponse = {
+      ...bounty,
+      title: "Polish car",
+      stars: 6,
+      revision: 1,
+    } as Record<string, unknown>;
+    delete historicalResponse.offerFrom;
+    db.prepare(
+      "INSERT INTO bounty_admin_command_receipts VALUES (?, ?, ?, ?)",
+    ).run(
+      command.requestId,
+      command.kind,
+      JSON.stringify(command),
+      JSON.stringify(historicalResponse),
+    );
+    db.exec(`
+      DROP TRIGGER bounty_definitions_update_guard;
+      DROP TRIGGER bounty_definitions_no_delete;
+      ALTER TABLE bounty_definitions DROP COLUMN offer_from;
+      CREATE TRIGGER bounty_definitions_update_guard BEFORE UPDATE ON bounty_definitions
+        BEGIN SELECT 1; END;
+      CREATE TRIGGER bounty_definitions_no_delete BEFORE DELETE ON bounty_definitions
+        BEGIN SELECT 1; END;
+      CREATE TRIGGER bounty_admin_receipts_no_update BEFORE UPDATE ON bounty_admin_command_receipts
+        BEGIN SELECT 1; END;
+      CREATE TRIGGER bounty_admin_receipts_no_delete BEFORE DELETE ON bounty_admin_command_receipts
+        BEGIN SELECT 1; END;
+      PRAGMA user_version = 6;
+    `);
+
+    migrateBountyStore(db);
+    expect(administerBountyDefinition({ db, command, today })).toMatchObject({
+      status: "already-applied",
+      definition: { id: bounty.id, title: "Polish car", offerFrom: null },
+    });
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
+  } finally {
+    db.close();
+  }
+});

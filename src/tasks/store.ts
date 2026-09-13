@@ -6,6 +6,7 @@ import type { CompletionCorrection } from "./admin-types";
 import { migrateBountyStore } from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
 import {
+  allowsAssignedDraft,
   type CreateTaskDraft,
   type EventReceipt,
   isRecord,
@@ -128,6 +129,8 @@ BEGIN
 END;
 
 `;
+
+export class InvalidTaskDefinitionError extends Error {}
 
 type Cached = { dir: string; db: DatabaseSync };
 
@@ -290,6 +293,11 @@ export function saveDefinition(input: {
   const current = definitionById(input.id);
   if (!current || current.retiredAt !== null) {
     throw new Error("task not found");
+  }
+  if (!allowsAssignedDraft(current, input.draft)) {
+    throw new InvalidTaskDefinitionError(
+      "New open Routines are not supported. Assign this Routine to a member or rotation.",
+    );
   }
   const plan = planDefinitionSave({
     current,

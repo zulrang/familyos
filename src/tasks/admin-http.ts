@@ -20,6 +20,7 @@ import {
 import {
   administerBountyDefinition,
   BountyAdminStoreError,
+  InactiveBountyMemberError,
   loadBountyClaims,
   loadBountyCompletions,
   loadBountyDefinitions,
@@ -67,12 +68,7 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   if (!command)
     return adminJson({ error: "Check the task fields and try again." }, 400);
   const assignedDraft =
-    command.kind === "create" || command.kind === "edit"
-      ? command.draft
-      : command.kind === "replace-definition" &&
-          command.replacement.kind === "assigned"
-        ? command.replacement
-        : null;
+    command.kind === "create" || command.kind === "edit" ? command.draft : null;
   if (assignedDraft) {
     const assignment = assignedDraft.assignment;
     const assigned =
@@ -142,6 +138,7 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
             db: tasksDatabase(),
             command,
             today,
+            members: household.members,
           }),
         });
       case "correct":
@@ -153,6 +150,8 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     }
     return adminJson({ ok: true });
   } catch (error) {
+    if (error instanceof InactiveBountyMemberError)
+      return adminJson({ error: error.message }, 400);
     if (
       error instanceof TaskAdminError ||
       error instanceof BountyAdminStoreError ||
