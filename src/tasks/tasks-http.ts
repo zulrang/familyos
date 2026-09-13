@@ -22,6 +22,7 @@ import {
 } from "./bounty-store";
 import {
   applyEvent,
+  InvalidTaskDefinitionError,
   insertDefinition,
   loadStore,
   loadStoredStarBalances,
@@ -182,6 +183,9 @@ export async function handleSaveTask(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof Error && error.message === "task not found") {
       return jsonError("task not found", 404);
+    }
+    if (error instanceof InvalidTaskDefinitionError) {
+      return jsonError(error.message, 400);
     }
     throw error;
   }

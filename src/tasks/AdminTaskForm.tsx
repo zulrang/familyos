@@ -22,6 +22,24 @@ import {
 
 const WEEKDAYS: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
+function initialBountyRecurrence(
+  task: LegacyTaskDefinition | undefined,
+  today: LocalDate,
+): BountyRecurrenceDraft {
+  if (!task || task.recurrence.kind === "once") return { kind: "once" };
+  const recurrence = task.recurrence;
+  return {
+    kind: "recurring",
+    startsOn: today,
+    cadence:
+      recurrence.kind === "monthly"
+        ? { kind: "monthly", day: String(recurrence.day) }
+        : recurrence.kind === "weekly"
+          ? { kind: "weekly", days: recurrence.days }
+          : { kind: "daily" },
+  };
+}
+
 export function AdminTaskForm({
   task,
   members,
@@ -44,7 +62,7 @@ export function AdminTaskForm({
   const [title, setTitle] = useState(task?.title ?? "");
   const [workMode, setWorkMode] = useState<"assigned" | "bounty">("assigned");
   const [bountyRecurrence, setBountyRecurrence] =
-    useState<BountyRecurrenceDraft>({ kind: "once" });
+    useState<BountyRecurrenceDraft>(() => initialBountyRecurrence(task, today));
   const [type, setType] = useState(task?.type ?? "chore");
   const [recurrence, setRecurrence] = useState(
     task?.recurrence.kind ?? "daily",
@@ -297,7 +315,8 @@ export function AdminTaskForm({
                     setAssignment(event.target.value as typeof assignment)
                   }
                 >
-                  {type === "chore" ? (
+                  {type === "chore" ||
+                  (assignment === "open" && task?.type === "routine") ? (
                     <option value="open">Open to anyone</option>
                   ) : null}
                   <option value="fixed">One member</option>

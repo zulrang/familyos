@@ -878,6 +878,18 @@ export function recurrenceEquals(left: Recurrence, right: Recurrence): boolean {
   }
 }
 
+export function allowsAssignedDraft(
+  current: LegacyTaskDefinition | null,
+  draft: CreateTaskDraft,
+): boolean {
+  if (draft.type !== "routine" || draft.assignment.kind !== "open") return true;
+  return (
+    current?.type === "routine" &&
+    current.assignment.kind === "open" &&
+    recurrenceEquals(current.recurrence, draft.recurrence)
+  );
+}
+
 export function assignmentEquals(
   left: AssignmentPolicy,
   right: AssignmentPolicy,

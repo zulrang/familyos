@@ -84,3 +84,48 @@ test("an assigned Chore converts to a Bounty with Bounty-only schedule fields", 
   resolveSave?.(Response.json({ receipt: { status: "accepted" } }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
 });
+
+test("a legacy open Routine keeps its assignment for metadata edits", async () => {
+  const user = userEvent.setup();
+  const task = {
+    id: "a".repeat(32),
+    lineage: "1".repeat(32),
+    title: "Morning check",
+    type: "routine",
+    recurrence: { kind: "daily" },
+    assignment: { kind: "open" },
+    time: null,
+    stars: 0,
+    retiredAt: null,
+  } as LegacyTaskDefinition;
+  const commands: Record<string, unknown>[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    commands.push(JSON.parse(String(init.body)));
+    return Response.json({ definition: task });
+  });
+
+  render(
+    <AdminTaskForm
+      task={task}
+      members={[{ id: "dad", name: "Dad", status: "active", color: "#a9d8d2" }]}
+      today={"2026-09-13" as LocalDate}
+      onSaved={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect(screen.getByLabelText("Assignment")).toHaveValue("open");
+  await user.clear(screen.getByLabelText("Title"));
+  await user.type(screen.getByLabelText("Title"), "Morning checklist");
+  await user.click(screen.getByRole("button", { name: "Save task" }));
+  await waitFor(() => expect(commands).toHaveLength(1));
+  expect(commands[0]).toMatchObject({
+    kind: "edit",
+    task: task.id,
+    draft: {
+      title: "Morning checklist",
+      type: "routine",
+      recurrence: { kind: "daily" },
+      assignment: { kind: "open" },
+    },
+  });
+});

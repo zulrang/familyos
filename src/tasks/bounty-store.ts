@@ -709,8 +709,9 @@ export function replaceDefinition(input: {
   db: DatabaseSync;
   command: DefinitionReplacementCommand;
   today: LocalDate;
+  members: readonly HouseholdMember[];
 }): DefinitionReplacementReceipt {
-  const { db, command, today } = input;
+  const { db, command, today, members } = input;
   db.exec("BEGIN IMMEDIATE");
   try {
     const prior = db
@@ -742,6 +743,22 @@ export function replaceDefinition(input: {
         throw new Error("corrupt definition replacement receipt");
       db.exec("COMMIT");
       return { status: "already-applied", replacement: { kind, id, lineage } };
+    }
+
+    if (command.replacement.kind === "assigned") {
+      const assignment = command.replacement.assignment;
+      const assigned =
+        assignment.kind === "fixed" ? [assignment.member] : assignment.order;
+      if (
+        assigned.some(
+          (id) =>
+            members.find((member) => member.id === id)?.status !== "active",
+        )
+      ) {
+        throw new InactiveBountyMemberError(
+          "Assign tasks only to active members.",
+        );
+      }
     }
 
     const source =

@@ -48,6 +48,16 @@ type RetireBountyCommand = Extract<
 
 const WEEKDAYS: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
+type AssignedScheduleDraft =
+  | { kind: "once"; date: string }
+  | { kind: "daily" }
+  | { kind: "weekly"; days: Weekday[] }
+  | { kind: "monthly"; day: string };
+
+type AssignedAssignmentDraft =
+  | { kind: "fixed"; member: string }
+  | { kind: "rotation"; order: string[] };
+
 function recurrenceDraft(bounty: BountyDefinition): BountyRecurrenceDraft {
   if (bounty.recurrence.kind === "once") return { kind: "once" };
   const cadence = bounty.recurrence.cadence;
@@ -59,6 +69,21 @@ function recurrenceDraft(bounty: BountyDefinition): BountyRecurrenceDraft {
         ? { kind: "monthly", day: String(cadence.day) }
         : cadence,
   };
+}
+
+function assignedScheduleDraft(
+  bounty: BountyDefinition,
+  today: LocalDate,
+): AssignedScheduleDraft {
+  if (bounty.recurrence.kind === "once") return { kind: "once", date: today };
+  const cadence = bounty.recurrence.cadence;
+  if (cadence.kind === "weekly") {
+    return { kind: "weekly", days: [...cadence.days] };
+  }
+  if (cadence.kind === "monthly") {
+    return { kind: "monthly", day: String(cadence.day) };
+  }
+  return { kind: "daily" };
 }
 
 function BountyForm({
@@ -80,15 +105,13 @@ function BountyForm({
   const [target, setTarget] = useState<"bounty" | "assigned">("bounty");
   const [bountyRecurrence, setBountyRecurrence] =
     useState<BountyRecurrenceDraft>(() => recurrenceDraft(bounty));
-  const [assignedRecurrence, setAssignedRecurrence] = useState<
-    "once" | "daily" | "weekly" | "monthly"
-  >("daily");
-  const [date, setDate] = useState<string>(today);
-  const [day, setDay] = useState("1");
-  const [days, setDays] = useState<Weekday[]>(["mon"]);
-  const [assignment, setAssignment] = useState<"fixed" | "rotation">("fixed");
-  const [member, setMember] = useState(roster[0]?.id ?? "");
-  const [order, setOrder] = useState<string[]>([]);
+  const [assignedSchedule, setAssignedSchedule] =
+    useState<AssignedScheduleDraft>(() => assignedScheduleDraft(bounty, today));
+  const [assignedAssignment, setAssignedAssignment] =
+    useState<AssignedAssignmentDraft>({
+      kind: "fixed",
+      member: roster[0]?.id ?? "",
+    });
   const [time, setTime] = useState("");
   const [save, setSave] = useState<
     | { status: "editing"; error?: string }
@@ -124,17 +147,10 @@ function BountyForm({
               title,
               type: "chore",
               recurrence:
-                assignedRecurrence === "once"
-                  ? { kind: "once", date }
-                  : assignedRecurrence === "weekly"
-                    ? { kind: "weekly", days }
-                    : assignedRecurrence === "monthly"
-                      ? { kind: "monthly", day: Number(day) }
-                      : { kind: "daily" },
-              assignment:
-                assignment === "fixed"
-                  ? { kind: "fixed", member }
-                  : { kind: "rotation", order },
+                assignedSchedule.kind === "monthly"
+                  ? { kind: "monthly", day: Number(assignedSchedule.day) }
+                  : assignedSchedule,
+              assignment: assignedAssignment,
               time,
               stars: Number(stars),
             });
@@ -245,12 +261,19 @@ function BountyForm({
                 <label>
                   Repeat
                   <select
-                    value={assignedRecurrence}
-                    onChange={(event) =>
-                      setAssignedRecurrence(
-                        event.target.value as typeof assignedRecurrence,
-                      )
-                    }
+                    value={assignedSchedule.kind}
+                    onChange={(event) => {
+                      const kind = event.target.value;
+                      setAssignedSchedule(
+                        kind === "once"
+                          ? { kind, date: today }
+                          : kind === "weekly"
+                            ? { kind, days: ["mon"] }
+                            : kind === "monthly"
+                              ? { kind, day: "1" }
+                              : { kind: "daily" },
+                      );
+                    }}
                   >
                     <option value="once">Once</option>
                     <option value="daily">Daily</option>
@@ -258,18 +281,23 @@ function BountyForm({
                     <option value="monthly">Monthly</option>
                   </select>
                 </label>
-                {assignedRecurrence === "once" ? (
+                {assignedSchedule.kind === "once" ? (
                   <label>
                     Date
                     <input
                       type="date"
                       required
-                      value={date}
-                      onChange={(event) => setDate(event.target.value)}
+                      value={assignedSchedule.date}
+                      onChange={(event) =>
+                        setAssignedSchedule({
+                          kind: "once",
+                          date: event.target.value,
+                        })
+                      }
                     />
                   </label>
                 ) : null}
-                {assignedRecurrence === "weekly" ? (
+                {assignedSchedule.kind === "weekly" ? (
                   <fieldset>
                     <legend>Days</legend>
                     <div className={styles.grid}>
@@ -277,17 +305,20 @@ function BountyForm({
                         <label className={styles.check} key={weekday}>
                           <input
                             type="checkbox"
-                            checked={days.includes(weekday)}
+                            checked={assignedSchedule.days.includes(weekday)}
                             onChange={(event) =>
-                              setDays(
-                                event.target.checked
+                              setAssignedSchedule({
+                                kind: "weekly",
+                                days: event.target.checked
                                   ? WEEKDAYS.filter(
                                       (value) =>
                                         value === weekday ||
-                                        days.includes(value),
+                                        assignedSchedule.days.includes(value),
                                     )
-                                  : days.filter((value) => value !== weekday),
-                              )
+                                  : assignedSchedule.days.filter(
+                                      (value) => value !== weekday,
+                                    ),
+                              })
                             }
                           />
                           {weekday[0].toUpperCase() + weekday.slice(1)}
@@ -296,7 +327,7 @@ function BountyForm({
                     </div>
                   </fieldset>
                 ) : null}
-                {assignedRecurrence === "monthly" ? (
+                {assignedSchedule.kind === "monthly" ? (
                   <label>
                     Day of month (1–28)
                     <input
@@ -305,20 +336,25 @@ function BountyForm({
                       max={28}
                       step={1}
                       required
-                      value={day}
-                      onChange={(event) => setDay(event.target.value)}
+                      value={assignedSchedule.day}
+                      onChange={(event) =>
+                        setAssignedSchedule({
+                          kind: "monthly",
+                          day: event.target.value,
+                        })
+                      }
                     />
                   </label>
                 ) : null}
                 <label>
                   Assignment
                   <select
-                    value={assignment}
+                    value={assignedAssignment.kind}
                     onChange={(event) =>
-                      setAssignment(
+                      setAssignedAssignment(
                         event.target.value === "rotation"
-                          ? "rotation"
-                          : "fixed",
+                          ? { kind: "rotation", order: [] }
+                          : { kind: "fixed", member: roster[0]?.id ?? "" },
                       )
                     }
                   >
@@ -326,13 +362,18 @@ function BountyForm({
                     <option value="rotation">Take turns</option>
                   </select>
                 </label>
-                {assignment === "fixed" ? (
+                {assignedAssignment.kind === "fixed" ? (
                   <label>
                     Member
                     <select
                       required
-                      value={member}
-                      onChange={(event) => setMember(event.target.value)}
+                      value={assignedAssignment.member}
+                      onChange={(event) =>
+                        setAssignedAssignment({
+                          kind: "fixed",
+                          member: event.target.value,
+                        })
+                      }
                     >
                       <option value="">Choose a member</option>
                       {roster.map((person) => (
@@ -349,13 +390,16 @@ function BountyForm({
                       <label className={styles.check} key={person.id}>
                         <input
                           type="checkbox"
-                          checked={order.includes(person.id)}
+                          checked={assignedAssignment.order.includes(person.id)}
                           onChange={(event) =>
-                            setOrder(
-                              event.target.checked
-                                ? [...order, person.id]
-                                : order.filter((id) => id !== person.id),
-                            )
+                            setAssignedAssignment({
+                              kind: "rotation",
+                              order: event.target.checked
+                                ? [...assignedAssignment.order, person.id]
+                                : assignedAssignment.order.filter(
+                                    (id) => id !== person.id,
+                                  ),
+                            })
                           }
                         />
                         {person.name}
@@ -388,8 +432,8 @@ function BountyForm({
             </label>
           </fieldset>
           <p className={styles.muted}>
-            Schedule or work-mode changes start a new definition. Existing
-            claims keep their accepted title, date, and reward.
+            Schedule changes affect future offerings. Existing claims keep their
+            title, date, and Stars.
           </p>
           {"error" in save && save.error && (
             <p role="alert" className={styles.error}>

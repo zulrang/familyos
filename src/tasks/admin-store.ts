@@ -13,6 +13,7 @@ import {
 } from "./store";
 import {
   type AssignmentPolicy,
+  allowsAssignedDraft,
   type CreateTaskDraft,
   createDefinition,
   type LegacyTaskDefinition,
@@ -67,6 +68,11 @@ export function preserveRotationTurn(
 
 function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
   const previous = requireActiveTask(task);
+  if (!allowsAssignedDraft(previous, draft)) {
+    throw new TaskAdminError(
+      "New open Routines are not supported. Assign this Routine to a member or rotation.",
+    );
+  }
   if (
     JSON.stringify(previous.assignment) === JSON.stringify(draft.assignment) &&
     JSON.stringify(previous.recurrence) === JSON.stringify(draft.recurrence)

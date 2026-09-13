@@ -254,7 +254,7 @@ export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
   if (!task) return null;
   if (raw.kind === "retire") return { kind: "retire", task };
   if (raw.kind === "edit") {
-    const draft = parseLegalAssignedDraft(raw.draft);
+    const draft = parseCreateTaskDraft(raw.draft);
     return draft ? { kind: "edit", task, draft } : null;
   }
   const window = parseLocalDate(raw.window);

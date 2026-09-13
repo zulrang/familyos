@@ -7,7 +7,7 @@ import { handleAdminMembers } from "@/members/admin-http";
 import { readHousehold, writeHousehold } from "@/settings/settings";
 import { handleAdminSession } from "@/shared/admin-auth";
 import { handleAdminTasks } from "./admin-http";
-import { correctAdminCompletion } from "./admin-store";
+import { correctAdminCompletion, createAdminTask } from "./admin-store";
 import { parseTaskAdminCommand, type TaskAdminRead } from "./admin-types";
 import {
   claimBounty,
@@ -244,6 +244,28 @@ describe("parent administration", () => {
     expect(bountyDraft?.kind).toBe("bounty");
     if (!bountyDraft || bountyDraft.kind !== "bounty") return;
     const bounty = createBounty(tasksDatabase(), bountyDraft, serverToday);
+    const available = loadAvailableBounties(tasksDatabase(), serverToday)[0];
+    const claimCommand = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: available?.offering,
+      member: "a",
+      definitionRevision: available?.definitionRevision,
+    });
+    expect(claimCommand?.kind).toBe("claim-bounty");
+    if (!claimCommand || claimCommand.kind !== "claim-bounty") return;
+    const acceptedClaim = claimBounty({
+      db: tasksDatabase(),
+      command: claimCommand,
+      today: serverToday,
+      members: (await readHousehold()).members,
+    });
+    if (
+      !("result" in acceptedClaim) ||
+      acceptedClaim.result.kind !== "claimed"
+    ) {
+      return;
+    }
     const requestId = crypto.randomUUID();
     const convertToAssigned = {
       kind: "replace-definition",
@@ -292,6 +314,20 @@ describe("parent administration", () => {
         (definition) => definition.id === bounty.id,
       ),
     ).toMatchObject({ retiredAt: serverToday });
+    const completion = parseBountyCommand({
+      kind: "complete-bounty",
+      requestId: crypto.randomUUID(),
+      claim: acceptedClaim.result.claim.id,
+      revision: acceptedClaim.result.revision,
+    });
+    expect(completion?.kind).toBe("complete-bounty");
+    if (!completion || completion.kind !== "complete-bounty") return;
+    expect(
+      completeBounty({ db: tasksDatabase(), command: completion }),
+    ).toMatchObject({
+      status: "accepted",
+      result: { kind: "completed", completion: { creditedStars: 4 } },
+    });
 
     const back = await tasks({
       kind: "replace-definition",
@@ -350,6 +386,95 @@ describe("parent administration", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  test("legacy open Routines allow metadata edits without allowing a new schedule", async () => {
+    await snapshot();
+    const legacy = createAdminTask(crypto.randomUUID(), {
+      ...draft,
+      title: "Morning check",
+      type: "routine",
+      assignment: { kind: "open" },
+    });
+    const metadataEdit = {
+      kind: "edit",
+      task: legacy.id,
+      draft: {
+        ...draft,
+        title: "Morning checklist",
+        type: "routine",
+        assignment: { kind: "open" },
+        time: "08:00",
+        stars: 1,
+      },
+    };
+    expect((await tasks(metadataEdit)).status).toBe(200);
+    expect(loadDefinitions().find((row) => row.id === legacy.id)).toMatchObject(
+      {
+        title: "Morning checklist",
+        type: "routine",
+        assignment: { kind: "open" },
+        recurrence: { kind: "daily" },
+        time: "08:00",
+        stars: 1,
+      },
+    );
+    expect(
+      (
+        await tasks({
+          ...metadataEdit,
+          draft: {
+            ...metadataEdit.draft,
+            recurrence: { kind: "weekly", days: ["mon"] },
+          },
+        })
+      ).status,
+    ).toBe(409);
+  });
+
+  test("an accepted conversion replays after its assigned member retires", async () => {
+    const serverToday = (await snapshot()).today;
+    const draft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Porch",
+      stars: 2,
+      recurrence: { kind: "once" },
+    });
+    expect(draft?.kind).toBe("bounty");
+    if (!draft || draft.kind !== "bounty") return;
+    const source = createBounty(tasksDatabase(), draft, serverToday);
+    const command = {
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: {
+        kind: "bounty",
+        definition: source.id,
+        revision: source.revision,
+      },
+      replacement: {
+        kind: "assigned",
+        title: "Porch",
+        type: "chore",
+        recurrence: { kind: "daily" },
+        assignment: { kind: "fixed", member: "a" },
+        time: null,
+        stars: 2,
+      },
+    };
+    expect((await tasks(command)).status).toBe(200);
+    const household = await readHousehold();
+    await writeHousehold({
+      ...household,
+      members: household.members.map((member) =>
+        member.id === "a"
+          ? { id: member.id, name: member.name, status: "retired" as const }
+          : member,
+      ),
+      configVersion: household.configVersion + 1,
+    });
+    const replay = await tasks(command);
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).receipt.status).toBe("already-applied");
   });
 
   test("schedule replacement waits for the next matching interval and preserves old claims", async () => {
@@ -412,6 +537,7 @@ describe("parent administration", () => {
       db: tasksDatabase(),
       command: replacementCommand,
       today,
+      members,
     });
     expect(replacement.replacement.id).not.toBe(source.id);
     expect(replacement.replacement.lineage).toBe(source.lineage);
@@ -486,7 +612,7 @@ describe("parent administration", () => {
     expect(command?.kind).toBe("replace-definition");
     if (!command || command.kind !== "replace-definition") return;
     expect(
-      replaceDefinition({ db: tasksDatabase(), command, today }),
+      replaceDefinition({ db: tasksDatabase(), command, today, members: [] }),
     ).toMatchObject({
       status: "accepted",
       replacement: { id: source.id },
