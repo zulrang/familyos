@@ -687,6 +687,10 @@ describe("TasksScreen", () => {
   });
 
   test("a member releases a Bounty and another member can claim the same offering", async () => {
+    const webCrypto = crypto;
+    vi.stubGlobal("crypto", {
+      getRandomValues: webCrypto.getRandomValues.bind(webCrypto),
+    });
     const user = userEvent.setup();
     const initial = emptyView();
     const definition = {
@@ -827,6 +831,91 @@ describe("TasksScreen", () => {
       claim: replacement.claim.id,
       revision: 0,
     });
+    for (const patch of patches) {
+      expect(patch.requestId).toMatch(/^[a-f0-9]{32}$/);
+    }
+  });
+
+  test("guards one Bounty offering through claim refresh while others remain usable", async () => {
+    const initial = emptyView();
+    const offerings = ["Wash windows", "Sweep porch"].map(
+      (title, index) =>
+        ({
+          kind: "available",
+          id: `guard-offering-${index}`,
+          offering: {
+            kind: "once",
+            definition: `guard-definition-${index}`,
+          },
+          title,
+          stars: index + 1,
+          definitionRevision: 0,
+        }) as AvailableBounty,
+    );
+    initial.availableBounties = offerings;
+    let finishRefresh: ((response: Response) => void) | undefined;
+    const refresh = new Promise<Response>((resolve) => {
+      finishRefresh = resolve;
+    });
+    let taskReads = 0;
+    let patches = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/tasks")) {
+          taskReads += 1;
+          return taskReads === 1 ? json(initial) : refresh;
+        }
+        if (method === "PATCH" && url.endsWith("/api/tasks")) {
+          patches += 1;
+          return json({ receipt: { status: "accepted" } });
+        }
+        throw new Error(`Unexpected ${method} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TasksScreen />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Bounties" }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Claim Wash windows" }),
+    );
+    const dad = screen.getByRole("button", { name: "Dad" });
+    act(() => {
+      dad.click();
+      dad.click();
+    });
+
+    await waitFor(() => expect(patches).toBe(1));
+    expect(
+      screen.getByRole("button", { name: "Claim Wash windows" }),
+    ).toBeDisabled();
+    const other = screen.getByRole("button", { name: "Claim Sweep porch" });
+    expect(other).toBeEnabled();
+    await userEvent.click(other);
+    expect(screen.getByRole("dialog", { name: "Claim Bounty" })).toBeVisible();
+
+    if (!finishRefresh) throw new Error("Missing deferred refresh resolver");
+    finishRefresh(
+      json({
+        ...initial,
+        availableBounties: [offerings[1]],
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Claim Wash windows" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText("Could not claim Bounty."),
+    ).not.toBeInTheDocument();
   });
 
   test("Bounties stay available without Active Members and explain the claim requirement", async () => {

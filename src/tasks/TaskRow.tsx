@@ -96,6 +96,7 @@ export function TaskRow({
           type="button"
           aria-label={`Claim ${label}`}
           onClick={onClaim}
+          disabled={mutationPending}
           className={styles.rowAction}
         >
           Claim
