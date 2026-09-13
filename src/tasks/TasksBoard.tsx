@@ -15,6 +15,7 @@ import styles from "./TasksBoard.module.css";
 import type {
   AvailableBounty,
   ClaimedBounty,
+  ClaimId,
   Occurrence,
   TasksViewRead,
 } from "./types";
@@ -52,6 +53,7 @@ type TaskActions = {
   onReleaseBounty: (row: ClaimedBounty) => void;
   onClaimBounty: (row: AvailableBounty) => void;
   onAddBounty: () => void;
+  completingBountyClaims: ReadonlySet<ClaimId>;
 };
 
 const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
@@ -114,6 +116,7 @@ function GroupTasks({
   onEdit,
   onCompleteBounty,
   onReleaseBounty,
+  completingBountyClaims,
 }: TaskActions & {
   group: TaskGroup;
   claimSelection: ClaimSelection | null;
@@ -188,6 +191,7 @@ function GroupTasks({
               label={work.row.claim.title}
               stars={work.row.claim.stars}
               status={{ kind: "open" }}
+              completionPending={completingBountyClaims.has(work.row.claim.id)}
               onComplete={() => onCompleteBounty(work.row)}
               onRelease={!preview ? () => onReleaseBounty(work.row) : undefined}
             />
@@ -303,6 +307,10 @@ export function TasksBoard({
       boardScroll.current = scrollRef.current?.scrollTop ?? 0;
     }
     setLocation({ kind: "bounties" });
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      backRef.current?.focus({ preventScroll: true });
+    });
   }
 
   function back() {

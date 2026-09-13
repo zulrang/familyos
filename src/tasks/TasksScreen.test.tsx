@@ -3,6 +3,7 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -822,6 +823,9 @@ describe("TasksScreen", () => {
     );
     expect(
       screen.queryByRole("checkbox", { name: "Already finished" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("dialog", { name: "All done!" }),
     ).not.toBeInTheDocument();
   });
 
@@ -1873,6 +1877,24 @@ describe("Family Board navigation", () => {
     );
   });
 
+  test("opening Bounties resets the board scroll position", async () => {
+    const user = userEvent.setup();
+    installFetch(boardView());
+    render(<TasksScreen />);
+    const heading = await screen.findByRole("heading", {
+      name: "Family Board",
+    });
+    const scroll = heading.parentElement?.nextElementSibling;
+    expect(scroll).toBeInstanceOf(HTMLElement);
+    if (!(scroll instanceof HTMLElement))
+      throw new Error("Missing board scroll");
+    scroll.scrollTop = 240;
+
+    await user.click(screen.getByRole("button", { name: "Bounties" }));
+
+    await waitFor(() => expect(scroll.scrollTop).toBe(0));
+  });
+
   test("the board caps the combined assigned and claimed Bounty preview", async () => {
     const user = userEvent.setup();
     const store = boardView();
@@ -2014,6 +2036,26 @@ describe("daily completion celebration", () => {
     return store;
   }
 
+  function bountyTask() {
+    const store = emptyView();
+    const claimed = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "celebration-claim",
+        offering: { kind: "once", definition: "celebration-bounty" },
+        member: "dad",
+        scheduledOn: store.today,
+        title: "Polish table",
+        stars: 2,
+      },
+      revision: 0,
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    store.bountyClaims = [claimed];
+    store.progress = [{ member: "dad", done: 0, total: 1 }];
+    return { store, claimed };
+  }
+
   test("celebrates only the last confirmed task and can be dismissed", async () => {
     const user = userEvent.setup();
     installFetch(dailyTasks());
@@ -2078,5 +2120,91 @@ describe("daily completion celebration", () => {
     expect(
       screen.queryByRole("dialog", { name: "All done!" }),
     ).not.toBeInTheDocument();
+  });
+
+  test("celebrates when a confirmed Bounty completes the member's last work", async () => {
+    const user = userEvent.setup();
+    const { store, claimed } = bountyTask();
+    const completed: TasksViewRead = {
+      ...store,
+      bountyClaims: [
+        {
+          ...claimed,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "celebration-completion",
+              claim: claimed.claim.id,
+              by: "dad",
+              at: store.generatedAt,
+              creditedStars: claimed.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: [{ member: "dad", done: 1, total: 1 }],
+    };
+    installScriptedBountyFetch(
+      [store, completed],
+      [{ method: "PATCH", response: { receipt: { status: "accepted" } } }],
+    );
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Polish table" }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "All done!" }),
+    ).toHaveTextContent("You did it, Dad!");
+  });
+
+  test("guards a Bounty completion while its request and refresh are pending", async () => {
+    const user = userEvent.setup();
+    const { store } = bountyTask();
+    let settleFirst: ((response: Response) => void) | undefined;
+    const firstPatch = new Promise<Response>((resolve) => {
+      settleFirst = resolve;
+    });
+    let patchCount = 0;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/tasks")) {
+          return json(store);
+        }
+        if (method === "PATCH" && url.endsWith("/api/tasks")) {
+          patchCount += 1;
+          return patchCount === 1
+            ? firstPatch
+            : json({ error: "stale claim revision" }, 409);
+        }
+        throw new Error(`Unexpected ${method} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TasksScreen />);
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Polish table",
+    });
+
+    fireEvent.click(checkbox);
+    fireEvent.click(checkbox);
+
+    expect(checkbox).toBeDisabled();
+    expect(patchCount).toBe(1);
+    if (!settleFirst) throw new Error("Missing deferred response resolver");
+    settleFirst(json({ error: "stale claim revision" }, 409));
+    await waitFor(() => expect(checkbox).toBeEnabled());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not complete Bounty.",
+    );
+
+    await user.click(checkbox);
+    await waitFor(() => expect(patchCount).toBe(2));
   });
 });
