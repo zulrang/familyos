@@ -75,7 +75,18 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 LISTEN_PID=
+SLEEP_PID=
+interruptible_sleep() {
+  sleep "$1" &
+  SLEEP_PID=$!
+  wait "$SLEEP_PID" 2>/dev/null || true
+  SLEEP_PID=
+}
 cleanup() {
+  if [ -n "$SLEEP_PID" ]; then
+    kill "$SLEEP_PID" 2>/dev/null || true
+    wait "$SLEEP_PID" 2>/dev/null || true
+  fi
   [ -n "$LISTEN_PID" ] || return 0
   kill "$LISTEN_PID" 2>/dev/null || true
   wait "$LISTEN_PID" 2>/dev/null || true
@@ -176,7 +187,7 @@ if [ -d /sys/class/i2c-dev ]; then
       [ -e "/dev/i2c-$bus" ] && ready=1
     done
     [ "$ready" -eq 1 ] && break
-    sleep 1
+    interruptible_sleep 1
   done
 fi
 
@@ -203,13 +214,13 @@ while true; do
         dimmed=1
       fi
     fi
-    sleep "$POLL_DIM"
+    interruptible_sleep "$POLL_DIM"
   else
     if [ "$dimmed" -eq 1 ]; then
       set_brightness "${saved:-50}" || true
       rm -f "$STATE"
       dimmed=0
     fi
-    sleep "$POLL_BRIGHT"
+    interruptible_sleep "$POLL_BRIGHT"
   fi
 done
