@@ -1,7 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
-import { migrateBountyStore } from "./bounty-store";
+import { claimBounty, migrateBountyStore } from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
+import { parseBountyCommand, parseLocalDate } from "./types";
 
 test("version-one data survives migration; balances start at zero and new credits apply once", () => {
   const db = new DatabaseSync(":memory:");
@@ -80,6 +81,53 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
         )
         .get()?.count,
     ).toBe(5);
+  } finally {
+    db.close();
+  }
+});
+
+test("a corrupt durable Bounty receipt is rejected before replay", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    migrateBountyStore(db);
+    const command = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: "corrupt-receipt-request",
+      offering: { kind: "once", definition: "missing-definition" },
+      member: "dad",
+    });
+    const today = parseLocalDate("2026-09-13");
+    expect(command).not.toBeNull();
+    expect(today).not.toBeNull();
+    if (!command || command.kind !== "claim-bounty" || !today) {
+      throw new Error("invalid test fixture");
+    }
+    db.prepare(
+      "INSERT INTO bounty_command_receipts (request_id, kind, payload, response) VALUES (?, ?, ?, ?)",
+    ).run(
+      command.requestId,
+      command.kind,
+      JSON.stringify(command),
+      JSON.stringify({
+        status: "accepted",
+        result: {
+          kind: "claimed",
+          claim: {
+            id: "claim",
+            offering: command.offering,
+            member: "dad",
+            scheduledOn: today,
+            title: "Unsafe reward",
+            stars: -1,
+            revision: 0,
+          },
+        },
+      }),
+    );
+
+    expect(() => claimBounty({ db, command, today })).toThrow(
+      "corrupt Bounty command receipt",
+    );
   } finally {
     db.close();
   }

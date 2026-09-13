@@ -14,11 +14,11 @@ import {
   type AssignmentPolicy,
   type CreateTaskDraft,
   createDefinition,
+  type LegacyTaskDefinition,
   type LocalDate,
   type NonEmpty,
   newTaskId,
   type StarAdjustment,
-  type TaskDefinition,
   type TaskId,
 } from "./types";
 
@@ -80,7 +80,7 @@ function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
   const completed = loadEffectiveEvents().filter(
     (event) => event.task === task && event.kind === "completed",
   ).length;
-  const replacement: TaskDefinition = {
+  const replacement: LegacyTaskDefinition = {
     ...draft,
     id: newTaskId(),
     lineage: previous.lineage,

@@ -18,9 +18,9 @@ import {
 } from "./store";
 import {
   type CreateTaskDraft,
+  type LegacyTaskDefinition,
   nowInstant,
   parseLocalDate,
-  type TaskDefinition,
 } from "./types";
 import { view } from "./view";
 
@@ -94,9 +94,10 @@ describe("parent administration", () => {
       draft: { ...draft, ...overrides },
     });
     expect(result.status).toBe(200);
-    return ((await result.json()) as { definition: TaskDefinition }).definition;
+    return ((await result.json()) as { definition: LegacyTaskDefinition })
+      .definition;
   }
-  function complete(task: TaskDefinition, member = "a") {
+  function complete(task: LegacyTaskDefinition, member = "a") {
     return applyEvent({
       kind: "completed",
       task: task.id,

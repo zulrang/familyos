@@ -130,7 +130,13 @@ function GroupTasks({
   const completedBounties = group.bounties.filter(
     (row) => row.state.kind === "completed",
   );
-  const visible = preview ? remaining.slice(0, BOARD_PREVIEW_COUNT) : remaining;
+  const remainingWork = [
+    ...unfinishedBounties.map((row) => ({ kind: "bounty" as const, row })),
+    ...remaining.map((row) => ({ kind: "assigned" as const, row })),
+  ];
+  const visibleWork = preview
+    ? remainingWork.slice(0, BOARD_PREVIEW_COUNT)
+    : remainingWork;
   const taskRow = (row: Occurrence) => (
     <TaskRow
       key={`${row.task}:${row.window}`}
@@ -171,24 +177,25 @@ function GroupTasks({
           </p>
         </div>
       ) : (
-        <>
-          {unfinishedBounties.map((row) => (
+        visibleWork.map((work) =>
+          work.kind === "assigned" ? (
+            taskRow(work.row)
+          ) : (
             <TaskRow
-              key={row.claim.id}
-              label={row.claim.title}
-              stars={row.claim.stars}
+              key={work.row.claim.id}
+              label={work.row.claim.title}
+              stars={work.row.claim.stars}
               status={{ kind: "open" }}
-              onComplete={() => onCompleteBounty(row)}
+              onComplete={() => onCompleteBounty(work.row)}
             />
-          ))}
-          {visible.map(taskRow)}
-        </>
+          ),
+        )
       )}
       <div className={styles.taskFooter}>
-        {preview && remaining.length > visible.length ? (
+        {preview && remainingWork.length > visibleWork.length ? (
           <button type="button" className={styles.more} onClick={onOpen}>
-            {remaining.length - visible.length} more{" "}
-            {remaining.length - visible.length === 1 ? "task" : "tasks"}
+            {remainingWork.length - visibleWork.length} more{" "}
+            {remainingWork.length - visibleWork.length === 1 ? "task" : "tasks"}
             <Icon name="chevron-right" size={20} />
           </button>
         ) : null}
@@ -449,12 +456,13 @@ export function TasksBoard({
                       : `${selected.name}’s tasks`}
                   </h2>
                   <p>
-                    {
-                      selected.rows.filter(
-                        (row) =>
-                          row.state === "pending" || row.state === "claimed",
-                      ).length
-                    }{" "}
+                    {selected.rows.filter(
+                      (row) =>
+                        row.state === "pending" || row.state === "claimed",
+                    ).length +
+                      selected.bounties.filter(
+                        (row) => row.state.kind === "unfinished",
+                      ).length}{" "}
                     remaining
                   </p>
                 </div>

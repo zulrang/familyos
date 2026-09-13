@@ -6,9 +6,9 @@ import styles from "@/shared/Admin.module.css";
 import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import { adminRequest, adminRequestId } from "@/shared/admin-client";
 import {
+  type LegacyTaskDefinition,
   type LocalDate,
   parseCreateTaskDraft,
-  type TaskDefinition,
   type Weekday,
 } from "./types";
 
@@ -21,7 +21,7 @@ export function AdminTaskForm({
   onSaved,
   onCancel,
 }: {
-  task?: TaskDefinition;
+  task?: LegacyTaskDefinition;
   members: HouseholdMember[];
   today: LocalDate;
   onSaved: () => void;

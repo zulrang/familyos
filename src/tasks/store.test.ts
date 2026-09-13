@@ -16,10 +16,10 @@ import {
 import type {
   CreateTaskDraft,
   Instant,
+  LegacyTaskDefinition,
   LineageId,
   LocalDate,
   LocalTime,
-  TaskDefinition,
   TaskEvent,
   TaskId,
 } from "./types";
@@ -37,7 +37,9 @@ describe("tasks sqlite store", () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
 
-  function definition(overrides: Partial<TaskDefinition> = {}): TaskDefinition {
+  function definition(
+    overrides: Partial<LegacyTaskDefinition> = {},
+  ): LegacyTaskDefinition {
     return {
       id: crypto.randomUUID() as TaskId,
       lineage: crypto.randomUUID() as LineageId,
@@ -53,7 +55,7 @@ describe("tasks sqlite store", () => {
   }
 
   function draftFrom(
-    def: TaskDefinition,
+    def: LegacyTaskDefinition,
     overrides: Partial<CreateTaskDraft> = {},
   ): CreateTaskDraft {
     return {

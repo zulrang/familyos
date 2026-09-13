@@ -16,7 +16,7 @@ import {
   loadAvailableBounties,
   loadBountyClaims,
   loadBountyDefinitions,
-  taskDefinitionVariants,
+  taskDefinitions,
 } from "./bounty-store";
 import {
   applyEvent,
@@ -64,7 +64,7 @@ export async function handleGetTasks(
   reconcileRetiredMembers(household.members, today);
   const { definitions: storedDefinitions, events } = loadStore();
   const db = tasksDatabase();
-  const variants = taskDefinitionVariants(
+  const variants = taskDefinitions(
     storedDefinitions,
     loadBountyDefinitions(db),
   );

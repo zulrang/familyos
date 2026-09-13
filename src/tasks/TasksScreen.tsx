@@ -21,10 +21,10 @@ import { TasksBoard } from "./TasksBoard";
 import {
   type AvailableBounty,
   type ClaimedBounty,
+  type LegacyTaskDefinition,
   nowInstant,
   type Occurrence,
   type Recurrence,
-  type TaskDefinition,
   type TaskId,
   type TasksViewRead,
   type TaskType,
@@ -96,6 +96,10 @@ type Draft = DraftFields & {
 
 type BountyDraft = { title: string; stars: string };
 
+type EditorState =
+  | { kind: "assigned"; draft: Draft }
+  | { kind: "bounty"; draft: BountyDraft };
+
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
   { label: "Daily", value: { kind: "daily" } },
@@ -153,7 +157,7 @@ function toDraftRecurrence(recurrence: Recurrence): DraftRecurrence {
   }
 }
 
-function sheetFromDefinition(definition: TaskDefinition): Draft {
+function sheetFromDefinition(definition: LegacyTaskDefinition): Draft {
   return {
     task: definition.id,
     title: definition.title,
@@ -288,8 +292,7 @@ export function TasksScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
-  const [sheet, setSheet] = useState<Draft | null>(null);
-  const [bountySheet, setBountySheet] = useState<BountyDraft | null>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
   const [skipping, setSkipping] = useState<Occurrence | null>(null);
   const [skipNote, setSkipNote] = useState("");
@@ -339,7 +342,9 @@ export function TasksScreen() {
 
   function openEditor(row: Occurrence) {
     const definition = tasks.definitions.find((item) => item.id === row.task);
-    if (definition) setSheet(sheetFromDefinition(definition));
+    if (definition) {
+      setEditor({ kind: "assigned", draft: sheetFromDefinition(definition) });
+    }
   }
 
   async function complete(occ: Occurrence, member = occ.assignee) {
@@ -448,11 +453,12 @@ export function TasksScreen() {
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
-      if (!res.ok) setError("Could not claim Bounty.");
+      const failure = !res.ok ? "Could not claim Bounty." : null;
       await load();
+      if (failure) setError(failure);
     } catch {
+      await load().catch(() => undefined);
       setError("Could not claim Bounty.");
-      await load();
     }
   }
 
@@ -470,18 +476,19 @@ export function TasksScreen() {
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
-      if (!res.ok) setError("Could not complete Bounty.");
+      const failure = !res.ok ? "Could not complete Bounty." : null;
       await load();
+      if (failure) setError(failure);
     } catch {
+      await load().catch(() => undefined);
       setError("Could not complete Bounty.");
-      await load();
     }
   }
 
   async function saveBounty() {
-    if (!bountySheet) return;
-    const title = bountySheet.title.trim();
-    const stars = Number(bountySheet.stars);
+    if (editor?.kind !== "bounty") return;
+    const title = editor.draft.title.trim();
+    const stars = Number(editor.draft.stars);
     if (!title || !Number.isSafeInteger(stars) || stars < 0) return;
     setBusy(true);
     try {
@@ -501,7 +508,7 @@ export function TasksScreen() {
         setError("Could not create Bounty.");
         return;
       }
-      setBountySheet(null);
+      setEditor(null);
       await load();
     } finally {
       setBusy(false);
@@ -539,7 +546,8 @@ export function TasksScreen() {
   }
 
   async function saveTask() {
-    if (!sheet) return;
+    if (editor?.kind !== "assigned") return;
+    const sheet = editor.draft;
     const title = sheet.title.trim();
     const recurrence = parseDraftRecurrence(sheet.recurrence);
     const stars = Number(sheet.stars);
@@ -576,7 +584,7 @@ export function TasksScreen() {
         );
         return;
       }
-      setSheet(null);
+      setEditor(null);
       await load();
     } finally {
       setBusy(false);
@@ -607,6 +615,7 @@ export function TasksScreen() {
       ) : null}
       {error ? (
         <div
+          role="alert"
           style={{
             padding: "0 24px 12px",
             font: "var(--type-card-meta)",
@@ -616,21 +625,7 @@ export function TasksScreen() {
           {error}
         </div>
       ) : null}
-      {members.length === 0 && settings ? (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            font: "var(--type-section)",
-            color: "var(--text-faint)",
-          }}
-        >
-          Add household members under Settings
-        </div>
-      ) : null}
-      {members.length > 0 ? (
+      {settings ? (
         <TasksBoard
           members={members}
           tasks={tasks}
@@ -643,7 +638,9 @@ export function TasksScreen() {
           onEdit={openEditor}
           onClaimBounty={(row) => claimBountyOffering(row).catch(() => {})}
           onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
-          onAddBounty={() => setBountySheet({ title: "", stars: "0" })}
+          onAddBounty={() =>
+            setEditor({ kind: "bounty", draft: { title: "", stars: "0" } })
+          }
           claimSelection={
             memberAction?.kind === "claim"
               ? {
@@ -663,37 +660,40 @@ export function TasksScreen() {
         <Fab
           label="Add task"
           onClick={() =>
-            setSheet({
-              task: null,
-              title: "",
-              type: "chore",
-              recurrence: { kind: "daily" },
-              assignment: {
-                kind: "fixed",
-                member: members[0]?.id ?? "",
+            setEditor({
+              kind: "assigned",
+              draft: {
+                task: null,
+                title: "",
+                type: "chore",
+                recurrence: { kind: "daily" },
+                assignment: {
+                  kind: "fixed",
+                  member: members[0]?.id ?? "",
+                },
+                time: "",
+                stars: "0",
               },
-              time: "",
-              stars: "0",
             })
           }
         />
       ) : null}
-      {sheet ? (
+      {editor?.kind === "assigned" ? (
         <CreateSheet
-          draft={sheet}
+          draft={editor.draft}
           members={members}
           busy={busy}
-          onChange={setSheet}
-          onClose={() => setSheet(null)}
+          onChange={(draft) => setEditor({ kind: "assigned", draft })}
+          onClose={() => setEditor(null)}
           onSave={saveTask}
         />
       ) : null}
-      {bountySheet ? (
+      {editor?.kind === "bounty" ? (
         <BountySheet
-          draft={bountySheet}
+          draft={editor.draft}
           busy={busy}
-          onChange={setBountySheet}
-          onClose={() => setBountySheet(null)}
+          onChange={(draft) => setEditor({ kind: "bounty", draft })}
+          onClose={() => setEditor(null)}
           onSave={saveBounty}
         />
       ) : null}
@@ -1286,6 +1286,9 @@ function MemberPicker({
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {members.length === 0 ? (
+            <p>Add an Active Member under Settings before claiming a Bounty.</p>
+          ) : null}
           {members.map((member) => {
             const surface = memberSurface(member.color);
             return (

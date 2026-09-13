@@ -22,8 +22,8 @@ import type {
   AvailableBounty,
   BountyDefinition,
   ClaimedBounty,
+  LegacyTaskDefinition,
   Occurrence,
-  TaskDefinition,
   TasksViewRead,
 } from "./types";
 
@@ -92,85 +92,20 @@ function emptyView(): TasksViewRead {
   };
 }
 
-function installFetch(store: TasksViewRead) {
+function installFetch(
+  store: TasksViewRead,
+  settingsResponse: PublicSettings = settings,
+) {
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = urlOf(input);
       const method = (init?.method ?? "GET").toUpperCase();
 
       if (method === "GET" && url.endsWith("/api/settings")) {
-        return json(settings);
+        return json(settingsResponse);
       }
       if (method === "GET" && url.endsWith("/api/tasks")) {
         return json(store);
-      }
-      if (method === "PATCH" && url.endsWith("/api/tasks")) {
-        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
-          string,
-          unknown
-        >;
-        if (body.kind === "claim-bounty") {
-          const offering = body.offering as { definition: string };
-          const available = store.availableBounties.find(
-            (row) => row.offering.definition === offering.definition,
-          );
-          if (!available) return json({ error: "unavailable" }, 409);
-          const member = String(body.member);
-          store.availableBounties = store.availableBounties.filter(
-            (row) => row.id !== available.id,
-          );
-          store.bountyClaims = [
-            ...store.bountyClaims,
-            {
-              kind: "claimed-bounty",
-              claim: {
-                id: `claim-${available.id}`,
-                offering: available.offering,
-                member,
-                scheduledOn: store.today,
-                title: available.title,
-                stars: available.stars,
-                revision: 0,
-              },
-              state: { kind: "unfinished" },
-            } as ClaimedBounty,
-          ];
-          store.progress = store.progress.map((row) =>
-            row.member === member ? { ...row, total: row.total + 1 } : row,
-          );
-          return json({ receipt: { status: "accepted" } });
-        }
-        if (body.kind === "complete-bounty") {
-          const target = store.bountyClaims.find(
-            (row) => row.claim.id === body.claim,
-          );
-          if (!target || target.state.kind !== "unfinished") {
-            return json({ error: "stale" }, 409);
-          }
-          store.bountyClaims = store.bountyClaims.map((row) =>
-            row.claim.id === target.claim.id
-              ? ({
-                  ...row,
-                  state: {
-                    kind: "completed",
-                    completion: {
-                      id: `completion-${row.claim.id}`,
-                      claim: row.claim.id,
-                      by: row.claim.member,
-                      at: store.generatedAt,
-                      creditedStars: row.claim.stars,
-                    },
-                  },
-                } as ClaimedBounty)
-              : row,
-          );
-          store.progress = store.progress.map((row) =>
-            row.member === target.claim.member
-              ? { ...row, done: row.done + 1 }
-              : row,
-          );
-          return json({ receipt: { status: "accepted" } });
-        }
       }
       if (
         method === "POST" &&
@@ -181,36 +116,11 @@ function installFetch(store: TasksViewRead) {
           string,
           unknown
         >;
-        if (rawBody.kind === "bounty") {
-          const id = `bounty-${store.bountyDefinitions.length + 1}`;
-          const definition = {
-            kind: "bounty",
-            id,
-            lineage: `lineage-${id}`,
-            type: "chore",
-            title: String(rawBody.title),
-            stars: Number(rawBody.stars),
-            recurrence: { kind: "once" },
-            retiredAt: null,
-          } as BountyDefinition;
-          store.bountyDefinitions = [...store.bountyDefinitions, definition];
-          store.availableBounties = [
-            ...store.availableBounties,
-            {
-              kind: "available",
-              id: `offering-${id}`,
-              offering: { kind: "once", definition: definition.id },
-              title: definition.title,
-              stars: definition.stars,
-            } as AvailableBounty,
-          ];
-          return json({ definition });
-        }
         const body = rawBody as unknown as {
           title: string;
           type: "chore" | "routine";
-          recurrence: TaskDefinition["recurrence"];
-          assignment: TaskDefinition["assignment"];
+          recurrence: LegacyTaskDefinition["recurrence"];
+          assignment: LegacyTaskDefinition["assignment"];
           time?: string;
           stars: number;
         };
@@ -268,8 +178,8 @@ function installFetch(store: TasksViewRead) {
           id: string;
           title: string;
           type: "chore" | "routine";
-          recurrence: TaskDefinition["recurrence"];
-          assignment: TaskDefinition["assignment"];
+          recurrence: LegacyTaskDefinition["recurrence"];
+          assignment: LegacyTaskDefinition["assignment"];
           time?: string;
           stars: number;
         };
@@ -308,8 +218,8 @@ function installFetch(store: TasksViewRead) {
             definition: store.definitions.find((row) => row.id === body.id),
           });
         }
-        const replacement: TaskDefinition = {
-          id: `task-${store.definitions.length + 1}` as TaskDefinition["id"],
+        const replacement: LegacyTaskDefinition = {
+          id: `task-${store.definitions.length + 1}` as LegacyTaskDefinition["id"],
           lineage: current.lineage,
           title: body.title,
           type: body.type,
@@ -394,6 +304,50 @@ function installFetch(store: TasksViewRead) {
   return fetchMock;
 }
 
+type ScriptedMutation = {
+  method: "POST" | "PATCH";
+  response: unknown;
+  status?: number;
+};
+
+function installScriptedBountyFetch(
+  taskReads: readonly TasksViewRead[],
+  mutations: readonly ScriptedMutation[],
+  settingsResponse: PublicSettings = settings,
+) {
+  let readIndex = 0;
+  let mutationIndex = 0;
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = urlOf(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET" && url.endsWith("/api/settings")) {
+        return json(settingsResponse);
+      }
+      if (method === "GET" && url.endsWith("/api/tasks")) {
+        const response = taskReads[Math.min(readIndex, taskReads.length - 1)];
+        readIndex += 1;
+        if (!response) throw new Error("Missing scripted Tasks read response");
+        return json(response);
+      }
+      if (
+        url.endsWith("/api/tasks") &&
+        (method === "POST" || method === "PATCH")
+      ) {
+        const mutation = mutations[mutationIndex];
+        mutationIndex += 1;
+        if (!mutation || mutation.method !== method) {
+          throw new Error(`Unexpected ${method} Bounty request`);
+        }
+        return json(mutation.response, mutation.status);
+      }
+      throw new Error(`Unexpected ${method} ${url}`);
+    },
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 function submittedRecurrence(
   fetchMock: ReturnType<typeof installFetch>,
 ): unknown {
@@ -410,7 +364,7 @@ function submittedRecurrence(
 describe("TasksScreen", () => {
   test("Bounties focus creates, advertises, claims, and completes zero-Star work", async () => {
     const user = userEvent.setup();
-    const store = emptyView();
+    const initial = emptyView();
     const definition = {
       kind: "bounty",
       id: "bounty-zero",
@@ -428,9 +382,80 @@ describe("TasksScreen", () => {
       title: definition.title,
       stars: definition.stars,
     } as AvailableBounty;
-    store.bountyDefinitions = [definition];
-    store.availableBounties = [available];
-    const fetchMock = installFetch(store);
+    initial.bountyDefinitions = [definition];
+    initial.availableBounties = [available];
+    const createdDefinition = {
+      kind: "bounty",
+      id: "bounty-bins",
+      lineage: "bounty-bins-lineage",
+      type: "chore",
+      title: "Take bins out",
+      stars: 3,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    const createdOffering = {
+      kind: "available",
+      id: "offering-bins",
+      offering: { kind: "once", definition: createdDefinition.id },
+      title: createdDefinition.title,
+      stars: createdDefinition.stars,
+    } as AvailableBounty;
+    const claimed = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "claim-zero",
+        offering: available.offering,
+        member: "dad",
+        scheduledOn: initial.today,
+        title: available.title,
+        stars: available.stars,
+        revision: 0,
+      },
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    const afterCreate: TasksViewRead = {
+      ...initial,
+      bountyDefinitions: [definition, createdDefinition],
+      availableBounties: [available, createdOffering],
+    };
+    const afterClaim: TasksViewRead = {
+      ...afterCreate,
+      availableBounties: [createdOffering],
+      bountyClaims: [claimed],
+      progress: afterCreate.progress.map((row) =>
+        row.member === "dad" ? { ...row, total: 1 } : row,
+      ),
+    };
+    const afterComplete: TasksViewRead = {
+      ...afterClaim,
+      bountyClaims: [
+        {
+          ...claimed,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "completion-zero",
+              claim: claimed.claim.id,
+              by: "dad",
+              at: initial.generatedAt,
+              creditedStars: claimed.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: afterClaim.progress.map((row) =>
+        row.member === "dad" ? { ...row, done: 1 } : row,
+      ),
+    };
+    const fetchMock = installScriptedBountyFetch(
+      [initial, afterCreate, afterClaim, afterComplete],
+      [
+        { method: "POST", response: { definition: createdDefinition } },
+        { method: "PATCH", response: { status: "accepted" } },
+        { method: "PATCH", response: { status: "accepted" } },
+      ],
+    );
     render(<TasksScreen />);
 
     await user.click(await screen.findByRole("button", { name: "Bounties" }));
@@ -495,6 +520,169 @@ describe("TasksScreen", () => {
     render(<TasksScreen />);
     await user.click(await screen.findByRole("button", { name: "Bounties" }));
     expect(screen.getByText("No Bounties available")).toBeVisible();
+  });
+
+  test("Bounties stay available without Active Members and explain the claim requirement", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-empty-roster",
+      lineage: "lineage-empty-roster",
+      type: "chore",
+      title: "Clear porch",
+      stars: 2,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    store.bountyDefinitions = [definition];
+    store.availableBounties = [
+      {
+        kind: "available",
+        id: "offering-empty-roster",
+        offering: { kind: "once", definition: definition.id },
+        title: definition.title,
+        stars: definition.stars,
+      } as AvailableBounty,
+    ];
+    installFetch(store, {
+      ...settings,
+      members: [{ id: "former", name: "Former", status: "retired" }],
+    });
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    await user.click(screen.getByRole("button", { name: "Claim Clear porch" }));
+    expect(
+      screen.getByText(
+        "Add an Active Member under Settings before claiming a Bounty.",
+      ),
+    ).toBeVisible();
+    const closeButton = within(
+      screen.getByRole("dialog", { name: "Claim Bounty" }),
+    )
+      .getAllByRole("button", { name: "Close" })
+      .at(-1);
+    expect(closeButton).toBeDefined();
+    if (!closeButton) throw new Error("Missing close button");
+    await user.click(closeButton);
+    await user.click(screen.getByRole("button", { name: "Add Bounty" }));
+    expect(screen.getByRole("dialog", { name: "New Bounty" })).toBeVisible();
+  });
+
+  test("a competing Bounty claim remains visible as an error after refresh", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-competing",
+      lineage: "lineage-competing",
+      type: "chore",
+      title: "Claimed elsewhere",
+      stars: 1,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    initial.bountyDefinitions = [definition];
+    initial.availableBounties = [
+      {
+        kind: "available",
+        id: "offering-competing",
+        offering: { kind: "once", definition: definition.id },
+        title: definition.title,
+        stars: definition.stars,
+      } as AvailableBounty,
+    ];
+    installScriptedBountyFetch(
+      [initial, { ...initial, availableBounties: [] }],
+      [
+        {
+          method: "PATCH",
+          status: 409,
+          response: { error: "Bounty already claimed" },
+        },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claim Claimed elsewhere" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not claim Bounty.",
+    );
+    expect(screen.queryByText("Claimed elsewhere")).not.toBeInTheDocument();
+  });
+
+  test("a stale Bounty completion remains visible as an error after refresh", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const claim = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "claim-stale",
+        offering: { kind: "once", definition: "bounty-stale" },
+        member: "dad",
+        scheduledOn: initial.today,
+        title: "Already finished",
+        stars: 2,
+        revision: 0,
+      },
+      state: { kind: "unfinished" },
+    } as ClaimedBounty;
+    initial.bountyClaims = [claim];
+    initial.progress = initial.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 1 } : row,
+    );
+    const refreshed: TasksViewRead = {
+      ...initial,
+      bountyClaims: [
+        {
+          ...claim,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "completion-stale",
+              claim: claim.claim.id,
+              by: "dad",
+              at: initial.generatedAt,
+              creditedStars: claim.claim.stars,
+            },
+          },
+        } as ClaimedBounty,
+      ],
+      progress: initial.progress.map((row) =>
+        row.member === "dad" ? { ...row, done: 1 } : row,
+      ),
+    };
+    installScriptedBountyFetch(
+      [initial, refreshed],
+      [
+        {
+          method: "PATCH",
+          status: 409,
+          response: { error: "stale claim revision" },
+        },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", { name: "Already finished" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not complete Bounty.",
+    );
+    expect(
+      screen.queryByRole("checkbox", { name: "Already finished" }),
+    ).not.toBeInTheDocument();
   });
 
   test("Stars requests a numeric keyboard and replaces its value when tapped", async () => {
@@ -1379,9 +1567,9 @@ describe("TasksScreen", () => {
   });
 
   function seedFixed(store: TasksViewRead, title: string, member: string) {
-    const definition: TaskDefinition = {
-      id: "edit-me" as TaskDefinition["id"],
-      lineage: "lin-edit" as TaskDefinition["lineage"],
+    const definition: LegacyTaskDefinition = {
+      id: "edit-me" as LegacyTaskDefinition["id"],
+      lineage: "lin-edit" as LegacyTaskDefinition["lineage"],
       title,
       type: "chore",
       recurrence: { kind: "daily" },
@@ -1543,6 +1731,59 @@ describe("Family Board navigation", () => {
         screen.getByRole("button", { name: "View tasks for Dad" }),
       ).toHaveFocus(),
     );
+  });
+
+  test("the board caps the combined assigned and claimed Bounty preview", async () => {
+    const user = userEvent.setup();
+    const store = boardView();
+    store.bountyClaims = ["Wash car", "Mow lawn"].map(
+      (title, index) =>
+        ({
+          kind: "claimed-bounty",
+          claim: {
+            id: `board-claim-${index}`,
+            offering: {
+              kind: "once",
+              definition: `board-bounty-${index}`,
+            },
+            member: "dad",
+            scheduledOn: store.today,
+            title,
+            stars: index,
+            revision: 0,
+          },
+          state: { kind: "unfinished" },
+        }) as ClaimedBounty,
+    );
+    store.progress = store.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 6 } : row,
+    );
+    installFetch(store);
+    render(<TasksScreen />);
+
+    await screen.findByRole("button", { name: "View tasks for Dad" });
+    const dadPreview = screen.getByRole("region", { name: "Dad tasks" });
+    expect(within(dadPreview).getAllByRole("checkbox")).toHaveLength(3);
+    expect(
+      within(dadPreview).getByRole("button", { name: "3 more tasks" }),
+    ).toBeVisible();
+
+    await user.click(
+      within(dadPreview).getByRole("button", { name: "3 more tasks" }),
+    );
+    expect(screen.getByRole("heading", { name: "Dad’s tasks" })).toBeVisible();
+    expect(screen.getByText("6 remaining")).toBeVisible();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(6);
+    for (const title of [
+      "Wash car",
+      "Mow lawn",
+      "Dishes",
+      "Laundry",
+      "Water plants",
+      "Pack lunch",
+    ]) {
+      expect(screen.getByRole("checkbox", { name: title })).toBeVisible();
+    }
   });
 
   test("member switching keeps the focus view and shows an empty member accurately", async () => {

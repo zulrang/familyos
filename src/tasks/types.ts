@@ -33,7 +33,7 @@ export type AssignmentPolicy =
   | { kind: "rotation"; order: NonEmpty<MemberId> }
   | { kind: "open" };
 
-export type AssignedTaskDefinition = {
+export type LegacyTaskDefinition = {
   id: TaskId;
   lineage: LineageId;
   title: string;
@@ -45,8 +45,9 @@ export type AssignedTaskDefinition = {
   retiredAt: LocalDate | null;
 };
 
-/** Compatibility name for assigned Tasks while Bounties coexist additively. */
-export type TaskDefinition = AssignedTaskDefinition;
+export type AssignedTaskDefinition = Readonly<
+  { kind: "assigned" } & LegacyTaskDefinition
+>;
 
 export type BountyDefinition = Readonly<{
   kind: "bounty";
@@ -59,9 +60,7 @@ export type BountyDefinition = Readonly<{
   retiredAt: LocalDate | null;
 }>;
 
-export type TaskDefinitionVariant =
-  | ({ kind: "assigned" } & AssignedTaskDefinition)
-  | BountyDefinition;
+export type TaskDefinition = AssignedTaskDefinition | BountyDefinition;
 
 export type OnceOfferingKey = Readonly<{
   kind: "once";
@@ -207,7 +206,7 @@ export type TasksViewRead = {
   occurrences: Occurrence[];
   progress: MemberProgress[];
   starBalances: StarBalance[];
-  definitions: TaskDefinition[];
+  definitions: LegacyTaskDefinition[];
   bountyDefinitions: BountyDefinition[];
   availableBounties: AvailableBounty[];
   bountyClaims: ClaimedBounty[];
@@ -234,7 +233,11 @@ export type DefinitionSavePlan =
       time: LocalTime | null;
       stars: number;
     }
-  | { kind: "replace"; retiredAt: LocalDate; replacement: TaskDefinition };
+  | {
+      kind: "replace";
+      retiredAt: LocalDate;
+      replacement: LegacyTaskDefinition;
+    };
 
 const WEEKDAYS = new Set<string>([
   "sun",
@@ -554,7 +557,7 @@ export function parseTaskCreateDraft(raw: unknown): TaskCreateDraft | null {
   return assigned ? { kind: "assigned", ...assigned } : null;
 }
 
-function hasExactKeys(
+function hasOnlyKnownKeys(
   raw: Record<string, unknown>,
   keys: Set<string>,
 ): boolean {
@@ -562,7 +565,10 @@ function hasExactKeys(
 }
 
 function parseOnceOfferingKey(raw: unknown): OnceOfferingKey | null {
-  if (!isRecord(raw) || !hasExactKeys(raw, new Set(["kind", "definition"]))) {
+  if (
+    !isRecord(raw) ||
+    !hasOnlyKnownKeys(raw, new Set(["kind", "definition"]))
+  ) {
     return null;
   }
   const definition = parseTaskId(raw.definition);
@@ -577,7 +583,10 @@ export function parseBountyCommand(raw: unknown): BountyCommand | null {
   if (!requestId) return null;
   if (raw.kind === "claim-bounty") {
     if (
-      !hasExactKeys(raw, new Set(["kind", "requestId", "offering", "member"]))
+      !hasOnlyKnownKeys(
+        raw,
+        new Set(["kind", "requestId", "offering", "member"]),
+      )
     ) {
       return null;
     }
@@ -589,7 +598,10 @@ export function parseBountyCommand(raw: unknown): BountyCommand | null {
   }
   if (raw.kind === "complete-bounty") {
     if (
-      !hasExactKeys(raw, new Set(["kind", "requestId", "claim", "revision"]))
+      !hasOnlyKnownKeys(
+        raw,
+        new Set(["kind", "requestId", "claim", "revision"]),
+      )
     ) {
       return null;
     }
@@ -602,7 +614,107 @@ export function parseBountyCommand(raw: unknown): BountyCommand | null {
   return null;
 }
 
-export function createDefinition(draft: CreateTaskDraft): TaskDefinition {
+function parseBountyClaim(raw: unknown): BountyClaim | null {
+  if (
+    !isRecord(raw) ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set([
+        "id",
+        "offering",
+        "member",
+        "scheduledOn",
+        "title",
+        "stars",
+        "revision",
+      ]),
+    )
+  ) {
+    return null;
+  }
+  const id = parseClaimId(raw.id);
+  const offering = parseOnceOfferingKey(raw.offering);
+  const member = nonEmptyString(raw.member);
+  const scheduledOn = parseLocalDate(raw.scheduledOn);
+  const title = parseTaskTitle(raw.title);
+  const stars = parseStarAmount(raw.stars);
+  const revision = parseClaimRevision(raw.revision);
+  if (
+    !id ||
+    !offering ||
+    !member ||
+    !scheduledOn ||
+    !title ||
+    stars === null ||
+    revision === null
+  ) {
+    return null;
+  }
+  return { id, offering, member, scheduledOn, title, stars, revision };
+}
+
+function parseBountyCompletion(raw: unknown): BountyCompletion | null {
+  if (
+    !isRecord(raw) ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set(["id", "claim", "by", "at", "creditedStars"]),
+    )
+  ) {
+    return null;
+  }
+  const id = parseCompletionId(raw.id);
+  const claim = parseClaimId(raw.claim);
+  const by = nonEmptyString(raw.by);
+  const at = parseInstant(raw.at);
+  const creditedStars = parseStarAmount(raw.creditedStars);
+  if (!id || !claim || !by || !at || creditedStars === null) return null;
+  return { id, claim, by, at, creditedStars };
+}
+
+export function parseBountyCommandReceipt(
+  raw: unknown,
+): BountyCommandReceipt | null {
+  if (!isRecord(raw)) return null;
+  if (raw.status === "rejected") {
+    if (
+      !hasOnlyKnownKeys(raw, new Set(["status", "error"])) ||
+      typeof raw.error !== "string" ||
+      raw.error.length === 0
+    ) {
+      return null;
+    }
+    return { status: "rejected", error: raw.error };
+  }
+  if (
+    (raw.status !== "accepted" && raw.status !== "already-applied") ||
+    !hasOnlyKnownKeys(raw, new Set(["status", "result"])) ||
+    !isRecord(raw.result)
+  ) {
+    return null;
+  }
+  if (
+    raw.result.kind === "claimed" &&
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "claim"]))
+  ) {
+    const claim = parseBountyClaim(raw.result.claim);
+    return claim
+      ? { status: raw.status, result: { kind: "claimed", claim } }
+      : null;
+  }
+  if (
+    raw.result.kind === "completed" &&
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "completion"]))
+  ) {
+    const completion = parseBountyCompletion(raw.result.completion);
+    return completion
+      ? { status: raw.status, result: { kind: "completed", completion } }
+      : null;
+  }
+  return null;
+}
+
+export function createDefinition(draft: CreateTaskDraft): LegacyTaskDefinition {
   return {
     id: newTaskId(),
     lineage: newLineageId(),
@@ -703,7 +815,7 @@ function replacementRotation(
 }
 
 export function planDefinitionSave(input: {
-  current: TaskDefinition;
+  current: LegacyTaskDefinition;
   draft: CreateTaskDraft;
   today: LocalDate;
   nextId: TaskId;

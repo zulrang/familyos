@@ -4,6 +4,7 @@ import type { MemberId } from "@/members/members";
 import {
   addLocalDays,
   type Instant,
+  type LegacyTaskDefinition,
   type LineageId,
   type LocalDate,
   type LocalTime,
@@ -11,7 +12,6 @@ import {
   parseRecurrence,
   type Recurrence,
   type StarAdjustment,
-  type TaskDefinition,
   type TaskEvent,
   type TaskId,
 } from "./types";
@@ -23,8 +23,8 @@ const ellie = "ellie" as MemberId;
 const luke = "luke" as MemberId;
 
 function definition(
-  overrides: Partial<TaskDefinition> & Pick<TaskDefinition, "id">,
-): TaskDefinition {
+  overrides: Partial<LegacyTaskDefinition> & Pick<LegacyTaskDefinition, "id">,
+): LegacyTaskDefinition {
   return {
     lineage: "lin-1" as LineageId,
     title: "Dishes",

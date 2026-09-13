@@ -1,7 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { MemberId } from "@/members/members";
 import {
-  type AssignedTaskDefinition,
   type AvailableBounty,
   type BountyClaim,
   type BountyCommand,
@@ -12,11 +11,13 @@ import {
   type CreateBountyDraft,
   createBountyDefinition,
   isRecord,
+  type LegacyTaskDefinition,
   type LocalDate,
   newClaimId,
   newCompletionId,
   newOfferingId,
   nowInstant,
+  parseBountyCommandReceipt,
   parseClaimId,
   parseClaimRevision,
   parseCompletionId,
@@ -27,7 +28,7 @@ import {
   parseStarAmount,
   parseTaskId,
   parseTaskTitle,
-  type TaskDefinitionVariant,
+  type TaskDefinition,
 } from "./types";
 
 export class BountyStoreError extends Error {}
@@ -249,10 +250,10 @@ export function loadBountyDefinitions(db: DatabaseSync): BountyDefinition[] {
     });
 }
 
-export function taskDefinitionVariants(
-  assigned: readonly AssignedTaskDefinition[],
+export function taskDefinitions(
+  assigned: readonly LegacyTaskDefinition[],
   bounties: readonly BountyDefinition[],
-): TaskDefinitionVariant[] {
+): TaskDefinition[] {
   return [
     ...assigned.map((definition) => ({
       kind: "assigned" as const,
@@ -352,7 +353,14 @@ function priorReceipt(
       "That request identity has already been used for a different Bounty command.",
     );
   }
-  const parsed = JSON.parse(String(row.response)) as BountyCommandReceipt;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(String(row.response));
+  } catch {
+    throw new Error("corrupt Bounty command receipt");
+  }
+  const parsed = parseBountyCommandReceipt(raw);
+  if (!parsed) throw new Error("corrupt Bounty command receipt");
   if (parsed.status === "rejected") return parsed;
   return { ...parsed, status: "already-applied" };
 }

@@ -5,8 +5,9 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
 import {
   addLocalDays,
+  type BountyDefinition,
   type EventReceipt,
-  type TaskDefinition,
+  type LegacyTaskDefinition,
   type TasksViewRead,
 } from "./types";
 
@@ -181,7 +182,7 @@ describe("Tasks HTTP", () => {
     );
     assert.equal(omitted.status, 200);
     const omittedBody = (await omitted.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     assert.equal(omittedBody.definition.stars, 0);
     assert.equal(
@@ -205,7 +206,7 @@ describe("Tasks HTTP", () => {
     );
     assert.equal(explicit.status, 200);
     const explicitBody = (await explicit.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const persisted = loadDefinitions().find(
       (definition) => definition.id === explicitBody.definition.id,
@@ -259,7 +260,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -313,7 +314,7 @@ describe("Tasks HTTP", () => {
     );
     assert.equal(created.status, 200);
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     assert.deepEqual(definition.recurrence, { kind: "monthly", day: 15 });
     assert.deepEqual(definition.assignment, { kind: "open" });
@@ -429,7 +430,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -498,7 +499,7 @@ describe("Tasks HTTP", () => {
     );
     assert.equal(created.status, 200);
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -558,7 +559,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -601,7 +602,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -643,7 +644,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -685,7 +686,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -783,7 +784,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const view = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -847,7 +848,7 @@ describe("Tasks HTTP", () => {
       );
       assert.equal(response.status, 200);
       const { definition } = (await response.json()) as {
-        definition: TaskDefinition;
+        definition: LegacyTaskDefinition;
       };
       assert.deepEqual(definition.recurrence, recurrence);
       assert.deepEqual(definition.assignment, {
@@ -909,7 +910,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const saved = await handleSaveTask(
       req("http://familyos.test/api/tasks", {
@@ -926,7 +927,9 @@ describe("Tasks HTTP", () => {
       }),
     );
     assert.equal(saved.status, 200);
-    const body = (await saved.json()) as { definition: TaskDefinition };
+    const body = (await saved.json()) as {
+      definition: LegacyTaskDefinition;
+    };
     assert.equal(body.definition.id, definition.id);
     assert.equal(body.definition.lineage, definition.lineage);
     assert.equal(body.definition.retiredAt, null);
@@ -957,7 +960,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const saved = await handleSaveTask(
       req("http://familyos.test/api/tasks", {
@@ -973,7 +976,9 @@ describe("Tasks HTTP", () => {
       }),
     );
     assert.equal(saved.status, 200);
-    const body = (await saved.json()) as { definition: TaskDefinition };
+    const body = (await saved.json()) as {
+      definition: LegacyTaskDefinition;
+    };
     assert.notEqual(body.definition.id, definition.id);
     assert.equal(body.definition.lineage, definition.lineage);
     assert.equal(body.definition.title, "Kitchen");
@@ -1026,7 +1031,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const { definition } = (await created.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const before = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
@@ -1060,7 +1065,9 @@ describe("Tasks HTTP", () => {
         }),
       }),
     );
-    const body = (await saved.json()) as { definition: TaskDefinition };
+    const body = (await saved.json()) as {
+      definition: LegacyTaskDefinition;
+    };
     assert.deepEqual(body.definition.assignment, {
       kind: "rotation",
       order: ["ellie", "luke", "dad"],
@@ -1099,7 +1106,9 @@ describe("Tasks HTTP", () => {
         }),
       }),
     );
-    const live = (await titleOnly.json()) as { definition: TaskDefinition };
+    const live = (await titleOnly.json()) as {
+      definition: LegacyTaskDefinition;
+    };
     await handleSaveTask(
       req("http://familyos.test/api/tasks", {
         method: "PUT",
@@ -1125,7 +1134,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const replaced = (await replacedCreate.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const retired = await handleSaveTask(
       req("http://familyos.test/api/tasks", {
@@ -1141,7 +1150,7 @@ describe("Tasks HTTP", () => {
       }),
     );
     const retiredBody = (await retired.json()) as {
-      definition: TaskDefinition;
+      definition: LegacyTaskDefinition;
     };
     const today = (
       (await (
@@ -1466,7 +1475,7 @@ describe("Tasks HTTP", () => {
         }),
       }),
     );
-    const definition = (await created.json()).definition as TaskDefinition;
+    const definition = (await created.json()).definition as BountyDefinition;
     const bountyView = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
@@ -1568,7 +1577,7 @@ describe("Tasks HTTP", () => {
         }),
       }),
     );
-    const definition = (await created.json()).definition as TaskDefinition;
+    const definition = (await created.json()).definition as BountyDefinition;
     const available = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;

@@ -9,6 +9,7 @@ import {
   type CreateTaskDraft,
   type EventReceipt,
   isRecord,
+  type LegacyTaskDefinition,
   type LocalDate,
   newTaskId,
   parseAssignment,
@@ -22,7 +23,6 @@ import {
   parseTaskType,
   planDefinitionSave,
   type StarAdjustment,
-  type TaskDefinition,
   type TaskEvent,
   type TaskId,
 } from "./types";
@@ -166,7 +166,7 @@ function parseJson(raw: unknown): unknown {
   }
 }
 
-function definitionFromRow(row: Record<string, unknown>): TaskDefinition {
+function definitionFromRow(row: Record<string, unknown>): LegacyTaskDefinition {
   const id = parseTaskId(row.id);
   const lineage = parseLineageId(row.lineage);
   const title = typeof row.title === "string" ? row.title : "";
@@ -244,7 +244,7 @@ function adjustmentFromRow(row: Record<string, unknown>): StarAdjustment {
   return { id, member, delta, reason, at };
 }
 
-export function insertDefinition(definition: TaskDefinition): void {
+export function insertDefinition(definition: LegacyTaskDefinition): void {
   tasksDatabase()
     .prepare(
       `INSERT INTO definitions
@@ -264,7 +264,7 @@ export function insertDefinition(definition: TaskDefinition): void {
     );
 }
 
-function definitionById(id: TaskId): TaskDefinition | null {
+function definitionById(id: TaskId): LegacyTaskDefinition | null {
   const row = tasksDatabase()
     .prepare("SELECT * FROM definitions WHERE id = ?")
     .get(id);
@@ -286,7 +286,7 @@ export function saveDefinition(input: {
   id: TaskId;
   draft: CreateTaskDraft;
   today: LocalDate;
-}): TaskDefinition {
+}): LegacyTaskDefinition {
   const current = definitionById(input.id);
   if (!current || current.retiredAt !== null) {
     throw new Error("task not found");
@@ -322,7 +322,7 @@ export function saveDefinition(input: {
   return plan.replacement;
 }
 
-export function loadDefinitions(): TaskDefinition[] {
+export function loadDefinitions(): LegacyTaskDefinition[] {
   const rows = tasksDatabase()
     .prepare("SELECT * FROM definitions ORDER BY creation_order")
     .all();
@@ -419,7 +419,7 @@ export function applyEvent(event: TaskEvent): EventReceipt {
 }
 
 export function loadStore(): {
-  definitions: TaskDefinition[];
+  definitions: LegacyTaskDefinition[];
   events: TaskEvent[];
   adjustments: StarAdjustment[];
 } {
