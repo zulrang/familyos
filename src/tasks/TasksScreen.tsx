@@ -303,7 +303,6 @@ export function TasksScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
-  const [tasksLoaded, setTasksLoaded] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
   const [skipping, setSkipping] = useState<Occurrence | null>(null);
@@ -338,7 +337,6 @@ export function TasksScreen() {
     }
     const view = (await res.json()) as TasksViewRead;
     setTasks(view);
-    setTasksLoaded(true);
     setError(null);
     return view;
   }, []);
@@ -357,9 +355,7 @@ export function TasksScreen() {
 
   const members = settings ? activeMembers(settings.members) : [];
   const bountyStartsOn = settings
-    ? tasksLoaded
-      ? tasks.today
-      : parseLocalDate(msToZonedDate(now.getTime(), settings.timeZone))
+    ? parseLocalDate(msToZonedDate(now.getTime(), settings.timeZone))
     : null;
 
   function beginBountyMutation(claim: ClaimId): boolean {
