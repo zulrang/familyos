@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -26,7 +27,7 @@ afterEach(() => {
 
 test("parents can manage available, completed, and retired Bounty definitions", async () => {
   const user = userEvent.setup();
-  const definitions = [
+  const initialDefinitions = [
     {
       kind: "bounty",
       id: "a".repeat(32),
@@ -66,7 +67,7 @@ test("parents can manage available, completed, and retired Bounty definitions", 
       kind: "claimed-bounty",
       claim: {
         id: "d".repeat(32),
-        offering: { kind: "once", definition: definitions[1]?.id },
+        offering: { kind: "once", definition: initialDefinitions[1]?.id },
         member: "dad",
         scheduledOn: "2026-09-10",
         title: "Clean windows",
@@ -88,7 +89,7 @@ test("parents can manage available, completed, and retired Bounty definitions", 
       kind: "claimed-bounty",
       claim: {
         id: "f".repeat(32),
-        offering: { kind: "once", definition: definitions[2]?.id },
+        offering: { kind: "once", definition: initialDefinitions[2]?.id },
         member: "dad",
         scheduledOn: "2026-09-11",
         title: "Old errand",
@@ -98,34 +99,51 @@ test("parents can manage available, completed, and retired Bounty definitions", 
       state: { kind: "unfinished" },
     },
   ];
+  const afterEdit = initialDefinitions.map((definition) =>
+    definition.id === "a".repeat(32)
+      ? { ...definition, title: "Polish car", stars: 8, revision: 1 }
+      : definition,
+  );
+  const afterConcurrentEdit = afterEdit.map((definition) =>
+    definition.id === "b".repeat(32)
+      ? { ...definition, stars: 9, revision: 3 }
+      : definition,
+  );
+  const afterRetire = afterConcurrentEdit.map((definition) =>
+    definition.id === "b".repeat(32)
+      ? { ...definition, revision: 4, retiredAt: "2026-09-13" }
+      : definition,
+  );
+  const taskReads = [
+    initialDefinitions,
+    afterEdit,
+    afterConcurrentEdit,
+    afterRetire,
+  ];
+  const postResponses = [
+    Response.json({
+      receipt: { status: "accepted", definition: afterEdit[0] },
+    }),
+    Response.json(
+      { error: "This Bounty changed. Refresh before saving." },
+      { status: 409 },
+    ),
+    Response.json({
+      receipt: { status: "accepted", definition: afterRetire[1] },
+    }),
+  ];
   const commands: Record<string, unknown>[] = [];
-  let retireFailures = 1;
+  let taskRead = 0;
+  let postResponse = 0;
   vi.stubGlobal("confirm", () => true);
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     if (init.method === "POST") {
       const command = JSON.parse(String(init.body)) as Record<string, unknown>;
       commands.push(command);
-      const definition = definitions.find(
-        (row) => row.id === command.definition,
-      );
-      if (definition && command.kind === "edit-bounty") {
-        const draft = command.draft as { title: string; stars: number };
-        definition.title = draft.title;
-        definition.stars = draft.stars;
-        definition.revision += 1;
-      }
-      if (definition && command.kind === "retire-bounty") {
-        if (retireFailures > 0) {
-          retireFailures -= 1;
-          return Response.json(
-            { error: "This Bounty changed. Refresh before saving." },
-            { status: 409 },
-          );
-        }
-        definition.retiredAt = "2026-09-13";
-        definition.revision += 1;
-      }
-      return Response.json({ receipt: { status: "accepted", definition } });
+      const response = postResponses[postResponse];
+      postResponse += 1;
+      if (!response) throw new Error("Unexpected Bounty command");
+      return response;
     }
     if (url.endsWith("/members")) {
       return Response.json({
@@ -135,9 +153,12 @@ test("parents can manage available, completed, and retired Bounty definitions", 
         version: 1,
       });
     }
+    const bountyDefinitions = taskReads[taskRead];
+    taskRead += 1;
+    if (!bountyDefinitions) throw new Error("Unexpected Bounty refresh");
     return Response.json({
       definitions: [],
-      bountyDefinitions: definitions,
+      bountyDefinitions,
       bountyClaims: claims,
       events: [],
       originalEvents: [],
@@ -196,18 +217,103 @@ test("parents can manage available, completed, and retired Bounty definitions", 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "This Bounty changed",
   );
-  expect(screen.getByText("Retry retire")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "Cancel retry" }));
   expect(
-    screen.getByRole("button", { name: "Retire Clean windows" }),
+    screen.getByRole("button", { name: "Retry retire Clean windows" }),
+  ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Cancel retry" }));
+  await user.click(screen.getByRole("button", { name: "Refresh Bounties" }));
+  expect(
+    await screen.findByRole("button", { name: "Retire Clean windows" }),
   ).toBeVisible();
   await user.click(
     screen.getByRole("button", { name: "Retire Clean windows" }),
   );
   await waitFor(() => expect(commands).toHaveLength(3));
   expect(commands[2]?.requestId).not.toBe(commands[1]?.requestId);
+  expect(commands[2]?.revision).toBe(3);
   expect(
     screen.queryByRole("button", { name: "Edit Clean windows" }),
   ).not.toBeInTheDocument();
   expect(screen.getAllByText("Retired")).toHaveLength(2);
+});
+
+test("one retirement command owns duplicate taps and blocks refresh until it settles", async () => {
+  const definition = {
+    kind: "bounty",
+    id: "a".repeat(32),
+    lineage: "1".repeat(32),
+    type: "chore",
+    title: "Wash car",
+    stars: 4,
+    recurrence: { kind: "once" },
+    revision: 0,
+    retiredAt: null,
+  };
+  const taskReads = [
+    [definition],
+    [{ ...definition, revision: 1, retiredAt: "2026-09-13" }],
+  ];
+  let resolveRetirement: ((response: Response) => void) | undefined;
+  const retirementResponse = new Promise<Response>((resolve) => {
+    resolveRetirement = resolve;
+  });
+  let taskRead = 0;
+  let commands = 0;
+  let confirmations = 0;
+  vi.stubGlobal("confirm", () => {
+    confirmations += 1;
+    return true;
+  });
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    if (init.method === "POST") {
+      commands += 1;
+      return retirementResponse;
+    }
+    if (url.endsWith("/members")) {
+      return Response.json({
+        members: [
+          { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        ],
+        version: 1,
+      });
+    }
+    const bountyDefinitions = taskReads[taskRead];
+    taskRead += 1;
+    if (!bountyDefinitions) throw new Error("Unexpected Bounty refresh");
+    return Response.json({
+      definitions: [],
+      bountyDefinitions,
+      bountyClaims: [],
+      events: [],
+      originalEvents: [],
+      corrections: [],
+      adjustments: [],
+      balances: [],
+      today: "2026-09-13",
+    });
+  });
+
+  render(<AdminBounties />);
+  await screen.findByRole("heading", { name: "Wash car" });
+  const retire = screen.getByRole("button", { name: "Retire Wash car" });
+  const refresh = screen.getByRole("button", { name: "Refresh Bounties" });
+  act(() => {
+    retire.click();
+    retire.click();
+    refresh.click();
+  });
+  expect(confirmations).toBe(1);
+  expect(commands).toBe(1);
+  expect(refresh).toBeDisabled();
+
+  resolveRetirement?.(
+    Response.json({
+      receipt: {
+        status: "accepted",
+        definition: taskReads[1]?.[0],
+      },
+    }),
+  );
+  expect(await screen.findByRole("status")).toHaveTextContent("Bounty retired");
+  expect(taskRead).toBe(2);
 });

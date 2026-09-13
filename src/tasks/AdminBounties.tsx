@@ -147,6 +147,8 @@ export function AdminBounties() {
   const { state, reload } = useAdminData(readTaskAdminData);
   const [editor, setEditor] = useState<BountyDefinition | null>(null);
   const [query, setQuery] = useState("");
+  const retirementCommand = useRef<RetireBountyCommand | null>(null);
+  const retirementSaving = useRef(false);
   const [retirement, setRetirement] = useState<
     | { status: "saving"; command: RetireBountyCommand }
     | { status: "retry"; command: RetireBountyCommand }
@@ -158,10 +160,10 @@ export function AdminBounties() {
   } | null>(null);
 
   async function retire(bounty: BountyDefinition) {
+    if (retirementSaving.current) return;
     const retry =
-      retirement?.status === "retry" &&
-      retirement.command.definition === bounty.id
-        ? retirement.command
+      retirementCommand.current?.definition === bounty.id
+        ? retirementCommand.current
         : null;
     if (
       !retry &&
@@ -177,6 +179,8 @@ export function AdminBounties() {
       definition: bounty.id,
       revision: bounty.revision,
     };
+    retirementCommand.current = command;
+    retirementSaving.current = true;
     setRetirement({ status: "saving", command });
     setNotice(null);
     try {
@@ -186,6 +190,7 @@ export function AdminBounties() {
         message: "Bounty retired. History preserved.",
       });
       await reload();
+      retirementCommand.current = null;
       setRetirement(null);
     } catch (error) {
       setRetirement({ status: "retry", command });
@@ -194,6 +199,8 @@ export function AdminBounties() {
         message:
           error instanceof Error ? error.message : "Could not retire Bounty.",
       });
+    } finally {
+      retirementSaving.current = false;
     }
   }
 
@@ -313,7 +320,12 @@ export function AdminBounties() {
                       type="button"
                       className={styles.danger}
                       disabled={retirement?.status === "saving"}
-                      aria-label={`Retire ${bounty.title}`}
+                      aria-label={`${
+                        retirement?.status === "retry" &&
+                        retirement.command.definition === bounty.id
+                          ? "Retry retire"
+                          : "Retire"
+                      } ${bounty.title}`}
                       onClick={() => void retire(bounty)}
                     >
                       {retirement?.command.definition === bounty.id
@@ -328,6 +340,7 @@ export function AdminBounties() {
                         type="button"
                         className={styles.quiet}
                         onClick={() => {
+                          retirementCommand.current = null;
                           setRetirement(null);
                           setNotice(null);
                         }}
@@ -343,7 +356,10 @@ export function AdminBounties() {
           <button
             type="button"
             className={styles.quiet}
+            disabled={retirement?.status === "saving"}
             onClick={() => {
+              if (retirementSaving.current) return;
+              retirementCommand.current = null;
               setRetirement(null);
               setNotice(null);
               void reload();
