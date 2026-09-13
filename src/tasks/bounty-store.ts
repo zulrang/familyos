@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { MemberId } from "@/members/members";
+import type { HouseholdMember, MemberId } from "@/members/members";
 import type { BountyAdminCommand } from "./admin-types";
 import {
   type AvailableBounty,
@@ -639,9 +639,9 @@ export function claimBounty(input: {
   db: DatabaseSync;
   command: Extract<BountyCommand, { kind: "claim-bounty" }>;
   today: LocalDate;
-  memberIsActive: boolean;
+  members: readonly HouseholdMember[];
 }): BountyCommandReceipt {
-  const { db, command, today, memberIsActive } = input;
+  const { db, command, today, members } = input;
   db.exec("BEGIN IMMEDIATE");
   try {
     const replay = priorReceipt(db, command);
@@ -654,7 +654,10 @@ export function claimBounty(input: {
         "This Bounty changed. Refresh before claiming it.",
       );
     }
-    if (!memberIsActive) {
+    if (
+      members.find((member) => member.id === command.member)?.status !==
+      "active"
+    ) {
       throw new InactiveBountyMemberError("active member required");
     }
     const row = db

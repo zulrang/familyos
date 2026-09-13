@@ -145,6 +145,7 @@ describe("parent administration", () => {
     expect(loadDefinitions()).toHaveLength(0);
   });
   test("Bounty edits are revision-guarded, retry-safe, and change only future claims", async () => {
+    const members = (await readHousehold()).members;
     const bountyDraft = parseTaskCreateDraft({
       kind: "bounty",
       title: "Wash car",
@@ -189,7 +190,7 @@ describe("parent administration", () => {
         db: tasksDatabase(),
         command: staleClaim,
         today,
-        memberIsActive: true,
+        members,
       }),
     ).toThrow("no longer available");
 
@@ -207,7 +208,7 @@ describe("parent administration", () => {
       db: tasksDatabase(),
       command: currentClaim,
       today,
-      memberIsActive: true,
+      members,
     });
     if (!("result" in claimed)) return;
     expect(claimed.result).toMatchObject({
@@ -232,6 +233,7 @@ describe("parent administration", () => {
     });
   });
   test("retiring a Bounty preserves claims while stopping every reopened offering", async () => {
+    const members = (await readHousehold()).members;
     const bountyDraft = parseTaskCreateDraft({
       kind: "bounty",
       title: "Clear garage",
@@ -258,7 +260,7 @@ describe("parent administration", () => {
       db: tasksDatabase(),
       command: claimCommand,
       today,
-      memberIsActive: true,
+      members,
     });
     if (!("result" in claimReceipt)) return;
     if (claimReceipt.result.kind !== "claimed") return;
@@ -311,7 +313,7 @@ describe("parent administration", () => {
       db: tasksDatabase(),
       command: releasableCommand,
       today,
-      memberIsActive: true,
+      members,
     });
     if (!("result" in releasableClaim)) return;
     if (releasableClaim.result.kind !== "claimed") return;
@@ -371,7 +373,7 @@ describe("parent administration", () => {
         db: tasksDatabase(),
         command: staleClaim,
         today,
-        memberIsActive: true,
+        members,
       }),
     ).toThrow("no longer available");
 
@@ -476,7 +478,7 @@ describe("parent administration", () => {
       db: tasksDatabase(),
       command: claimCommand,
       today,
-      memberIsActive: true,
+      members: (await readHousehold()).members,
     });
     expect(
       (

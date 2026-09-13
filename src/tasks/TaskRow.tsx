@@ -23,7 +23,7 @@ export function TaskRow({
   stars,
   status,
   onComplete,
-  completionPending = false,
+  mutationPending = false,
   onClaim,
   onCancelClaim,
   onRelease,
@@ -35,7 +35,7 @@ export function TaskRow({
   stars?: number;
   status: TaskRowStatus;
   onComplete?: () => void;
-  completionPending?: boolean;
+  mutationPending?: boolean;
   onClaim?: () => void;
   onCancelClaim?: () => void;
   onRelease?: () => void;
@@ -50,7 +50,7 @@ export function TaskRow({
           <input
             type="checkbox"
             checked={done}
-            disabled={done || completionPending}
+            disabled={done || mutationPending}
             aria-label={label}
             onChange={onComplete}
           />
@@ -106,6 +106,7 @@ export function TaskRow({
           type="button"
           aria-label={`Release ${label}`}
           onClick={onRelease}
+          disabled={mutationPending}
           className={styles.skip}
         >
           Release
