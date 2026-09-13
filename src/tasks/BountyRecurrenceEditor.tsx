@@ -69,10 +69,12 @@ function selectedCadence(
 export function BountyRecurrenceEditor({
   draft,
   defaultStartsOn,
+  disabled = false,
   onChange,
 }: {
   draft: BountyRecurrenceDraft;
   defaultStartsOn: LocalDate;
+  disabled?: boolean;
   onChange: (draft: BountyRecurrenceDraft) => void;
 }) {
   const selected = selectedCadence(draft);
@@ -80,8 +82,21 @@ export function BountyRecurrenceEditor({
     draft.kind === "recurring" && draft.cadence.kind === "weekly"
       ? { startsOn: draft.startsOn, days: draft.cadence.days }
       : null;
+  const validationError =
+    draft.kind !== "recurring" || parseBountyRecurrenceDraft(draft)
+      ? null
+      : !draft.startsOn
+        ? "Choose a valid starting date."
+        : draft.cadence.kind === "weekly" && draft.cadence.days.length === 0
+          ? "Choose at least one weekday."
+          : draft.cadence.kind === "monthly"
+            ? "Choose a day from 1 through 28."
+            : "Choose a valid starting date.";
   return (
-    <fieldset className={`${styles.details} ${styles.recurrenceEditor}`}>
+    <fieldset
+      className={`${styles.details} ${styles.recurrenceEditor}`}
+      disabled={disabled}
+    >
       <legend>Schedule</legend>
       <div className={styles.scheduleChoices}>
         <button
@@ -201,6 +216,7 @@ export function BountyRecurrenceEditor({
           />
         </label>
       ) : null}
+      {validationError ? <p role="alert">{validationError}</p> : null}
     </fieldset>
   );
 }

@@ -2,6 +2,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type { HouseholdMember, MemberId } from "@/members/members";
 import type { BountyAdminCommand } from "./admin-types";
 import {
+  type BountyRecurrence,
+  parseBountyRecurrence,
+} from "./bounty-calendar";
+import { currentOfferingKey, sameOfferingKey } from "./bounty-offerings";
+import {
   type AvailableBounty,
   type BountyClaim,
   type BountyCommand,
@@ -19,6 +24,7 @@ import {
   newCompletionId,
   newOfferingId,
   nowInstant,
+  type OfferingKey,
   parseBountyCommandReceipt,
   parseBountyDefinition,
   parseClaimId,
@@ -122,25 +128,42 @@ const BOUNTY_ADMIN_RECEIPTS_V5 = `
       BEGIN SELECT RAISE(ABORT, 'Bounty admin receipts are immutable'); END;
 `;
 
-function createBountyStore(db: DatabaseSync): void {
-  db.exec(`BEGIN IMMEDIATE;
+const BOUNTY_DEFINITIONS_V6 = `
     CREATE TABLE bounty_definitions (
       creation_order INTEGER PRIMARY KEY AUTOINCREMENT,
       id TEXT NOT NULL UNIQUE,
       lineage TEXT NOT NULL,
       title TEXT NOT NULL CHECK (length(trim(title)) > 0),
       type TEXT NOT NULL CHECK (type = 'chore'),
-      recurrence TEXT NOT NULL CHECK (recurrence = 'once'),
+      recurrence TEXT NOT NULL CHECK (recurrence = 'once' OR json_valid(recurrence)),
       stars INTEGER NOT NULL CHECK (stars >= 0 AND stars <= 9007199254740991),
       revision INTEGER NOT NULL CHECK (revision >= 0),
       retired_at TEXT
     );
+`;
+
+const BOUNTY_OFFERINGS_V6 = `
     CREATE TABLE bounty_offerings (
       id TEXT NOT NULL PRIMARY KEY,
-      definition_id TEXT NOT NULL UNIQUE,
-      kind TEXT NOT NULL CHECK (kind = 'once'),
+      definition_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('once', 'recurring')),
+      interval_start TEXT,
+      CHECK (
+        (kind = 'once' AND interval_start IS NULL)
+        OR (kind = 'recurring' AND interval_start IS NOT NULL)
+      ),
       FOREIGN KEY (definition_id) REFERENCES bounty_definitions(id)
     );
+    CREATE UNIQUE INDEX bounty_offerings_once_definition
+      ON bounty_offerings(definition_id) WHERE kind = 'once';
+    CREATE UNIQUE INDEX bounty_offerings_recurring_interval
+      ON bounty_offerings(definition_id, interval_start) WHERE kind = 'recurring';
+`;
+
+function createBountyStore(db: DatabaseSync): void {
+  db.exec(`BEGIN IMMEDIATE;
+    ${BOUNTY_DEFINITIONS_V6}
+    ${BOUNTY_OFFERINGS_V6}
     ${BOUNTY_CLAIMS_V4}
     CREATE TABLE bounty_completions (
       id TEXT NOT NULL PRIMARY KEY,
@@ -167,9 +190,72 @@ function createBountyStore(db: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'bounty receipts are immutable'); END;
     CREATE TRIGGER bounty_receipts_no_delete BEFORE DELETE ON bounty_command_receipts
       BEGIN SELECT RAISE(ABORT, 'bounty receipts are immutable'); END;
-    PRAGMA user_version = 5;
+    PRAGMA user_version = 6;
     COMMIT;
   `);
+}
+
+function migrateBountyDefinitionsAndOfferingsToV6(db: DatabaseSync): void {
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      DROP TRIGGER IF EXISTS bounty_definitions_update_guard;
+      DROP TRIGGER IF EXISTS bounty_definitions_no_delete;
+      DROP TRIGGER IF EXISTS bounty_offerings_no_update;
+      DROP TRIGGER IF EXISTS bounty_offerings_no_delete;
+      CREATE TABLE bounty_definitions_v6 (
+        creation_order INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        lineage TEXT NOT NULL,
+        title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+        type TEXT NOT NULL CHECK (type = 'chore'),
+        recurrence TEXT NOT NULL CHECK (recurrence = 'once' OR json_valid(recurrence)),
+        stars INTEGER NOT NULL CHECK (stars >= 0 AND stars <= 9007199254740991),
+        revision INTEGER NOT NULL CHECK (revision >= 0),
+        retired_at TEXT
+      );
+      INSERT INTO bounty_definitions_v6
+        (creation_order, id, lineage, title, type, recurrence, stars, revision, retired_at)
+        SELECT creation_order, id, lineage, title, type, recurrence, stars, revision, retired_at
+        FROM bounty_definitions;
+      CREATE TABLE bounty_offerings_v6 (
+        id TEXT NOT NULL PRIMARY KEY,
+        definition_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('once', 'recurring')),
+        interval_start TEXT,
+        CHECK (
+          (kind = 'once' AND interval_start IS NULL)
+          OR (kind = 'recurring' AND interval_start IS NOT NULL)
+        ),
+        FOREIGN KEY (definition_id) REFERENCES bounty_definitions_v6(id)
+      );
+      INSERT INTO bounty_offerings_v6 (id, definition_id, kind, interval_start)
+        SELECT id, definition_id, kind, NULL FROM bounty_offerings;
+      DROP TABLE bounty_offerings;
+      DROP TABLE bounty_definitions;
+      ALTER TABLE bounty_definitions_v6 RENAME TO bounty_definitions;
+      ALTER TABLE bounty_offerings_v6 RENAME TO bounty_offerings;
+      CREATE UNIQUE INDEX bounty_offerings_once_definition
+        ON bounty_offerings(definition_id) WHERE kind = 'once';
+      CREATE UNIQUE INDEX bounty_offerings_recurring_interval
+        ON bounty_offerings(definition_id, interval_start) WHERE kind = 'recurring';
+      ${BOUNTY_DEFINITION_TRIGGERS_V5}
+      CREATE TRIGGER bounty_offerings_no_update BEFORE UPDATE ON bounty_offerings
+        BEGIN SELECT RAISE(ABORT, 'bounty offerings are immutable'); END;
+      CREATE TRIGGER bounty_offerings_no_delete BEFORE DELETE ON bounty_offerings
+        BEGIN SELECT RAISE(ABORT, 'bounty offerings cannot be deleted'); END;
+      PRAGMA user_version = 6;
+    `);
+    const foreignKeyError = db.prepare("PRAGMA foreign_key_check").get();
+    if (foreignKeyError)
+      throw new Error("Bounty recurrence migration broke a foreign key");
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
 }
 
 function migrateBountyDefinitionsToV5(db: DatabaseSync): void {
@@ -265,6 +351,11 @@ export function migrateBountyStore(db: DatabaseSync): void {
     .all()
     .some((column) => column.name === "revision");
   if (!hasDefinitionRevision) migrateBountyDefinitionsToV5(db);
+  const hasIntervalStart = db
+    .prepare("PRAGMA table_info(bounty_offerings)")
+    .all()
+    .some((column) => column.name === "interval_start");
+  if (!hasIntervalStart) migrateBountyDefinitionsAndOfferingsToV6(db);
 }
 
 function bountyDefinitionFromRow(
@@ -277,12 +368,21 @@ function bountyDefinitionFromRow(
   const title = parseTaskTitle(row.title);
   const stars = parseStarAmount(row.stars);
   const revision = parseDefinitionRevision(row.revision);
+  let recurrence: BountyRecurrence | null = null;
+  if (row.recurrence === "once") recurrence = { kind: "once" };
+  else if (typeof row.recurrence === "string") {
+    try {
+      recurrence = parseBountyRecurrence(JSON.parse(row.recurrence));
+    } catch {
+      recurrence = null;
+    }
+  }
   if (
     !id ||
     !lineage ||
     !title ||
     row.type !== "chore" ||
-    row.recurrence !== "once" ||
+    !recurrence ||
     stars === null ||
     revision === null ||
     (row.retired_at !== null && !retiredAt)
@@ -296,7 +396,7 @@ function bountyDefinitionFromRow(
     title,
     type: "chore",
     stars,
-    recurrence: { kind: "once" },
+    recurrence,
     revision,
     retiredAt,
   };
@@ -312,6 +412,16 @@ function claimFromRow(row: Record<string, unknown>): {
   const title = parseTaskTitle(row.title);
   const stars = parseStarAmount(row.stars);
   const revision = parseClaimRevision(row.revision);
+  const intervalStart =
+    row.offering_kind === "recurring"
+      ? parseLocalDate(row.interval_start)
+      : null;
+  const offering: OfferingKey | null =
+    definition && row.offering_kind === "once" && row.interval_start === null
+      ? { kind: "once", definition }
+      : definition && row.offering_kind === "recurring" && intervalStart
+        ? { kind: "recurring", definition, intervalStart }
+        : null;
   if (
     !id ||
     !definition ||
@@ -320,14 +430,15 @@ function claimFromRow(row: Record<string, unknown>): {
     !row.member ||
     !title ||
     stars === null ||
-    revision === null
+    revision === null ||
+    !offering
   ) {
     throw new Error("corrupt Bounty claim row");
   }
   return {
     claim: {
       id,
-      offering: { kind: "once", definition },
+      offering,
       member: row.member,
       scheduledOn,
       title,
@@ -355,27 +466,56 @@ function completionFromRow(row: Record<string, unknown>): BountyCompletion {
   return { id, claim, by: row.member, at, creditedStars };
 }
 
+function materializeCurrentOffering(
+  db: DatabaseSync,
+  definition: BountyDefinition,
+  today: LocalDate,
+): OfferingKey | null {
+  const offering = currentOfferingKey(definition, today);
+  if (!offering) return null;
+  db.prepare(
+    `INSERT OR IGNORE INTO bounty_offerings
+      (id, definition_id, kind, interval_start) VALUES (?, ?, ?, ?)`,
+  ).run(
+    newOfferingId(),
+    offering.definition,
+    offering.kind,
+    offering.kind === "recurring" ? offering.intervalStart : null,
+  );
+  return offering;
+}
+
+export function reconcileBountyOfferings(
+  db: DatabaseSync,
+  today: LocalDate,
+): void {
+  for (const definition of loadBountyDefinitions(db)) {
+    materializeCurrentOffering(db, definition, today);
+  }
+}
+
 export function createBounty(
   db: DatabaseSync,
   draft: CreateBountyDraft,
+  today: LocalDate,
 ): BountyDefinition {
   const definition = createBountyDefinition(draft);
-  const offering = newOfferingId();
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(
       `INSERT INTO bounty_definitions
         (id, lineage, title, type, recurrence, stars, revision, retired_at)
-       VALUES (?, ?, ?, 'chore', 'once', ?, 0, NULL)`,
+       VALUES (?, ?, ?, 'chore', ?, ?, 0, NULL)`,
     ).run(
       definition.id,
       definition.lineage,
       definition.title,
+      definition.recurrence.kind === "once"
+        ? "once"
+        : JSON.stringify(definition.recurrence),
       definition.stars,
     );
-    db.prepare(
-      "INSERT INTO bounty_offerings (id, definition_id, kind) VALUES (?, ?, 'once')",
-    ).run(offering, definition.id);
+    materializeCurrentOffering(db, definition, today);
     db.exec("COMMIT");
     return definition;
   } catch (error) {
@@ -494,10 +634,17 @@ export function taskDefinitions(
   ];
 }
 
-export function loadAvailableBounties(db: DatabaseSync): AvailableBounty[] {
+export function loadAvailableBounties(
+  db: DatabaseSync,
+  today: LocalDate,
+): AvailableBounty[] {
+  reconcileBountyOfferings(db, today);
   return db
     .prepare(
-      `SELECT o.id, o.definition_id, d.title, d.stars, d.revision
+      `SELECT o.id AS offering_id, o.definition_id,
+              o.kind AS offering_kind, o.interval_start,
+              d.id, d.lineage, d.title, d.type, d.recurrence, d.stars,
+              d.revision, d.retired_at
        FROM bounty_offerings o
        JOIN bounty_definitions d ON d.id = o.definition_id
        WHERE d.retired_at IS NULL AND NOT EXISTS (
@@ -507,8 +654,9 @@ export function loadAvailableBounties(db: DatabaseSync): AvailableBounty[] {
        ORDER BY d.creation_order`,
     )
     .all()
-    .map((row) => {
-      const id = parseOfferingId(row.id);
+    .flatMap((row) => {
+      if (!isRecord(row)) throw new Error("corrupt Bounty offering row");
+      const id = parseOfferingId(row.offering_id);
       const definition = parseTaskId(row.definition_id);
       const title = parseTaskTitle(row.title);
       const stars = parseStarAmount(row.stars);
@@ -522,22 +670,40 @@ export function loadAvailableBounties(db: DatabaseSync): AvailableBounty[] {
       ) {
         throw new Error("corrupt Bounty offering row");
       }
-      return {
-        kind: "available" as const,
-        id,
-        offering: { kind: "once" as const, definition },
-        title,
-        stars,
-        definitionRevision,
-      };
+      const bounty = bountyDefinitionFromRow(row);
+      const intervalStart =
+        row.offering_kind === "recurring"
+          ? parseLocalDate(row.interval_start)
+          : null;
+      const offering: OfferingKey | null =
+        row.offering_kind === "once"
+          ? { kind: "once", definition }
+          : intervalStart
+            ? { kind: "recurring", definition, intervalStart }
+            : null;
+      const current = currentOfferingKey(bounty, today);
+      if (!offering || !current || !sameOfferingKey(offering, current))
+        return [];
+      return [
+        {
+          kind: "available" as const,
+          id,
+          offering,
+          title,
+          stars,
+          definitionRevision,
+        },
+      ];
     });
 }
 
 export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
   return db
     .prepare(
-      `SELECT c.*, x.id AS completion_id, x.completed_at, x.credited_stars
+      `SELECT c.*, o.kind AS offering_kind, o.interval_start,
+              x.id AS completion_id, x.completed_at, x.credited_stars
        FROM bounty_claims c
+       JOIN bounty_offerings o ON o.id = c.offering_id
        LEFT JOIN bounty_completions x ON x.claim_id = c.id
        ORDER BY c.rowid`,
     )
@@ -660,17 +826,38 @@ export function claimBounty(input: {
     ) {
       throw new InactiveBountyMemberError("active member required");
     }
-    const row = db
+    const definitionRow = db
       .prepare(
-        `SELECT o.id AS offering_id, d.id AS definition_id, d.title, d.stars
-         FROM bounty_offerings o
-         JOIN bounty_definitions d ON d.id = o.definition_id
-         WHERE d.id = ? AND d.revision = ? AND d.retired_at IS NULL AND NOT EXISTS (
-           SELECT 1 FROM bounty_claims c
-           WHERE c.offering_id = o.id AND c.state != 'released'
-         )`,
+        "SELECT * FROM bounty_definitions WHERE id = ? AND revision = ? AND retired_at IS NULL",
       )
       .get(command.offering.definition, command.definitionRevision);
+    if (!isRecord(definitionRow))
+      throw new BountyStoreError("This Bounty is no longer available.");
+    const definition = bountyDefinitionFromRow(definitionRow);
+    const current = currentOfferingKey(definition, today);
+    if (!current || !sameOfferingKey(current, command.offering)) {
+      throw new BountyStoreError("This Bounty offering has expired.");
+    }
+    const row = db
+      .prepare(
+        `SELECT o.id AS offering_id, d.id AS definition_id, d.title, d.stars,
+                o.kind AS offering_kind, o.interval_start
+         FROM bounty_offerings o
+         JOIN bounty_definitions d ON d.id = o.definition_id
+         WHERE d.id = ? AND d.revision = ? AND o.kind = ?
+           AND o.interval_start IS ? AND d.retired_at IS NULL AND NOT EXISTS (
+             SELECT 1 FROM bounty_claims c
+             WHERE c.offering_id = o.id AND c.state != 'released'
+           )`,
+      )
+      .get(
+        command.offering.definition,
+        command.definitionRevision,
+        command.offering.kind,
+        command.offering.kind === "recurring"
+          ? command.offering.intervalStart
+          : null,
+      );
     if (!row) throw new BountyStoreError("This Bounty is no longer available.");
     const claimId = newClaimId();
     db.prepare(
@@ -689,7 +876,11 @@ export function claimBounty(input: {
     );
     const claimed = claimFromRow(
       db
-        .prepare("SELECT * FROM bounty_claims WHERE id = ?")
+        .prepare(
+          `SELECT c.*, o.kind AS offering_kind, o.interval_start
+           FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
+           WHERE c.id = ?`,
+        )
         .get(claimId) as Record<string, unknown>,
     );
     const receipt: BountyCommandReceipt = {
@@ -785,7 +976,11 @@ function releaseClaimRow(
   ).run(current.claim.id);
   const released = claimFromRow(
     db
-      .prepare("SELECT * FROM bounty_claims WHERE id = ?")
+      .prepare(
+        `SELECT c.*, o.kind AS offering_kind, o.interval_start
+         FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
+         WHERE c.id = ?`,
+      )
       .get(current.claim.id) as Record<string, unknown>,
   );
   return released;
@@ -804,7 +999,11 @@ export function releaseBounty(input: {
       return replay;
     }
     const row = db
-      .prepare("SELECT * FROM bounty_claims WHERE id = ?")
+      .prepare(
+        `SELECT c.*, o.kind AS offering_kind, o.interval_start
+         FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
+         WHERE c.id = ?`,
+      )
       .get(command.claim);
     if (
       !row ||
@@ -840,7 +1039,11 @@ export function releaseBountiesForRetiredMembers(
 ): void {
   if (retiredMembers.size === 0) return;
   const claims = db
-    .prepare("SELECT * FROM bounty_claims WHERE state = 'unfinished'")
+    .prepare(
+      `SELECT c.*, o.kind AS offering_kind, o.interval_start
+       FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
+       WHERE c.state = 'unfinished'`,
+    )
     .all()
     .filter((row) => retiredMembers.has(String(row.member)));
   for (const row of claims) releaseClaimRow(db, row as Record<string, unknown>);

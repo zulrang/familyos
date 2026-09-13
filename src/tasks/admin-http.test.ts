@@ -154,8 +154,8 @@ describe("parent administration", () => {
     });
     expect(bountyDraft?.kind).toBe("bounty");
     if (!bountyDraft || bountyDraft.kind !== "bounty") return;
-    const definition = createBounty(tasksDatabase(), bountyDraft);
-    const staleOffering = loadAvailableBounties(tasksDatabase())[0];
+    const definition = createBounty(tasksDatabase(), bountyDraft, today);
+    const staleOffering = loadAvailableBounties(tasksDatabase(), today)[0];
     expect(staleOffering?.definitionRevision).toBe(0);
 
     const edit = {
@@ -194,7 +194,7 @@ describe("parent administration", () => {
       }),
     ).toThrow("no longer available");
 
-    const currentOffering = loadAvailableBounties(tasksDatabase())[0];
+    const currentOffering = loadAvailableBounties(tasksDatabase(), today)[0];
     const currentClaim = parseBountyCommand({
       kind: "claim-bounty",
       requestId: crypto.randomUUID(),
@@ -243,10 +243,11 @@ describe("parent administration", () => {
     expect(bountyDraft?.kind).toBe("bounty");
     if (!bountyDraft || bountyDraft.kind !== "bounty") return;
 
-    const completable = createBounty(tasksDatabase(), bountyDraft);
-    const completableOffering = loadAvailableBounties(tasksDatabase()).find(
-      (row) => row.offering.definition === completable.id,
-    );
+    const completable = createBounty(tasksDatabase(), bountyDraft, today);
+    const completableOffering = loadAvailableBounties(
+      tasksDatabase(),
+      today,
+    ).find((row) => row.offering.definition === completable.id);
     const claimCommand = parseBountyCommand({
       kind: "claim-bounty",
       requestId: crypto.randomUUID(),
@@ -293,13 +294,18 @@ describe("parent administration", () => {
     completeBounty({ db: tasksDatabase(), command: completeCommand });
     expect(balance("a")).toBe(6);
 
-    const releasable = createBounty(tasksDatabase(), {
-      ...bountyDraft,
-      title: "Clear shed" as typeof bountyDraft.title,
-    });
-    const releasableOffering = loadAvailableBounties(tasksDatabase()).find(
-      (row) => row.offering.definition === releasable.id,
+    const releasable = createBounty(
+      tasksDatabase(),
+      {
+        ...bountyDraft,
+        title: "Clear shed" as typeof bountyDraft.title,
+      },
+      today,
     );
+    const releasableOffering = loadAvailableBounties(
+      tasksDatabase(),
+      today,
+    ).find((row) => row.offering.definition === releasable.id);
     const releasableCommand = parseBountyCommand({
       kind: "claim-bounty",
       requestId: crypto.randomUUID(),
@@ -337,16 +343,20 @@ describe("parent administration", () => {
     if (!releaseCommand || releaseCommand.kind !== "release-bounty") return;
     releaseBounty({ db: tasksDatabase(), command: releaseCommand });
     expect(
-      loadAvailableBounties(tasksDatabase()).some(
+      loadAvailableBounties(tasksDatabase(), today).some(
         (row) => row.offering.definition === releasable.id,
       ),
     ).toBe(false);
 
-    const neverClaimed = createBounty(tasksDatabase(), {
-      ...bountyDraft,
-      title: "Clear attic" as typeof bountyDraft.title,
-    });
-    const staleOffering = loadAvailableBounties(tasksDatabase()).find(
+    const neverClaimed = createBounty(
+      tasksDatabase(),
+      {
+        ...bountyDraft,
+        title: "Clear attic" as typeof bountyDraft.title,
+      },
+      today,
+    );
+    const staleOffering = loadAvailableBounties(tasksDatabase(), today).find(
       (row) => row.offering.definition === neverClaimed.id,
     );
     expect(
@@ -458,8 +468,8 @@ describe("parent administration", () => {
     if (!bountyDraft || bountyDraft.kind !== "bounty") {
       throw new Error("Invalid Bounty fixture");
     }
-    const bounty = createBounty(tasksDatabase(), bountyDraft);
-    const offering = loadAvailableBounties(tasksDatabase()).find(
+    const bounty = createBounty(tasksDatabase(), bountyDraft, today);
+    const offering = loadAvailableBounties(tasksDatabase(), today).find(
       (row) => row.offering.definition === bounty.id,
     );
     expect(offering).toBeDefined();
@@ -509,7 +519,7 @@ describe("parent administration", () => {
       state: { kind: "released" },
     });
     expect(
-      loadAvailableBounties(tasksDatabase()).some(
+      loadAvailableBounties(tasksDatabase(), today).some(
         (row) => row.offering.definition === bounty.id,
       ),
     ).toBe(true);

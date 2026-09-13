@@ -27,6 +27,7 @@ describe("Tasks HTTP", () => {
   let loadEvents: typeof import("./store.ts").loadEvents;
   let tasksDatabase: typeof import("./store.ts").tasksDatabase;
   let closeTasksDatabase: typeof import("./store.ts").closeTasksDatabase;
+  let loadBountyClaims: typeof import("./bounty-store.ts").loadBountyClaims;
 
   beforeAll(async () => {
     dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-tasks-http-"));
@@ -46,6 +47,7 @@ describe("Tasks HTTP", () => {
     ({ handlePair } = await import("@/displays/pairing-http"));
     ({ loadDefinitions, loadEvents, tasksDatabase, closeTasksDatabase } =
       await import("./store.ts"));
+    ({ loadBountyClaims } = await import("./bounty-store.ts"));
 
     await mkdir(dataRoot, { recursive: true });
     await writeHousehold({
@@ -1671,6 +1673,32 @@ describe("Tasks HTTP", () => {
         stars: 1.5,
         recurrence: { kind: "once" },
       },
+      {
+        kind: "bounty",
+        title: "No recurring start",
+        stars: 2,
+        recurrence: { kind: "recurring", cadence: { kind: "daily" } },
+      },
+      {
+        kind: "bounty",
+        title: "Duplicate weekdays",
+        stars: 2,
+        recurrence: {
+          kind: "recurring",
+          startsOn: "2026-09-13",
+          cadence: { kind: "weekly", days: ["sun", "sun"] },
+        },
+      },
+      {
+        kind: "bounty",
+        title: "Late month",
+        stars: 2,
+        recurrence: {
+          kind: "recurring",
+          startsOn: "2026-09-13",
+          cadence: { kind: "monthly", day: 29 },
+        },
+      },
     ];
     for (const body of invalidBodies) {
       const response = await handleCreateTask(
@@ -2059,6 +2087,492 @@ describe("Tasks HTTP", () => {
         listIds: [],
         timeZone: "America/New_York",
         configVersion: 3,
+      });
+    }
+  });
+
+  test("recurring Bounties roll to one current offering while older claims persist", async () => {
+    const beforeStart = new Date("2026-10-03T16:00:00Z");
+    const sunday = new Date("2026-10-04T16:00:00Z");
+    const monday = new Date("2026-10-05T16:00:00Z");
+    const tuesday = new Date("2026-10-06T16:00:00Z");
+    const saturday = new Date("2026-10-10T16:00:00Z");
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Sweep the patio",
+          stars: 4,
+          recurrence: {
+            kind: "recurring",
+            startsOn: "2026-10-04",
+            cadence: { kind: "daily" },
+          },
+        }),
+      }),
+      sunday,
+    );
+    assert.equal(created.status, 200);
+    const definition = (await created.json()).definition as BountyDefinition;
+
+    const early = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), beforeStart)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      early.availableBounties.some(
+        (row) => row.offering.definition === definition.id,
+      ),
+      false,
+    );
+
+    const sundayView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), sunday)
+    ).json()) as TasksViewRead;
+    const sundayOffering = sundayView.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(sundayOffering);
+    assert.deepEqual(sundayOffering.offering, {
+      kind: "recurring",
+      definition: definition.id,
+      intervalStart: "2026-10-04",
+    });
+
+    const mondayView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), monday)
+    ).json()) as TasksViewRead;
+    const mondayOffering = mondayView.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(mondayOffering);
+    assert.equal(mondayOffering.offering.kind, "recurring");
+    if (mondayOffering.offering.kind !== "recurring") return;
+    assert.equal(mondayOffering.offering.intervalStart, "2026-10-05");
+
+    const stale = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: sundayOffering.offering,
+          member: "dad",
+          definitionRevision: sundayOffering.definitionRevision,
+        }),
+      }),
+      monday,
+    );
+    assert.equal(stale.status, 409);
+
+    const mondayClaim = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: mondayOffering.offering,
+          member: "dad",
+          definitionRevision: mondayOffering.definitionRevision,
+        }),
+      }),
+      monday,
+    );
+    assert.equal(mondayClaim.status, 200);
+
+    const tuesdayView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), tuesday)
+    ).json()) as TasksViewRead;
+    const tuesdayOffering = tuesdayView.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(tuesdayOffering);
+    const tuesdayClaim = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: tuesdayOffering.offering,
+          member: "dad",
+          definitionRevision: tuesdayOffering.definitionRevision,
+        }),
+      }),
+      tuesday,
+    );
+    assert.equal(tuesdayClaim.status, 200);
+    const overlapping = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), tuesday)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      overlapping.bountyClaims.filter(
+        (row) => row.claim.offering.definition === definition.id,
+      ).length,
+      2,
+    );
+
+    const afterMissedIntervals = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), saturday)
+    ).json()) as TasksViewRead;
+    const current = afterMissedIntervals.availableBounties.filter(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.equal(current.length, 1);
+    assert.equal(current[0]?.offering.kind, "recurring");
+    if (current[0]?.offering.kind === "recurring") {
+      assert.equal(current[0].offering.intervalStart, "2026-10-10");
+    }
+    assert.equal(
+      afterMissedIntervals.bountyClaims.filter(
+        (row) => row.claim.offering.definition === definition.id,
+      ).length,
+      2,
+    );
+
+    const balanceBefore =
+      afterMissedIntervals.starBalances.find((row) => row.member === "dad")
+        ?.balance ?? 0;
+    for (const row of afterMissedIntervals.bountyClaims.filter(
+      (candidate) =>
+        candidate.claim.offering.definition === definition.id &&
+        candidate.state.kind === "unfinished",
+    )) {
+      const completion = await handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind: "complete-bounty",
+            requestId: crypto.randomUUID(),
+            claim: row.claim.id,
+            revision: row.revision,
+          }),
+        }),
+        saturday,
+      );
+      assert.equal(completion.status, 200);
+    }
+    const completed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), saturday)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      completed.starBalances.find((row) => row.member === "dad")?.balance,
+      balanceBefore + 8,
+    );
+  });
+
+  test("recurring release reopens only an offering whose interval is current", async () => {
+    const sunday = new Date("2026-10-11T16:00:00Z");
+    const monday = new Date("2026-10-12T16:00:00Z");
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Set out recycling",
+          stars: 3,
+          recurrence: {
+            kind: "recurring",
+            startsOn: "2026-10-11",
+            cadence: { kind: "weekly", days: ["sun", "mon"] },
+          },
+        }),
+      }),
+      sunday,
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+
+    async function claimCurrent(now: Date) {
+      const view = (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+      ).json()) as TasksViewRead;
+      const offering = view.availableBounties.find(
+        (row) => row.offering.definition === definition.id,
+      );
+      assert.ok(offering);
+      const response = await handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind: "claim-bounty",
+            requestId: crypto.randomUUID(),
+            offering: offering.offering,
+            member: "dad",
+            definitionRevision: offering.definitionRevision,
+          }),
+        }),
+        now,
+      );
+      assert.equal(response.status, 200);
+      return (
+        (await response.json()) as {
+          receipt: { result: { claim: { id: string }; revision: number } };
+        }
+      ).receipt.result;
+    }
+
+    async function release(
+      claim: Awaited<ReturnType<typeof claimCurrent>>,
+      now: Date,
+    ) {
+      const response = await handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind: "release-bounty",
+            requestId: crypto.randomUUID(),
+            claim: claim.claim.id,
+            revision: claim.revision,
+          }),
+        }),
+        now,
+      );
+      assert.equal(response.status, 200);
+    }
+
+    const sundayClaim = await claimCurrent(sunday);
+    const mondayClaim = await claimCurrent(monday);
+    await release(sundayClaim, monday);
+    let mondayView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), monday)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      mondayView.availableBounties.some(
+        (row) => row.offering.definition === definition.id,
+      ),
+      false,
+    );
+
+    await release(mondayClaim, monday);
+    mondayView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), monday)
+    ).json()) as TasksViewRead;
+    const reopened = mondayView.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.deepEqual(reopened?.offering, {
+      kind: "recurring",
+      definition: definition.id,
+      intervalStart: "2026-10-12",
+    });
+  });
+
+  test("monthly recurring work waits for its first matching date and advances without backlog", async () => {
+    const october = new Date("2026-10-29T16:00:00Z");
+    const beforeFirst = new Date("2026-11-27T16:00:00Z");
+    const first = new Date("2026-11-28T16:00:00Z");
+    const next = new Date("2026-12-28T16:00:00Z");
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Clean the filter",
+          stars: 5,
+          recurrence: {
+            kind: "recurring",
+            startsOn: "2026-10-29",
+            cadence: { kind: "monthly", day: 28 },
+          },
+        }),
+      }),
+      october,
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+    const early = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), beforeFirst)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      early.availableBounties.some(
+        (row) => row.offering.definition === definition.id,
+      ),
+      false,
+    );
+    const firstView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), first)
+    ).json()) as TasksViewRead;
+    const offering = firstView.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.deepEqual(offering?.offering, {
+      kind: "recurring",
+      definition: definition.id,
+      intervalStart: "2026-11-28",
+    });
+    assert.ok(offering);
+    assert.equal(
+      (
+        await handleBountyCommand(
+          req("http://familyos.test/api/tasks", {
+            method: "PATCH",
+            body: JSON.stringify({
+              kind: "claim-bounty",
+              requestId: crypto.randomUUID(),
+              offering: offering.offering,
+              member: "dad",
+              definitionRevision: offering.definitionRevision,
+            }),
+          }),
+          first,
+        )
+      ).status,
+      200,
+    );
+    const nextView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), next)
+    ).json()) as TasksViewRead;
+    assert.deepEqual(
+      nextView.availableBounties.find(
+        (row) => row.offering.definition === definition.id,
+      )?.offering,
+      {
+        kind: "recurring",
+        definition: definition.id,
+        intervalStart: "2026-12-28",
+      },
+    );
+    assert.equal(
+      nextView.bountyClaims.filter(
+        (row) => row.claim.offering.definition === definition.id,
+      ).length,
+      1,
+    );
+  });
+
+  test("Household Time Zone midnight advances recurring offering identity across fall DST", async () => {
+    const beforeMidnight = new Date("2026-11-02T04:59:59Z");
+    const atMidnight = new Date("2026-11-02T05:00:00Z");
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Refill humidifier",
+          stars: 1,
+          recurrence: {
+            kind: "recurring",
+            startsOn: "2026-11-01",
+            cadence: { kind: "daily" },
+          },
+        }),
+      }),
+      beforeMidnight,
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+    async function offeringAt(now: Date) {
+      const view = (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+      ).json()) as TasksViewRead;
+      return view.availableBounties.find(
+        (row) => row.offering.definition === definition.id,
+      )?.offering;
+    }
+    assert.deepEqual(await offeringAt(beforeMidnight), {
+      kind: "recurring",
+      definition: definition.id,
+      intervalStart: "2026-11-01",
+    });
+    assert.deepEqual(await offeringAt(atMidnight), {
+      kind: "recurring",
+      definition: definition.id,
+      intervalStart: "2026-11-02",
+    });
+  });
+
+  test("retiring a member releases old and current recurring claims without reopening old work", async () => {
+    const monday = new Date("2026-10-19T16:00:00Z");
+    const tuesday = new Date("2026-10-20T16:00:00Z");
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Feed the birds",
+          stars: 2,
+          recurrence: {
+            kind: "recurring",
+            startsOn: "2026-10-19",
+            cadence: { kind: "daily" },
+          },
+        }),
+      }),
+      monday,
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+    for (const now of [monday, tuesday]) {
+      const view = (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+      ).json()) as TasksViewRead;
+      const offering = view.availableBounties.find(
+        (row) => row.offering.definition === definition.id,
+      );
+      assert.ok(offering);
+      assert.equal(
+        (
+          await handleBountyCommand(
+            req("http://familyos.test/api/tasks", {
+              method: "PATCH",
+              body: JSON.stringify({
+                kind: "claim-bounty",
+                requestId: crypto.randomUUID(),
+                offering: offering.offering,
+                member: "ellie",
+                definitionRevision: offering.definitionRevision,
+              }),
+            }),
+            now,
+          )
+        ).status,
+        200,
+      );
+    }
+
+    await writeHousehold({
+      familyName: "TasksHousehold",
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        { id: "ellie", name: "Ellie", status: "retired" },
+      ],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 4,
+    });
+    try {
+      const reconciled = (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"), tuesday)
+      ).json()) as TasksViewRead;
+      const reopened = reconciled.availableBounties.filter(
+        (row) => row.offering.definition === definition.id,
+      );
+      assert.equal(reopened.length, 1);
+      assert.deepEqual(reopened[0]?.offering, {
+        kind: "recurring",
+        definition: definition.id,
+        intervalStart: "2026-10-20",
+      });
+      const released = loadBountyClaims(tasksDatabase()).filter(
+        (row) => row.claim.offering.definition === definition.id,
+      );
+      assert.equal(released.length, 2);
+      assert.ok(released.every((row) => row.state.kind === "released"));
+    } finally {
+      await writeHousehold({
+        familyName: "TasksHousehold",
+        members: [
+          { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+          {
+            id: "ellie",
+            name: "Ellie",
+            status: "active",
+            color: "#f6c9c5",
+          },
+        ],
+        calendarId: null,
+        calendarTimeZone: null,
+        listIds: [],
+        timeZone: "America/New_York",
+        configVersion: 5,
       });
     }
   });

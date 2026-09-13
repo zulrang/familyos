@@ -152,6 +152,18 @@ describe("recurring Bounty calendar intervals", () => {
     );
   });
 
+  test("a single selected weekday keeps the interval open for seven days", () => {
+    const recurrence = schedule({
+      kind: "recurring",
+      startsOn: "2026-09-14",
+      cadence: { kind: "weekly", days: ["mon"] },
+    });
+    assert.deepEqual(
+      currentBountyInterval(recurrence, localDate("2026-09-20")),
+      { start: "2026-09-14", next: "2026-09-21" },
+    );
+  });
+
   test("weekly work waits for the first matching date on or after its start", () => {
     const recurrence = schedule({
       kind: "recurring",
@@ -208,6 +220,26 @@ describe("recurring Bounty calendar intervals", () => {
     assert.deepEqual(currentBountyInterval(recurrence, atMidnight), {
       start: "2026-03-09",
       next: "2026-03-15",
+    });
+
+    const fallSchedule = schedule({
+      kind: "recurring",
+      startsOn: "2026-11-01",
+      cadence: { kind: "daily" },
+    });
+    const beforeFallMidnight = localDate(
+      msToZonedDate(Date.parse("2026-11-02T04:59:59Z"), zone),
+    );
+    const atFallMidnight = localDate(
+      msToZonedDate(Date.parse("2026-11-02T05:00:00Z"), zone),
+    );
+    assert.deepEqual(currentBountyInterval(fallSchedule, beforeFallMidnight), {
+      start: "2026-11-01",
+      next: "2026-11-02",
+    });
+    assert.deepEqual(currentBountyInterval(fallSchedule, atFallMidnight), {
+      start: "2026-11-02",
+      next: "2026-11-03",
     });
   });
 });

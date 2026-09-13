@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
@@ -316,4 +317,94 @@ test("one retirement command owns duplicate taps and blocks refresh until it set
   );
   expect(await screen.findByRole("status")).toHaveTextContent("Bounty retired");
   expect(taskRead).toBe(2);
+});
+
+test("recurring management status follows the current interval while retaining older history", async () => {
+  const definitions = [
+    {
+      kind: "bounty",
+      id: "a".repeat(32),
+      lineage: "1".repeat(32),
+      type: "chore",
+      title: "Daily reset",
+      stars: 2,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-10",
+        cadence: { kind: "daily" },
+      },
+      revision: 0,
+      retiredAt: null,
+    },
+    {
+      kind: "bounty",
+      id: "b".repeat(32),
+      lineage: "2".repeat(32),
+      type: "chore",
+      title: "Monday bins",
+      stars: 3,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-15",
+        cadence: { kind: "weekly", days: ["mon"] },
+      },
+      revision: 0,
+      retiredAt: null,
+    },
+  ];
+  vi.stubGlobal("fetch", async (url: string) => {
+    if (url.endsWith("/members")) {
+      return Response.json({
+        members: [{ id: "dad", name: "Dad", status: "active" }],
+        version: 1,
+      });
+    }
+    return Response.json({
+      definitions: [],
+      bountyDefinitions: definitions,
+      bountyClaims: [
+        {
+          kind: "claimed-bounty",
+          claim: {
+            id: "c".repeat(32),
+            offering: {
+              kind: "recurring",
+              definition: definitions[0]?.id,
+              intervalStart: "2026-09-12",
+            },
+            member: "dad",
+            scheduledOn: "2026-09-12",
+            title: "Daily reset",
+            stars: 2,
+          },
+          revision: 0,
+          state: { kind: "unfinished" },
+        },
+      ],
+      events: [],
+      originalEvents: [],
+      corrections: [],
+      adjustments: [],
+      balances: [],
+      today: "2026-09-13",
+    });
+  });
+
+  render(<AdminBounties />);
+  const daily = (
+    await screen.findByRole("heading", {
+      name: "Daily reset",
+    })
+  ).closest("article");
+  const future = screen
+    .getByRole("heading", { name: "Monday bins" })
+    .closest("article");
+  expect(daily).not.toBeNull();
+  expect(future).not.toBeNull();
+  if (!daily || !future) return;
+  expect(within(daily).getByText("Available")).toBeVisible();
+  expect(within(daily).getByText(/Daily from 2026-09-10/)).toBeVisible();
+  expect(within(daily).getByText(/1 historical claim/)).toBeVisible();
+  expect(within(future).getByText("Waiting")).toBeVisible();
+  expect(within(future).getByText(/Mon from 2026-09-15/)).toBeVisible();
 });

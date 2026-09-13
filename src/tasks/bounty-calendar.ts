@@ -1,13 +1,16 @@
 import {
   addLocalDays,
   type DayOfMonth,
-  isRecord,
   type LocalDate,
   parseDayOfMonth,
   parseLocalDate,
   parseWeekday,
   type Weekday,
-} from "./types";
+} from "./calendar-values";
+
+function isRecord(raw: unknown): raw is Record<string, unknown> {
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw);
+}
 
 declare const distinctWeekdaysBrand: unique symbol;
 
@@ -25,6 +28,10 @@ export type RecurringBountySchedule = Readonly<{
   startsOn: LocalDate;
   cadence: CalendarCadence;
 }>;
+
+export type BountyRecurrence =
+  | Readonly<{ kind: "once" }>
+  | RecurringBountySchedule;
 
 export type BountyInterval = Readonly<{
   start: LocalDate;
@@ -98,6 +105,13 @@ export function parseRecurringBountySchedule(
   const startsOn = parseLocalDate(raw.startsOn);
   const cadence = parseCalendarCadence(raw.cadence);
   return startsOn && cadence ? { kind: "recurring", startsOn, cadence } : null;
+}
+
+export function parseBountyRecurrence(raw: unknown): BountyRecurrence | null {
+  if (!isRecord(raw)) return null;
+  if (raw.kind === "once")
+    return hasExactlyKeys(raw, ["kind"]) ? { kind: "once" } : null;
+  return parseRecurringBountySchedule(raw);
 }
 
 function weekdayIndex(date: LocalDate): number {

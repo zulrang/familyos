@@ -11,10 +11,15 @@ import {
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
-import { formatClock } from "@/shared/time";
+import { formatClock, msToZonedDate } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
+import {
+  type BountyRecurrenceDraft,
+  BountyRecurrenceEditor,
+  parseBountyRecurrenceDraft,
+} from "./BountyRecurrenceEditor";
 import { TaskCelebration } from "./TaskCelebration";
 import styles from "./TaskEditor.module.css";
 import { TasksBoard } from "./TasksBoard";
@@ -25,6 +30,7 @@ import {
   type LegacyTaskDefinition,
   nowInstant,
   type Occurrence,
+  parseLocalDate,
   type Recurrence,
   type TaskId,
   type TasksViewRead,
@@ -95,7 +101,11 @@ type Draft = DraftFields & {
   task: TaskId | null;
 };
 
-type BountyDraft = { title: string; stars: string };
+type BountyDraft = {
+  title: string;
+  stars: string;
+  recurrence: BountyRecurrenceDraft;
+};
 
 type EditorState =
   | { kind: "assigned"; draft: Draft }
@@ -293,6 +303,7 @@ export function TasksScreen() {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
+  const [tasksLoaded, setTasksLoaded] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
   const [skipping, setSkipping] = useState<Occurrence | null>(null);
@@ -327,6 +338,7 @@ export function TasksScreen() {
     }
     const view = (await res.json()) as TasksViewRead;
     setTasks(view);
+    setTasksLoaded(true);
     setError(null);
     return view;
   }, []);
@@ -344,6 +356,11 @@ export function TasksScreen() {
   }, [load]);
 
   const members = settings ? activeMembers(settings.members) : [];
+  const bountyStartsOn = settings
+    ? tasksLoaded
+      ? tasks.today
+      : parseLocalDate(msToZonedDate(now.getTime(), settings.timeZone))
+    : null;
 
   function beginBountyMutation(claim: ClaimId): boolean {
     if (pendingBountyMutationIds.current.has(claim)) return false;
@@ -562,7 +579,9 @@ export function TasksScreen() {
     if (editor?.kind !== "bounty") return;
     const title = editor.draft.title.trim();
     const stars = Number(editor.draft.stars);
-    if (!title || !Number.isSafeInteger(stars) || stars < 0) return;
+    const recurrence = parseBountyRecurrenceDraft(editor.draft.recurrence);
+    if (!title || !Number.isSafeInteger(stars) || stars < 0 || !recurrence)
+      return;
     setBusy(true);
     try {
       const res = await fetch("/api/tasks", {
@@ -573,7 +592,7 @@ export function TasksScreen() {
           type: "chore",
           title,
           stars,
-          recurrence: { kind: "once" },
+          recurrence,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -714,7 +733,14 @@ export function TasksScreen() {
           onReleaseBounty={(row) => releaseBountyClaim(row).catch(() => {})}
           mutatingBountyClaims={mutatingBountyClaims}
           onAddBounty={() =>
-            setEditor({ kind: "bounty", draft: { title: "", stars: "0" } })
+            setEditor({
+              kind: "bounty",
+              draft: {
+                title: "",
+                stars: "0",
+                recurrence: { kind: "once" },
+              },
+            })
           }
           claimSelection={
             memberAction?.kind === "claim"
@@ -763,9 +789,10 @@ export function TasksScreen() {
           onSave={saveTask}
         />
       ) : null}
-      {editor?.kind === "bounty" ? (
+      {editor?.kind === "bounty" && bountyStartsOn ? (
         <BountySheet
           draft={editor.draft}
+          today={bountyStartsOn}
           busy={busy}
           onChange={(draft) => setEditor({ kind: "bounty", draft })}
           onClose={() => setEditor(null)}
@@ -816,20 +843,26 @@ export function TasksScreen() {
 
 function BountySheet({
   draft,
+  today,
   busy,
   onChange,
   onClose,
   onSave,
 }: {
   draft: BountyDraft;
+  today: TasksViewRead["today"];
   busy: boolean;
   onChange: (draft: BountyDraft) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
   const stars = Number(draft.stars);
+  const recurrence = parseBountyRecurrenceDraft(draft.recurrence);
   const canSave =
-    draft.title.trim().length > 0 && Number.isSafeInteger(stars) && stars >= 0;
+    draft.title.trim().length > 0 &&
+    Number.isSafeInteger(stars) &&
+    stars >= 0 &&
+    recurrence !== null;
   return (
     <div className={styles.overlay}>
       <button
@@ -860,6 +893,7 @@ function BountySheet({
               className="fos-input"
               aria-label="Bounty title"
               value={draft.title}
+              disabled={busy}
               onChange={(event) =>
                 onChange({ ...draft, title: event.target.value })
               }
@@ -876,6 +910,7 @@ function BountySheet({
                 pattern="[0-9]*"
                 aria-label="Stars"
                 value={draft.stars}
+                disabled={busy}
                 onFocus={(event) => event.currentTarget.select()}
                 onClick={(event) => event.currentTarget.select()}
                 onChange={(event) =>
@@ -884,6 +919,12 @@ function BountySheet({
               />
             </label>
           </section>
+          <BountyRecurrenceEditor
+            draft={draft.recurrence}
+            defaultStartsOn={today}
+            disabled={busy}
+            onChange={(recurrence) => onChange({ ...draft, recurrence })}
+          />
         </div>
         <div className={styles.footer}>
           <Button onClick={onClose}>Cancel</Button>

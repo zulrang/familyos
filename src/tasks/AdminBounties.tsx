@@ -11,6 +11,10 @@ import {
 import { readTaskAdminData } from "./admin-client";
 import type { BountyAdminCommand } from "./admin-types";
 import {
+  bountyManagementStatus,
+  bountyScheduleLabel,
+} from "./bounty-management";
+import {
   type BountyDefinition,
   parseBountyCommandId,
   parseStarAmount,
@@ -259,14 +263,11 @@ export function AdminBounties() {
             const claims = state.data.tasks.bountyClaims.filter(
               (row) => row.claim.offering.definition === bounty.id,
             );
-            const current = claims.find((row) => row.state.kind !== "released");
-            const status = bounty.retiredAt
-              ? "Retired"
-              : current?.state.kind === "completed"
-                ? "Completed"
-                : current
-                  ? "Claimed"
-                  : "Available";
+            const status = bountyManagementStatus({
+              definition: bounty,
+              claims,
+              today: state.data.tasks.today,
+            });
             return (
               <article className={styles.card} key={bounty.id}>
                 <div className={styles.row}>
@@ -274,6 +275,8 @@ export function AdminBounties() {
                   <span className={styles.badge}>{status}</span>
                 </div>
                 <p className={styles.muted}>
+                  {bountyScheduleLabel(bounty)}
+                  <br />
                   {bounty.stars} {bounty.stars === 1 ? "Star" : "Stars"} per
                   completion
                   <br />
