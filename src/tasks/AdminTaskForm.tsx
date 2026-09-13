@@ -1,14 +1,22 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { activeMembers, type HouseholdMember } from "@/members/members";
 import styles from "@/shared/Admin.module.css";
 import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import { adminRequest, adminRequestId } from "@/shared/admin-client";
+import type { TaskAdminCommand } from "./admin-types";
+import {
+  type BountyRecurrenceDraft,
+  BountyRecurrenceEditor,
+  parseBountyRecurrenceDraft,
+} from "./BountyRecurrenceEditor";
 import {
   type LegacyTaskDefinition,
   type LocalDate,
+  parseBountyCommandId,
   parseCreateTaskDraft,
+  parseTaskCreateDraft,
   type Weekday,
 } from "./types";
 
@@ -28,7 +36,15 @@ export function AdminTaskForm({
   onCancel: () => void;
 }) {
   const [id] = useState(adminRequestId);
+  const [replacementRequestId] = useState(() => {
+    const parsed = parseBountyCommandId(id);
+    if (!parsed) throw new Error("Could not create a task request identity.");
+    return parsed;
+  });
   const [title, setTitle] = useState(task?.title ?? "");
+  const [workMode, setWorkMode] = useState<"assigned" | "bounty">("assigned");
+  const [bountyRecurrence, setBountyRecurrence] =
+    useState<BountyRecurrenceDraft>({ kind: "once" });
   const [type, setType] = useState(task?.type ?? "chore");
   const [recurrence, setRecurrence] = useState(
     task?.recurrence.kind ?? "daily",
@@ -52,13 +68,53 @@ export function AdminTaskForm({
   const [time, setTime] = useState(task?.time ?? "");
   const [stars, setStars] = useState(String(task?.stars ?? 0));
   const [save, setSave] = useState<{
-    status: "idle" | "saving";
+    status: "idle" | "saving" | "retry";
     error?: string;
   }>({ status: "idle" });
+  const saving = useRef(false);
+  const command = useRef<TaskAdminCommand | null>(null);
   const roster = activeMembers(members);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (saving.current) return;
+    if (task && workMode === "bounty") {
+      const bountySchedule = parseBountyRecurrenceDraft(bountyRecurrence);
+      const bountyDraft = bountySchedule
+        ? parseTaskCreateDraft({
+            kind: "bounty",
+            type: "chore",
+            title,
+            stars: Number(stars),
+            recurrence: bountySchedule,
+          })
+        : null;
+      if (!bountyDraft || bountyDraft.kind !== "bounty") {
+        setSave({
+          status: "idle",
+          error:
+            "Enter a title, valid Bounty schedule, and nonnegative whole-number Star reward.",
+        });
+        return;
+      }
+      command.current ??= {
+        kind: "replace-definition",
+        requestId: replacementRequestId,
+        source: { kind: "assigned", definition: task.id },
+        replacement: bountyDraft,
+      };
+      saving.current = true;
+      setSave({ status: "saving" });
+      try {
+        await adminRequest("tasks", command.current);
+        onSaved();
+      } catch (error) {
+        setSave({ status: "retry", error: (error as Error).message });
+      } finally {
+        saving.current = false;
+      }
+      return;
+    }
     const draft = parseCreateTaskDraft({
       title,
       type,
@@ -87,17 +143,18 @@ export function AdminTaskForm({
       });
       return;
     }
+    command.current ??= task
+      ? { kind: "edit", task: task.id, draft }
+      : { kind: "create", id, draft };
+    saving.current = true;
     setSave({ status: "saving" });
     try {
-      await adminRequest(
-        "tasks",
-        task
-          ? { kind: "edit", task: task.id, draft }
-          : { kind: "create", id, draft },
-      );
+      await adminRequest("tasks", command.current);
       onSaved();
     } catch (error) {
-      setSave({ status: "idle", error: (error as Error).message });
+      setSave({ status: "retry", error: (error as Error).message });
+    } finally {
+      saving.current = false;
     }
   }
   return (
@@ -110,9 +167,25 @@ export function AdminTaskForm({
       {(close) => (
         <form className={`${styles.card} ${styles.form}`} onSubmit={submit}>
           <fieldset
-            disabled={save.status === "saving"}
+            disabled={save.status !== "idle"}
             className={`${styles.form} ${styles.fields}`}
           >
+            {task?.type === "chore" ? (
+              <label>
+                Work mode
+                <select
+                  value={workMode}
+                  onChange={(event) =>
+                    setWorkMode(
+                      event.target.value === "bounty" ? "bounty" : "assigned",
+                    )
+                  }
+                >
+                  <option value="assigned">Assigned Chore</option>
+                  <option value="bounty">Bounty</option>
+                </select>
+              </label>
+            ) : null}
             <label>
               Title
               <input
@@ -122,37 +195,49 @@ export function AdminTaskForm({
                 onChange={(event) => setTitle(event.target.value)}
               />
             </label>
-            <div className={styles.grid}>
-              <label>
-                Type
-                <select
-                  value={type}
-                  onChange={(event) =>
-                    setType(
-                      event.target.value === "routine" ? "routine" : "chore",
-                    )
-                  }
-                >
-                  <option value="chore">Chore</option>
-                  <option value="routine">Routine</option>
-                </select>
-              </label>
-              <label>
-                Repeat
-                <select
-                  value={recurrence}
-                  onChange={(event) =>
-                    setRecurrence(event.target.value as typeof recurrence)
-                  }
-                >
-                  <option value="once">Once</option>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                </select>
-              </label>
-            </div>
-            {recurrence === "once" && (
+            {workMode === "bounty" ? (
+              <BountyRecurrenceEditor
+                draft={bountyRecurrence}
+                defaultStartsOn={today}
+                onChange={setBountyRecurrence}
+              />
+            ) : null}
+            {workMode === "assigned" ? (
+              <div className={styles.grid}>
+                <label>
+                  Type
+                  <select
+                    value={type}
+                    onChange={(event) => {
+                      const next =
+                        event.target.value === "routine" ? "routine" : "chore";
+                      setType(next);
+                      if (next === "routine" && assignment === "open") {
+                        setAssignment("fixed");
+                      }
+                    }}
+                  >
+                    <option value="chore">Chore</option>
+                    <option value="routine">Routine</option>
+                  </select>
+                </label>
+                <label>
+                  Repeat
+                  <select
+                    value={recurrence}
+                    onChange={(event) =>
+                      setRecurrence(event.target.value as typeof recurrence)
+                    }
+                  >
+                    <option value="once">Once</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+            {workMode === "assigned" && recurrence === "once" && (
               <label>
                 Date
                 <input
@@ -163,7 +248,7 @@ export function AdminTaskForm({
                 />
               </label>
             )}
-            {recurrence === "monthly" && (
+            {workMode === "assigned" && recurrence === "monthly" && (
               <label>
                 Day of month (1–28)
                 <input
@@ -177,7 +262,7 @@ export function AdminTaskForm({
                 />
               </label>
             )}
-            {recurrence === "weekly" && (
+            {workMode === "assigned" && recurrence === "weekly" && (
               <fieldset>
                 <legend>Days</legend>
                 <div className={styles.grid}>
@@ -203,20 +288,24 @@ export function AdminTaskForm({
                 </div>
               </fieldset>
             )}
-            <label>
-              Assignment
-              <select
-                value={assignment}
-                onChange={(event) =>
-                  setAssignment(event.target.value as typeof assignment)
-                }
-              >
-                <option value="open">Open to anyone</option>
-                <option value="fixed">One member</option>
-                <option value="rotation">Take turns</option>
-              </select>
-            </label>
-            {assignment === "fixed" && (
+            {workMode === "assigned" ? (
+              <label>
+                Assignment
+                <select
+                  value={assignment}
+                  onChange={(event) =>
+                    setAssignment(event.target.value as typeof assignment)
+                  }
+                >
+                  {type === "chore" ? (
+                    <option value="open">Open to anyone</option>
+                  ) : null}
+                  <option value="fixed">One member</option>
+                  <option value="rotation">Take turns</option>
+                </select>
+              </label>
+            ) : null}
+            {workMode === "assigned" && assignment === "fixed" && (
               <label>
                 Member
                 <select
@@ -233,7 +322,7 @@ export function AdminTaskForm({
                 </select>
               </label>
             )}
-            {assignment === "rotation" && (
+            {workMode === "assigned" && assignment === "rotation" && (
               <fieldset className={styles.stack}>
                 <legend>Rotation order</legend>
                 <p className={styles.muted}>
@@ -298,14 +387,16 @@ export function AdminTaskForm({
               </fieldset>
             )}
             <div className={styles.grid}>
-              <label>
-                Time (optional)
-                <input
-                  type="time"
-                  value={time}
-                  onChange={(event) => setTime(event.target.value)}
-                />
-              </label>
+              {workMode === "assigned" ? (
+                <label>
+                  Time (optional)
+                  <input
+                    type="time"
+                    value={time}
+                    onChange={(event) => setTime(event.target.value)}
+                  />
+                </label>
+              ) : null}
               <label>
                 Stars per completion
                 <input
@@ -334,7 +425,11 @@ export function AdminTaskForm({
           )}
           <div className={styles.actions}>
             <button type="submit" disabled={save.status === "saving"}>
-              {save.status === "saving" ? "Saving…" : "Save task"}
+              {save.status === "saving"
+                ? "Saving…"
+                : save.status === "retry"
+                  ? "Retry save"
+                  : "Save task"}
             </button>
             <button
               type="button"

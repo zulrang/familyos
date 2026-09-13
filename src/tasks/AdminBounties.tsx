@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useRef, useState } from "react";
+import { activeMembers, type HouseholdMember } from "@/members/members";
 import styles from "@/shared/Admin.module.css";
 import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import {
@@ -9,16 +10,28 @@ import {
   useAdminData,
 } from "@/shared/admin-client";
 import { readTaskAdminData } from "./admin-client";
-import type { BountyAdminCommand } from "./admin-types";
+import type {
+  BountyAdminCommand,
+  DefinitionReplacementCommand,
+} from "./admin-types";
+import {
+  type BountyRecurrenceDraft,
+  BountyRecurrenceEditor,
+  parseBountyRecurrenceDraft,
+} from "./BountyRecurrenceEditor";
+import { sameBountyRecurrence } from "./bounty-calendar";
 import {
   bountyManagementStatus,
   bountyScheduleLabel,
 } from "./bounty-management";
 import {
   type BountyDefinition,
+  type LocalDate,
   parseBountyCommandId,
+  parseCreateTaskDraft,
   parseStarAmount,
   parseTaskTitle,
+  type Weekday,
 } from "./types";
 
 function bountyRequestId() {
@@ -33,43 +46,143 @@ type RetireBountyCommand = Extract<
   { kind: "retire-bounty" }
 >;
 
+const WEEKDAYS: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+function recurrenceDraft(bounty: BountyDefinition): BountyRecurrenceDraft {
+  if (bounty.recurrence.kind === "once") return { kind: "once" };
+  const cadence = bounty.recurrence.cadence;
+  return {
+    kind: "recurring",
+    startsOn: bounty.recurrence.startsOn,
+    cadence:
+      cadence.kind === "monthly"
+        ? { kind: "monthly", day: String(cadence.day) }
+        : cadence,
+  };
+}
+
 function BountyForm({
   bounty,
+  members,
+  today,
   onSaved,
   onCancel,
 }: {
   bounty: BountyDefinition;
+  members: HouseholdMember[];
+  today: LocalDate;
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const roster = activeMembers(members);
   const [title, setTitle] = useState<string>(bounty.title);
   const [stars, setStars] = useState(String(bounty.stars));
+  const [target, setTarget] = useState<"bounty" | "assigned">("bounty");
+  const [bountyRecurrence, setBountyRecurrence] =
+    useState<BountyRecurrenceDraft>(() => recurrenceDraft(bounty));
+  const [assignedRecurrence, setAssignedRecurrence] = useState<
+    "once" | "daily" | "weekly" | "monthly"
+  >("daily");
+  const [date, setDate] = useState<string>(today);
+  const [day, setDay] = useState("1");
+  const [days, setDays] = useState<Weekday[]>(["mon"]);
+  const [assignment, setAssignment] = useState<"fixed" | "rotation">("fixed");
+  const [member, setMember] = useState(roster[0]?.id ?? "");
+  const [order, setOrder] = useState<string[]>([]);
+  const [time, setTime] = useState("");
   const [save, setSave] = useState<
     | { status: "editing"; error?: string }
     | { status: "saving" }
     | { status: "retry"; error: string }
   >({ status: "editing" });
-  const command = useRef<BountyAdminCommand | null>(null);
+  const command = useRef<
+    BountyAdminCommand | DefinitionReplacementCommand | null
+  >(null);
+  const saving = useRef(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (save.status === "saving") return;
+    if (saving.current) return;
     const parsedTitle = parseTaskTitle(title);
     const parsedStars = parseStarAmount(Number(stars));
-    if (!parsedTitle || parsedStars === null) {
+    const replacement =
+      target === "bounty"
+        ? (() => {
+            const recurrence = parseBountyRecurrenceDraft(bountyRecurrence);
+            return parsedTitle && parsedStars !== null && recurrence
+              ? {
+                  kind: "bounty" as const,
+                  type: "chore" as const,
+                  title: parsedTitle,
+                  stars: parsedStars,
+                  recurrence,
+                }
+              : null;
+          })()
+        : (() => {
+            const draft = parseCreateTaskDraft({
+              title,
+              type: "chore",
+              recurrence:
+                assignedRecurrence === "once"
+                  ? { kind: "once", date }
+                  : assignedRecurrence === "weekly"
+                    ? { kind: "weekly", days }
+                    : assignedRecurrence === "monthly"
+                      ? { kind: "monthly", day: Number(day) }
+                      : { kind: "daily" },
+              assignment:
+                assignment === "fixed"
+                  ? { kind: "fixed", member }
+                  : { kind: "rotation", order },
+              time,
+              stars: Number(stars),
+            });
+            return draft &&
+              draft.type === "chore" &&
+              draft.assignment.kind !== "open"
+              ? {
+                  kind: "assigned" as const,
+                  title: draft.title,
+                  type: "chore" as const,
+                  recurrence: draft.recurrence,
+                  assignment: draft.assignment,
+                  time: draft.time,
+                  stars: draft.stars,
+                }
+              : null;
+          })();
+    if (!replacement) {
       setSave({
         status: "editing",
-        error: "Enter a title and a nonnegative whole-number Star reward.",
+        error:
+          target === "bounty"
+            ? "Enter a title, valid schedule, and nonnegative whole-number Star reward."
+            : "Check the schedule, assignment, time, and Star reward. Assigned Chores need one member or a nonempty rotation.",
       });
       return;
     }
-    command.current ??= {
-      kind: "edit-bounty",
-      requestId: bountyRequestId(),
-      definition: bounty.id,
-      revision: bounty.revision,
-      draft: { title: parsedTitle, stars: parsedStars },
-    };
+    command.current ??=
+      replacement.kind === "bounty" &&
+      sameBountyRecurrence(bounty.recurrence, replacement.recurrence)
+        ? {
+            kind: "edit-bounty",
+            requestId: bountyRequestId(),
+            definition: bounty.id,
+            revision: bounty.revision,
+            draft: { title: replacement.title, stars: replacement.stars },
+          }
+        : {
+            kind: "replace-definition",
+            requestId: bountyRequestId(),
+            source: {
+              kind: "bounty",
+              definition: bounty.id,
+              revision: bounty.revision,
+            },
+            replacement,
+          };
+    saving.current = true;
     setSave({ status: "saving" });
     try {
       await adminRequest("tasks", command.current);
@@ -80,6 +193,8 @@ function BountyForm({
         error:
           error instanceof Error ? error.message : "Could not save Bounty.",
       });
+    } finally {
+      saving.current = false;
     }
   }
 
@@ -97,6 +212,20 @@ function BountyForm({
             disabled={save.status !== "editing"}
           >
             <label>
+              Work mode
+              <select
+                value={target}
+                onChange={(event) =>
+                  setTarget(
+                    event.target.value === "assigned" ? "assigned" : "bounty",
+                  )
+                }
+              >
+                <option value="bounty">Bounty</option>
+                <option value="assigned">Assigned Chore</option>
+              </select>
+            </label>
+            <label>
               Title
               <input
                 required
@@ -105,6 +234,145 @@ function BountyForm({
                 onChange={(event) => setTitle(event.target.value)}
               />
             </label>
+            {target === "bounty" ? (
+              <BountyRecurrenceEditor
+                draft={bountyRecurrence}
+                defaultStartsOn={today}
+                onChange={setBountyRecurrence}
+              />
+            ) : (
+              <>
+                <label>
+                  Repeat
+                  <select
+                    value={assignedRecurrence}
+                    onChange={(event) =>
+                      setAssignedRecurrence(
+                        event.target.value as typeof assignedRecurrence,
+                      )
+                    }
+                  >
+                    <option value="once">Once</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </label>
+                {assignedRecurrence === "once" ? (
+                  <label>
+                    Date
+                    <input
+                      type="date"
+                      required
+                      value={date}
+                      onChange={(event) => setDate(event.target.value)}
+                    />
+                  </label>
+                ) : null}
+                {assignedRecurrence === "weekly" ? (
+                  <fieldset>
+                    <legend>Days</legend>
+                    <div className={styles.grid}>
+                      {WEEKDAYS.map((weekday) => (
+                        <label className={styles.check} key={weekday}>
+                          <input
+                            type="checkbox"
+                            checked={days.includes(weekday)}
+                            onChange={(event) =>
+                              setDays(
+                                event.target.checked
+                                  ? WEEKDAYS.filter(
+                                      (value) =>
+                                        value === weekday ||
+                                        days.includes(value),
+                                    )
+                                  : days.filter((value) => value !== weekday),
+                              )
+                            }
+                          />
+                          {weekday[0].toUpperCase() + weekday.slice(1)}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
+                {assignedRecurrence === "monthly" ? (
+                  <label>
+                    Day of month (1–28)
+                    <input
+                      type="number"
+                      min={1}
+                      max={28}
+                      step={1}
+                      required
+                      value={day}
+                      onChange={(event) => setDay(event.target.value)}
+                    />
+                  </label>
+                ) : null}
+                <label>
+                  Assignment
+                  <select
+                    value={assignment}
+                    onChange={(event) =>
+                      setAssignment(
+                        event.target.value === "rotation"
+                          ? "rotation"
+                          : "fixed",
+                      )
+                    }
+                  >
+                    <option value="fixed">One member</option>
+                    <option value="rotation">Take turns</option>
+                  </select>
+                </label>
+                {assignment === "fixed" ? (
+                  <label>
+                    Member
+                    <select
+                      required
+                      value={member}
+                      onChange={(event) => setMember(event.target.value)}
+                    >
+                      <option value="">Choose a member</option>
+                      {roster.map((person) => (
+                        <option key={person.id} value={person.id}>
+                          {person.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <fieldset>
+                    <legend>Rotation members</legend>
+                    {roster.map((person) => (
+                      <label className={styles.check} key={person.id}>
+                        <input
+                          type="checkbox"
+                          checked={order.includes(person.id)}
+                          onChange={(event) =>
+                            setOrder(
+                              event.target.checked
+                                ? [...order, person.id]
+                                : order.filter((id) => id !== person.id),
+                            )
+                          }
+                        />
+                        {person.name}
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+                <label>
+                  Time (optional)
+                  <input
+                    type="time"
+                    value={time}
+                    onChange={(event) => setTime(event.target.value)}
+                  />
+                </label>
+              </>
+            )}
             <label>
               Stars per completion
               <input
@@ -119,6 +387,10 @@ function BountyForm({
               />
             </label>
           </fieldset>
+          <p className={styles.muted}>
+            Schedule or work-mode changes start a new definition. Existing
+            claims keep their accepted title, date, and reward.
+          </p>
           {"error" in save && save.error && (
             <p role="alert" className={styles.error}>
               {save.error}
@@ -376,6 +648,8 @@ export function AdminBounties() {
         <BountyForm
           key={`${editor.id}:${editor.revision}`}
           bounty={editor}
+          members={state.data.members}
+          today={state.data.tasks.today}
           onSaved={() => {
             setEditor(null);
             setNotice({ kind: "success", message: "Bounty saved." });
