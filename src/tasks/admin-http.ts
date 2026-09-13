@@ -13,10 +13,17 @@ import {
 } from "./admin-store";
 import { parseTaskAdminCommand } from "./admin-types";
 import {
+  administerBountyDefinition,
+  BountyAdminStoreError,
+  loadBountyClaims,
+  loadBountyDefinitions,
+} from "./bounty-store";
+import {
   loadCompletionCorrections,
   loadEvents,
   loadStore,
   loadStoredStarBalances,
+  tasksDatabase,
 } from "./store";
 import { nowInstant, parseLocalDate } from "./types";
 
@@ -36,8 +43,11 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   reconcileRetiredMembers(household.members, today);
   if (request.method === "GET") {
     const store = loadStore();
+    const db = tasksDatabase();
     return adminJson({
       ...store,
+      bountyDefinitions: loadBountyDefinitions(db),
+      bountyClaims: loadBountyClaims(db),
       originalEvents: loadEvents(),
       corrections: loadCompletionCorrections(),
       balances: loadStoredStarBalances(),
@@ -86,6 +96,15 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
       case "retire":
         retireAdminTask(command.task, today);
         break;
+      case "edit-bounty":
+      case "retire-bounty":
+        return adminJson({
+          receipt: administerBountyDefinition({
+            db: tasksDatabase(),
+            command,
+            today,
+          }),
+        });
       case "correct":
         correctAdminCompletion({ ...command.correction, at: nowInstant() });
         break;
@@ -95,7 +114,10 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     }
     return adminJson({ ok: true });
   } catch (error) {
-    if (error instanceof TaskAdminError)
+    if (
+      error instanceof TaskAdminError ||
+      error instanceof BountyAdminStoreError
+    )
       return adminJson({ error: error.message }, 409);
     throw error;
   }

@@ -65,6 +65,8 @@ function read(
 ): TaskAdminRead {
   return {
     definitions: [definition("dishes", "Dishes")],
+    bountyDefinitions: [],
+    bountyClaims: [],
     events,
     originalEvents: events,
     corrections,
