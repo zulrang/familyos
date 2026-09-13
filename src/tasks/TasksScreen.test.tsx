@@ -532,6 +532,8 @@ describe("TasksScreen", () => {
   });
 
   test("recurring creation never seeds the placeholder date while Tasks are still loading", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-09-14T04:00:00Z"));
     let resolveTasks: ((response: Response) => void) | undefined;
     const tasksResponse = new Promise<Response>((resolve) => {
       resolveTasks = resolve;
@@ -552,15 +554,32 @@ describe("TasksScreen", () => {
     const dialog = screen.getByRole("dialog", { name: "New Bounty" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Daily" }));
     const date = within(dialog).getByLabelText("Starting date");
-    expect(date).not.toHaveValue("1970-01-01");
-    expect((date as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(date).toHaveValue("2026-09-14");
 
     resolveTasks?.(json(emptyView()));
     await act(async () => {});
   });
 
+  test("recurring creation uses the live Household date after a stale Tasks read crosses midnight", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-09-14T04:00:00Z"));
+    const stale = { ...emptyView(), today: "2026-09-13" } as TasksViewRead;
+    installFetch(stale);
+    render(<TasksScreen />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Bounties" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bounty" }));
+    const dialog = screen.getByRole("dialog", { name: "New Bounty" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Daily" }));
+    expect(within(dialog).getByLabelText("Starting date")).toHaveValue(
+      "2026-09-14",
+    );
+  });
+
   test("the Bounty editor creates and claims a selected-weekday offering", async () => {
-    const user = userEvent.setup();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-25T16:00:00Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const initial = emptyView();
     const definition = {
       kind: "bounty",

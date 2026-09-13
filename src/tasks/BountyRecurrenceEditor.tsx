@@ -1,7 +1,4 @@
-import type {
-  CalendarCadence,
-  RecurringBountySchedule,
-} from "./bounty-calendar";
+import type { BountyRecurrence, CalendarCadence } from "./bounty-calendar";
 import { parseRecurringBountySchedule } from "./bounty-calendar";
 import styles from "./TaskEditor.module.css";
 import type { LocalDate, Weekday } from "./types";
@@ -29,13 +26,9 @@ export type BountyRecurrenceDraft =
       cadence: CalendarCadenceDraft;
     }>;
 
-export type BountyRecurrenceValue =
-  | Readonly<{ kind: "once" }>
-  | RecurringBountySchedule;
-
 export function parseBountyRecurrenceDraft(
   draft: BountyRecurrenceDraft,
-): BountyRecurrenceValue | null {
+): BountyRecurrence | null {
   if (draft.kind === "once") return { kind: "once" };
   const cadence: unknown =
     draft.cadence.kind === "monthly"
