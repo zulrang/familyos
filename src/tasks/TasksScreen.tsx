@@ -481,6 +481,7 @@ export function TasksScreen() {
           requestId: crypto.randomUUID(),
           offering: bounty.offering,
           member,
+          definitionRevision: bounty.definitionRevision,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;

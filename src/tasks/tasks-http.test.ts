@@ -1239,8 +1239,9 @@ describe("Tasks HTTP", () => {
       available.progress.find((row) => row.member === "dad")?.total,
       available.occurrences.filter((row) => row.assignee === "dad").length,
     );
-    const offering = available.availableBounties[0]?.offering;
-    assert.ok(offering);
+    const advertisedOffering = available.availableBounties[0];
+    assert.ok(advertisedOffering);
+    const offering = advertisedOffering.offering;
 
     closeTasksDatabase();
     const availableAfterRestart = (await (
@@ -1254,6 +1255,18 @@ describe("Tasks HTTP", () => {
     );
 
     const requestId = crypto.randomUUID();
+    const revisionless = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering,
+          member: "dad",
+        }),
+      }),
+    );
+    assert.equal(revisionless.status, 409);
     const claim = await handleBountyCommand(
       req("http://familyos.test/api/tasks", {
         method: "PATCH",
@@ -1262,6 +1275,7 @@ describe("Tasks HTTP", () => {
           requestId,
           offering,
           member: "dad",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1279,6 +1293,7 @@ describe("Tasks HTTP", () => {
           requestId,
           offering,
           member: "dad",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1292,6 +1307,7 @@ describe("Tasks HTTP", () => {
           requestId,
           offering,
           member: "ellie",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1305,6 +1321,7 @@ describe("Tasks HTTP", () => {
           requestId: crypto.randomUUID(),
           offering,
           member: "ellie",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1449,6 +1466,7 @@ describe("Tasks HTTP", () => {
           requestId: crypto.randomUUID(),
           offering: firstOffering.offering,
           member: "dad",
+          definitionRevision: firstOffering.definitionRevision,
         }),
       }),
       firstDay,
@@ -1515,17 +1533,26 @@ describe("Tasks HTTP", () => {
 
     tasksDatabase()
       .prepare(
-        "UPDATE bounty_definitions SET title = ?, stars = ? WHERE id = ?",
+        "UPDATE bounty_definitions SET title = ?, stars = ?, revision = revision + 1 WHERE id = ?",
       )
       .run("Polish windows", 8, definition.id);
+    const refreshedOffering = (
+      (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"), secondDay)
+      ).json()) as TasksViewRead
+    ).availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(refreshedOffering);
     await handleBountyCommand(
       req("http://familyos.test/api/tasks", {
         method: "PATCH",
         body: JSON.stringify({
           kind: "claim-bounty",
           requestId: crypto.randomUUID(),
-          offering: reopened.offering,
+          offering: refreshedOffering.offering,
           member: "ellie",
+          definitionRevision: refreshedOffering.definitionRevision,
         }),
       }),
       secondDay,
@@ -1670,10 +1697,11 @@ describe("Tasks HTTP", () => {
     const bountyView = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
-    const offering = bountyView.availableBounties.find(
+    const advertisedOffering = bountyView.availableBounties.find(
       (row) => row.offering.definition === definition.id,
-    )?.offering;
-    assert.ok(offering);
+    );
+    assert.ok(advertisedOffering);
+    const offering = advertisedOffering.offering;
     for (const member of ["former", "missing"]) {
       const response = await handleBountyCommand(
         req("http://familyos.test/api/tasks", {
@@ -1683,6 +1711,7 @@ describe("Tasks HTTP", () => {
             requestId: crypto.randomUUID(),
             offering,
             member,
+            definitionRevision: advertisedOffering.definitionRevision,
           }),
         }),
       );
@@ -1696,6 +1725,7 @@ describe("Tasks HTTP", () => {
           requestId: crypto.randomUUID(),
           offering: { ...offering, scheduledOn: bountyView.today },
           member: "dad",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1772,10 +1802,11 @@ describe("Tasks HTTP", () => {
     const available = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
-    const offering = available.availableBounties.find(
+    const advertisedOffering = available.availableBounties.find(
       (row) => row.offering.definition === definition.id,
-    )?.offering;
-    assert.ok(offering);
+    );
+    assert.ok(advertisedOffering);
+    const offering = advertisedOffering.offering;
     await handleBountyCommand(
       req("http://familyos.test/api/tasks", {
         method: "PATCH",
@@ -1784,6 +1815,7 @@ describe("Tasks HTTP", () => {
           requestId: crypto.randomUUID(),
           offering,
           member: "ellie",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1850,10 +1882,11 @@ describe("Tasks HTTP", () => {
     const available = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
-    const offering = available.availableBounties.find(
+    const advertisedOffering = available.availableBounties.find(
       (row) => row.offering.definition === definition.id,
-    )?.offering;
-    assert.ok(offering);
+    );
+    assert.ok(advertisedOffering);
+    const offering = advertisedOffering.offering;
     await handleBountyCommand(
       req("http://familyos.test/api/tasks", {
         method: "PATCH",
@@ -1862,6 +1895,7 @@ describe("Tasks HTTP", () => {
           requestId: crypto.randomUUID(),
           offering,
           member: "dad",
+          definitionRevision: advertisedOffering.definitionRevision,
         }),
       }),
     );
@@ -1939,19 +1973,20 @@ describe("Tasks HTTP", () => {
     const available = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
-    const firstOffering = available.availableBounties.find(
+    const firstAdvertised = available.availableBounties.find(
       (row) => row.offering.definition === firstDefinition.id,
-    )?.offering;
-    const secondOffering = available.availableBounties.find(
+    );
+    const secondAdvertised = available.availableBounties.find(
       (row) => row.offering.definition === secondDefinition.id,
-    )?.offering;
-    assert.ok(firstOffering);
-    assert.ok(secondOffering);
+    );
+    assert.ok(firstAdvertised);
+    assert.ok(secondAdvertised);
     const command = {
       kind: "claim-bounty",
       requestId: crypto.randomUUID(),
-      offering: firstOffering,
+      offering: firstAdvertised.offering,
       member: "ellie",
+      definitionRevision: firstAdvertised.definitionRevision,
     };
     const accepted = await handleBountyCommand(
       req("http://familyos.test/api/tasks", {
@@ -1990,8 +2025,9 @@ describe("Tasks HTTP", () => {
           body: JSON.stringify({
             kind: "claim-bounty",
             requestId: crypto.randomUUID(),
-            offering: secondOffering,
+            offering: secondAdvertised.offering,
             member: "ellie",
+            definitionRevision: secondAdvertised.definitionRevision,
           }),
         }),
       );
