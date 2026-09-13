@@ -8,7 +8,12 @@ import type {
   BountyCompletionCorrectionCommand,
   TaskAdminRead,
 } from "./admin-types";
-import type { BountyCompletion, ClaimedBounty, TaskEvent } from "./types";
+import {
+  type BountyCompletion,
+  type ClaimedBounty,
+  parseBountyCommandId,
+  type TaskEvent,
+} from "./types";
 
 function CorrectionForm({
   event,
@@ -116,9 +121,10 @@ function bountyCorrectionCommand(input: {
   member: string;
   reason: string;
 }): BountyCompletionCorrectionCommand {
+  const requestId = parseBountyCommandId(adminRequestId());
+  if (!requestId) throw new Error("Could not create Bounty request identity");
   const fields = {
-    requestId:
-      adminRequestId() as BountyCompletionCorrectionCommand["requestId"],
+    requestId,
     claim: input.row.claim.id,
     revision: input.row.revision,
     completion: input.completion.id,
