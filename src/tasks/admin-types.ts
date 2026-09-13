@@ -1,12 +1,20 @@
 import {
+  type BountyCommandId,
+  type BountyDefinition,
+  type ClaimedBounty,
   type CreateTaskDraft,
+  type DefinitionRevision,
   type Instant,
   isRecord,
   type LegacyTaskDefinition,
   type LocalDate,
+  parseBountyCommandId,
   parseCreateTaskDraft,
+  parseDefinitionRevision,
   parseLocalDate,
+  parseStarAmount,
   parseTaskId,
+  parseTaskTitle,
   type StarAdjustment,
   type StarBalance,
   type TaskEvent,
@@ -15,6 +23,8 @@ import {
 
 export type TaskAdminRead = {
   definitions: LegacyTaskDefinition[];
+  bountyDefinitions: BountyDefinition[];
+  bountyClaims: ClaimedBounty[];
   events: TaskEvent[];
   originalEvents: TaskEvent[];
   corrections: CompletionCorrection[];
@@ -22,6 +32,26 @@ export type TaskAdminRead = {
   balances: StarBalance[];
   today: LocalDate;
 };
+
+export type BountyDefinitionDraft = Readonly<{
+  title: BountyDefinition["title"];
+  stars: BountyDefinition["stars"];
+}>;
+
+export type BountyAdminCommand =
+  | Readonly<{
+      kind: "edit-bounty";
+      requestId: BountyCommandId;
+      definition: TaskId;
+      revision: DefinitionRevision;
+      draft: BountyDefinitionDraft;
+    }>
+  | Readonly<{
+      kind: "retire-bounty";
+      requestId: BountyCommandId;
+      definition: TaskId;
+      revision: DefinitionRevision;
+    }>;
 
 export type CompletionCorrection = {
   id: string;
@@ -37,6 +67,7 @@ export type TaskAdminCommand =
   | { kind: "create"; id: string; draft: CreateTaskDraft }
   | { kind: "edit"; task: TaskId; draft: CreateTaskDraft }
   | { kind: "retire"; task: TaskId }
+  | BountyAdminCommand
   | { kind: "correct"; correction: Omit<CompletionCorrection, "at"> }
   | {
       kind: "adjust-stars";
@@ -71,6 +102,39 @@ export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
           member: raw.member,
           delta: raw.delta,
           reason: raw.reason.trim(),
+        }
+      : null;
+  }
+  if (raw.kind === "edit-bounty" || raw.kind === "retire-bounty") {
+    const requestId = parseBountyCommandId(raw.requestId);
+    const definition = parseTaskId(raw.definition);
+    const revision = parseDefinitionRevision(raw.revision);
+    if (!requestId || !definition || revision === null) return null;
+    if (raw.kind === "retire-bounty") {
+      return Object.keys(raw).every((key) =>
+        ["kind", "requestId", "definition", "revision"].includes(key),
+      )
+        ? { kind: "retire-bounty", requestId, definition, revision }
+        : null;
+    }
+    if (
+      !Object.keys(raw).every((key) =>
+        ["kind", "requestId", "definition", "revision", "draft"].includes(key),
+      ) ||
+      !isRecord(raw.draft) ||
+      !Object.keys(raw.draft).every((key) => ["title", "stars"].includes(key))
+    ) {
+      return null;
+    }
+    const title = parseTaskTitle(raw.draft.title);
+    const stars = parseStarAmount(raw.draft.stars);
+    return title && stars !== null
+      ? {
+          kind: "edit-bounty",
+          requestId,
+          definition,
+          revision,
+          draft: { title, stars },
         }
       : null;
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type CSSProperties, useRef, useState } from "react";
 import {
   type ActiveMember,
@@ -50,9 +51,10 @@ type TaskActions = {
   onSkip: (row: Occurrence) => void;
   onEdit: (row: Occurrence) => void;
   onCompleteBounty: (row: ClaimedBounty) => void;
+  onReleaseBounty: (row: ClaimedBounty) => void;
   onClaimBounty: (row: AvailableBounty) => void;
   onAddBounty: () => void;
-  completingBountyClaims: ReadonlySet<ClaimId>;
+  mutatingBountyClaims: ReadonlySet<ClaimId>;
 };
 
 const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
@@ -114,7 +116,8 @@ function GroupTasks({
   onSkip,
   onEdit,
   onCompleteBounty,
-  completingBountyClaims,
+  onReleaseBounty,
+  mutatingBountyClaims,
 }: TaskActions & {
   group: TaskGroup;
   claimSelection: ClaimSelection | null;
@@ -189,8 +192,9 @@ function GroupTasks({
               label={work.row.claim.title}
               stars={work.row.claim.stars}
               status={{ kind: "open" }}
-              completionPending={completingBountyClaims.has(work.row.claim.id)}
+              mutationPending={mutatingBountyClaims.has(work.row.claim.id)}
               onComplete={() => onCompleteBounty(work.row)}
+              onRelease={!preview ? () => onReleaseBounty(work.row) : undefined}
             />
           ),
         )
@@ -546,13 +550,14 @@ export function TasksBoard({
               )}
             </div>
             <div className={styles.manageBounties}>
-              <h2>Manage Bounties</h2>
-              <p>
-                {tasks.bountyDefinitions.length} Bounty{" "}
-                {tasks.bountyDefinitions.length === 1
-                  ? "definition"
-                  : "definitions"}
-              </p>
+              <div>
+                <h2>Manage Bounties</h2>
+                <p>Edit rewards, retire old work, and review history.</p>
+              </div>
+              <Link className={styles.rowAction} href="/admin/bounties">
+                Manage
+                <Icon name="chevron-right" size={20} />
+              </Link>
             </div>
           </section>
         ) : null}

@@ -1,5 +1,6 @@
 import type { HouseholdMember } from "@/members/members";
 import type { CompletionCorrection } from "./admin-types";
+import { releaseBountiesForRetiredMembers } from "./bounty-store";
 import {
   insertDefinition,
   loadCompletionCorrections,
@@ -156,6 +157,7 @@ export function reconcileRetiredMembers(
           today,
         );
     }
+    releaseBountiesForRetiredMembers(tasksDatabase(), retired);
   });
 }
 

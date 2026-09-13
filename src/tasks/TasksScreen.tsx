@@ -304,8 +304,8 @@ export function TasksScreen() {
     date: TasksViewRead["today"];
   } | null>(null);
   const celebrated = useRef(new Set<string>());
-  const pendingBountyCompletionIds = useRef(new Set<ClaimId>());
-  const [completingBountyClaims, setCompletingBountyClaims] = useState<
+  const pendingBountyMutationIds = useRef(new Set<ClaimId>());
+  const [mutatingBountyClaims, setMutatingBountyClaims] = useState<
     ReadonlySet<ClaimId>
   >(new Set());
   const dismissCelebration = useCallback(() => setCelebration(null), []);
@@ -344,6 +344,18 @@ export function TasksScreen() {
   }, [load]);
 
   const members = settings ? activeMembers(settings.members) : [];
+
+  function beginBountyMutation(claim: ClaimId): boolean {
+    if (pendingBountyMutationIds.current.has(claim)) return false;
+    pendingBountyMutationIds.current.add(claim);
+    setMutatingBountyClaims(new Set(pendingBountyMutationIds.current));
+    return true;
+  }
+
+  function endBountyMutation(claim: ClaimId): void {
+    pendingBountyMutationIds.current.delete(claim);
+    setMutatingBountyClaims(new Set(pendingBountyMutationIds.current));
+  }
 
   function celebrateIfDayComplete(
     confirmed: TasksViewRead | undefined,
@@ -469,6 +481,7 @@ export function TasksScreen() {
           requestId: crypto.randomUUID(),
           offering: bounty.offering,
           member,
+          definitionRevision: bounty.definitionRevision,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -483,9 +496,7 @@ export function TasksScreen() {
 
   async function completeBountyClaim(row: ClaimedBounty) {
     if (row.state.kind !== "unfinished") return;
-    if (pendingBountyCompletionIds.current.has(row.claim.id)) return;
-    pendingBountyCompletionIds.current.add(row.claim.id);
-    setCompletingBountyClaims(new Set(pendingBountyCompletionIds.current));
+    if (!beginBountyMutation(row.claim.id)) return;
     try {
       const res = await fetch("/api/tasks", {
         method: "PATCH",
@@ -494,7 +505,7 @@ export function TasksScreen() {
           kind: "complete-bounty",
           requestId: crypto.randomUUID(),
           claim: row.claim.id,
-          revision: row.claim.revision,
+          revision: row.revision,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -517,8 +528,33 @@ export function TasksScreen() {
       await load().catch(() => undefined);
       setError("Could not complete Bounty.");
     } finally {
-      pendingBountyCompletionIds.current.delete(row.claim.id);
-      setCompletingBountyClaims(new Set(pendingBountyCompletionIds.current));
+      endBountyMutation(row.claim.id);
+    }
+  }
+
+  async function releaseBountyClaim(row: ClaimedBounty) {
+    if (row.state.kind !== "unfinished") return;
+    if (!beginBountyMutation(row.claim.id)) return;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "release-bounty",
+          requestId: crypto.randomUUID(),
+          claim: row.claim.id,
+          revision: row.revision,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      const failure = !res.ok ? "Could not release Bounty." : null;
+      await load();
+      if (failure) setError(failure);
+    } catch {
+      await load().catch(() => undefined);
+      setError("Could not release Bounty.");
+    } finally {
+      endBountyMutation(row.claim.id);
     }
   }
 
@@ -675,7 +711,8 @@ export function TasksScreen() {
           onEdit={openEditor}
           onClaimBounty={(row) => claimBountyOffering(row).catch(() => {})}
           onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
-          completingBountyClaims={completingBountyClaims}
+          onReleaseBounty={(row) => releaseBountyClaim(row).catch(() => {})}
+          mutatingBountyClaims={mutatingBountyClaims}
           onAddBounty={() =>
             setEditor({ kind: "bounty", draft: { title: "", stars: "0" } })
           }
