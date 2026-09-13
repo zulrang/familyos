@@ -21,6 +21,7 @@ import { TasksBoard } from "./TasksBoard";
 import {
   type AvailableBounty,
   type ClaimedBounty,
+  type ClaimId,
   type LegacyTaskDefinition,
   nowInstant,
   type Occurrence,
@@ -303,6 +304,10 @@ export function TasksScreen() {
     date: TasksViewRead["today"];
   } | null>(null);
   const celebrated = useRef(new Set<string>());
+  const pendingBountyCompletionIds = useRef(new Set<ClaimId>());
+  const [completingBountyClaims, setCompletingBountyClaims] = useState<
+    ReadonlySet<ClaimId>
+  >(new Set());
   const dismissCelebration = useCallback(() => setCelebration(null), []);
 
   const load = useCallback(async () => {
@@ -340,6 +345,29 @@ export function TasksScreen() {
 
   const members = settings ? activeMembers(settings.members) : [];
 
+  function celebrateIfDayComplete(
+    confirmed: TasksViewRead | undefined,
+    member: string,
+    completionConfirmed: boolean,
+  ) {
+    const person = members.find((candidate) => candidate.id === member);
+    const progress = confirmed?.progress.find((row) => row.member === member);
+    const receipt = `${confirmed?.today}:${member}`;
+    if (
+      confirmed &&
+      person &&
+      confirmed.today === tasks.today &&
+      completionConfirmed &&
+      progress &&
+      progress.total > 0 &&
+      progress.done === progress.total &&
+      !celebrated.current.has(receipt)
+    ) {
+      celebrated.current.add(receipt);
+      setCelebration({ member: person, date: confirmed.today });
+    }
+  }
+
   function openEditor(row: Occurrence) {
     const definition = tasks.definitions.find((item) => item.id === row.task);
     if (definition) {
@@ -374,30 +402,21 @@ export function TasksScreen() {
         setError("Could not complete task.");
       }
       const confirmed = await load();
-      const person = members.find((candidate) => candidate.id === member);
-      const progress = confirmed?.progress.find((row) => row.member === member);
-      const receipt = `${confirmed?.today}:${member}`;
-      if (
+      celebrateIfDayComplete(
+        confirmed,
+        member,
         res.ok &&
-        confirmed &&
-        person &&
-        confirmed.today === tasks.today &&
-        occ.state !== "done" &&
-        confirmed.occurrences.some(
-          (row) =>
-            row.task === occ.task &&
-            row.window === occ.window &&
-            row.state === "done" &&
-            row.by === member,
-        ) &&
-        progress &&
-        progress.total > 0 &&
-        progress.done === progress.total &&
-        !celebrated.current.has(receipt)
-      ) {
-        celebrated.current.add(receipt);
-        setCelebration({ member: person, date: confirmed.today });
-      }
+          occ.state !== "done" &&
+          Boolean(
+            confirmed?.occurrences.some(
+              (row) =>
+                row.task === occ.task &&
+                row.window === occ.window &&
+                row.state === "done" &&
+                row.by === member,
+            ),
+          ),
+      );
     } catch {
       setError("Could not complete task.");
       await load();
@@ -464,6 +483,9 @@ export function TasksScreen() {
 
   async function completeBountyClaim(row: ClaimedBounty) {
     if (row.state.kind !== "unfinished") return;
+    if (pendingBountyCompletionIds.current.has(row.claim.id)) return;
+    pendingBountyCompletionIds.current.add(row.claim.id);
+    setCompletingBountyClaims(new Set(pendingBountyCompletionIds.current));
     try {
       const res = await fetch("/api/tasks", {
         method: "PATCH",
@@ -477,11 +499,26 @@ export function TasksScreen() {
       });
       if (await redirectIfPairingRequired(res)) return;
       const failure = !res.ok ? "Could not complete Bounty." : null;
-      await load();
+      const confirmed = await load();
       if (failure) setError(failure);
+      celebrateIfDayComplete(
+        confirmed,
+        row.claim.member,
+        res.ok &&
+          Boolean(
+            confirmed?.bountyClaims.some(
+              (candidate) =>
+                candidate.claim.id === row.claim.id &&
+                candidate.state.kind === "completed",
+            ),
+          ),
+      );
     } catch {
       await load().catch(() => undefined);
       setError("Could not complete Bounty.");
+    } finally {
+      pendingBountyCompletionIds.current.delete(row.claim.id);
+      setCompletingBountyClaims(new Set(pendingBountyCompletionIds.current));
     }
   }
 
@@ -638,6 +675,7 @@ export function TasksScreen() {
           onEdit={openEditor}
           onClaimBounty={(row) => claimBountyOffering(row).catch(() => {})}
           onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
+          completingBountyClaims={completingBountyClaims}
           onAddBounty={() =>
             setEditor({ kind: "bounty", draft: { title: "", stars: "0" } })
           }

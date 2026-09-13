@@ -23,6 +23,7 @@ export function TaskRow({
   stars,
   status,
   onComplete,
+  completionPending = false,
   onClaim,
   onCancelClaim,
   onSkip,
@@ -33,6 +34,7 @@ export function TaskRow({
   stars?: number;
   status: TaskRowStatus;
   onComplete?: () => void;
+  completionPending?: boolean;
   onClaim?: () => void;
   onCancelClaim?: () => void;
   onSkip?: () => void;
@@ -46,7 +48,7 @@ export function TaskRow({
           <input
             type="checkbox"
             checked={done}
-            disabled={done}
+            disabled={done || completionPending}
             aria-label={label}
             onChange={onComplete}
           />
