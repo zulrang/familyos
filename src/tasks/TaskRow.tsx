@@ -25,6 +25,7 @@ export function TaskRow({
   onComplete,
   onClaim,
   onCancelClaim,
+  onRelease,
   onSkip,
   onEdit,
 }: {
@@ -35,6 +36,7 @@ export function TaskRow({
   onComplete?: () => void;
   onClaim?: () => void;
   onCancelClaim?: () => void;
+  onRelease?: () => void;
   onSkip?: () => void;
   onEdit?: () => void;
 }) {
@@ -95,6 +97,16 @@ export function TaskRow({
           className={styles.rowAction}
         >
           Claim
+        </button>
+      ) : null}
+      {onRelease ? (
+        <button
+          type="button"
+          aria-label={`Release ${label}`}
+          onClick={onRelease}
+          className={styles.skip}
+        >
+          Release
         </button>
       ) : null}
       {onSkip ? (

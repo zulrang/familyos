@@ -97,7 +97,7 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 3);
+    assert.equal(version.user_version, 4);
   });
 
   test("persists full recurrence and assignment unions", () => {

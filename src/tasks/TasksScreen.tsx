@@ -472,7 +472,7 @@ export function TasksScreen() {
           kind: "complete-bounty",
           requestId: crypto.randomUUID(),
           claim: row.claim.id,
-          revision: row.claim.revision,
+          revision: row.revision,
         }),
       });
       if (await redirectIfPairingRequired(res)) return;
@@ -482,6 +482,29 @@ export function TasksScreen() {
     } catch {
       await load().catch(() => undefined);
       setError("Could not complete Bounty.");
+    }
+  }
+
+  async function releaseBountyClaim(row: ClaimedBounty) {
+    if (row.state.kind !== "unfinished") return;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "release-bounty",
+          requestId: crypto.randomUUID(),
+          claim: row.claim.id,
+          revision: row.revision,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      const failure = !res.ok ? "Could not release Bounty." : null;
+      await load();
+      if (failure) setError(failure);
+    } catch {
+      await load().catch(() => undefined);
+      setError("Could not release Bounty.");
     }
   }
 
@@ -638,6 +661,7 @@ export function TasksScreen() {
           onEdit={openEditor}
           onClaimBounty={(row) => claimBountyOffering(row).catch(() => {})}
           onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
+          onReleaseBounty={(row) => releaseBountyClaim(row).catch(() => {})}
           onAddBounty={() =>
             setEditor({ kind: "bounty", draft: { title: "", stars: "0" } })
           }

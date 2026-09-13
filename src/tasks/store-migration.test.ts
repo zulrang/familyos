@@ -73,7 +73,7 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
     expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
       9,
     );
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(3);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(4);
     expect(
       db
         .prepare(
@@ -81,6 +81,87 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
         )
         .get()?.count,
     ).toBe(5);
+  } finally {
+    db.close();
+  }
+});
+
+test("version-three claims and durable receipts survive the release expansion", () => {
+  const db = new DatabaseSync(":memory:");
+  const command = parseBountyCommand({
+    kind: "claim-bounty",
+    requestId: "accepted-v3-claim",
+    offering: { kind: "once", definition: "bounty" },
+    member: "dad",
+  });
+  const today = parseLocalDate("2026-09-13");
+  expect(command?.kind).toBe("claim-bounty");
+  expect(today).not.toBeNull();
+  if (!command || command.kind !== "claim-bounty" || !today) {
+    throw new Error("invalid test fixture");
+  }
+  try {
+    const response = JSON.stringify({
+      status: "accepted",
+      result: {
+        kind: "claimed",
+        claim: {
+          id: "claim",
+          offering: command.offering,
+          member: "dad",
+          scheduledOn: today,
+          title: "Wash car",
+          stars: 5,
+          revision: 0,
+        },
+      },
+    });
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE bounty_definitions (creation_order INTEGER PRIMARY KEY, id TEXT UNIQUE, lineage TEXT, title TEXT, type TEXT, recurrence TEXT, stars INTEGER, retired_at TEXT);
+      CREATE TABLE bounty_offerings (id TEXT PRIMARY KEY, definition_id TEXT UNIQUE REFERENCES bounty_definitions(id), kind TEXT);
+      CREATE TABLE bounty_claims (id TEXT PRIMARY KEY, offering_id TEXT UNIQUE REFERENCES bounty_offerings(id), definition_id TEXT REFERENCES bounty_definitions(id), member TEXT, scheduled_on TEXT, title TEXT, stars INTEGER, revision INTEGER, state TEXT CHECK (state IN ('unfinished', 'completed')), created_at TEXT);
+      CREATE TABLE bounty_completions (id TEXT PRIMARY KEY, claim_id TEXT UNIQUE REFERENCES bounty_claims(id), request_id TEXT UNIQUE, member TEXT, completed_at TEXT, credited_stars INTEGER);
+      CREATE TABLE bounty_command_receipts (request_id TEXT PRIMARY KEY, kind TEXT CHECK (kind IN ('claim-bounty', 'complete-bounty')), payload TEXT, response TEXT);
+      CREATE TRIGGER bounty_claims_update_guard BEFORE UPDATE ON bounty_claims BEGIN SELECT RAISE(ABORT, 'old claim guard'); END;
+      CREATE TRIGGER bounty_claims_no_delete BEFORE DELETE ON bounty_claims BEGIN SELECT RAISE(ABORT, 'old claim guard'); END;
+      CREATE TRIGGER bounty_receipts_no_update BEFORE UPDATE ON bounty_command_receipts BEGIN SELECT RAISE(ABORT, 'old receipt guard'); END;
+      CREATE TRIGGER bounty_receipts_no_delete BEFORE DELETE ON bounty_command_receipts BEGIN SELECT RAISE(ABORT, 'old receipt guard'); END;
+      INSERT INTO bounty_definitions VALUES (1, 'bounty', 'lineage', 'Wash car', 'chore', 'once', 5, NULL);
+      INSERT INTO bounty_offerings VALUES ('offering', 'bounty', 'once');
+      INSERT INTO bounty_claims VALUES ('claim', 'offering', 'bounty', 'dad', '2026-09-13', 'Wash car', 5, 0, 'unfinished', '2026-09-13T12:00:00Z');
+      PRAGMA user_version = 3;
+    `);
+    db.prepare("INSERT INTO bounty_command_receipts VALUES (?, ?, ?, ?)").run(
+      command.requestId,
+      command.kind,
+      JSON.stringify(command),
+      response,
+    );
+
+    migrateBountyStore(db);
+    migrateBountyStore(db);
+
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(4);
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(
+      db.prepare("PRAGMA foreign_key_list(bounty_completions)").get()?.table,
+    ).toBe("bounty_claims");
+    expect(claimBounty({ db, command, today, memberIsActive: false })).toEqual({
+      status: "already-applied",
+      result: {
+        kind: "claimed",
+        claim: {
+          id: "claim",
+          offering: command.offering,
+          member: "dad",
+          scheduledOn: today,
+          title: "Wash car",
+          stars: 5,
+        },
+        revision: 0,
+      },
+    });
   } finally {
     db.close();
   }
@@ -125,9 +206,9 @@ test("a corrupt durable Bounty receipt is rejected before replay", () => {
       }),
     );
 
-    expect(() => claimBounty({ db, command, today })).toThrow(
-      "corrupt Bounty command receipt",
-    );
+    expect(() =>
+      claimBounty({ db, command, today, memberIsActive: true }),
+    ).toThrow("corrupt Bounty command receipt");
   } finally {
     db.close();
   }

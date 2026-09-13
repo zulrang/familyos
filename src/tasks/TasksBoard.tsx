@@ -49,6 +49,7 @@ type TaskActions = {
   onSkip: (row: Occurrence) => void;
   onEdit: (row: Occurrence) => void;
   onCompleteBounty: (row: ClaimedBounty) => void;
+  onReleaseBounty: (row: ClaimedBounty) => void;
   onClaimBounty: (row: AvailableBounty) => void;
   onAddBounty: () => void;
 };
@@ -112,6 +113,7 @@ function GroupTasks({
   onSkip,
   onEdit,
   onCompleteBounty,
+  onReleaseBounty,
 }: TaskActions & {
   group: TaskGroup;
   claimSelection: ClaimSelection | null;
@@ -187,6 +189,7 @@ function GroupTasks({
               stars={work.row.claim.stars}
               status={{ kind: "open" }}
               onComplete={() => onCompleteBounty(work.row)}
+              onRelease={!preview ? () => onReleaseBounty(work.row) : undefined}
             />
           ),
         )

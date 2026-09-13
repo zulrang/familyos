@@ -12,10 +12,12 @@ import {
   claimBounty,
   completeBounty,
   createBounty,
+  InactiveBountyMemberError,
   isBountyDefinition,
   loadAvailableBounties,
   loadBountyClaims,
   loadBountyDefinitions,
+  releaseBounty,
   taskDefinitions,
 } from "./bounty-store";
 import {
@@ -80,8 +82,11 @@ export async function handleGetTasks(
   const bountyClaims = loadBountyClaims(db).filter(
     (row) =>
       row.state.kind === "unfinished" ||
-      msToZonedDate(Date.parse(row.state.completion.at), household.timeZone) ===
-        today,
+      (row.state.kind === "completed" &&
+        msToZonedDate(
+          Date.parse(row.state.completion.at),
+          household.timeZone,
+        ) === today),
   );
   const occurrences = view(definitions, events, today);
   const progress = activeMembers(household.members).map((member) => {
@@ -198,21 +203,31 @@ export async function handleBountyCommand(
   const command = parseBountyCommand(await readJson(request));
   if (!command) return jsonError("invalid body", 400);
   const household = await readHousehold();
+  const today = parseLocalDate(
+    msToZonedDate(now.getTime(), household.timeZone),
+  );
+  if (!today) return jsonError("invalid household date", 500);
+  reconcileRetiredMembers(household.members, today);
   try {
     if (command.kind === "claim-bounty") {
-      if (memberById(household.members, command.member)?.status !== "active") {
-        return jsonError("active member required", 400);
-      }
-      const today = parseLocalDate(
-        msToZonedDate(now.getTime(), household.timeZone),
-      );
-      if (!today) return jsonError("invalid household date", 500);
-      const receipt = claimBounty({ db: tasksDatabase(), command, today });
+      const receipt = claimBounty({
+        db: tasksDatabase(),
+        command,
+        today,
+        memberIsActive:
+          memberById(household.members, command.member)?.status === "active",
+      });
       return Response.json({ receipt });
     }
-    const receipt = completeBounty({ db: tasksDatabase(), command });
+    const receipt =
+      command.kind === "complete-bounty"
+        ? completeBounty({ db: tasksDatabase(), command })
+        : releaseBounty({ db: tasksDatabase(), command });
     return Response.json({ receipt });
   } catch (error) {
+    if (error instanceof InactiveBountyMemberError) {
+      return jsonError(error.message, 400);
+    }
     if (error instanceof BountyStoreError) {
       return jsonError(error.message, 409);
     }
