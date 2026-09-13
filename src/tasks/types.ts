@@ -82,15 +82,16 @@ export type BountyClaim = Readonly<{
   scheduledOn: LocalDate;
   title: TaskTitle;
   stars: StarAmount;
-  revision: ClaimRevision;
 }>;
 
 export type ClaimedBounty = Readonly<{
   kind: "claimed-bounty";
   claim: BountyClaim;
+  revision: ClaimRevision;
   state:
     | { kind: "unfinished" }
-    | { kind: "completed"; completion: BountyCompletion };
+    | { kind: "completed"; completion: BountyCompletion }
+    | { kind: "released" };
 }>;
 
 export type BountyCompletion = Readonly<{
@@ -125,16 +126,34 @@ export type BountyCommand =
       requestId: BountyCommandId;
       claim: ClaimId;
       revision: ClaimRevision;
+    }>
+  | Readonly<{
+      kind: "release-bounty";
+      requestId: BountyCommandId;
+      claim: ClaimId;
+      revision: ClaimRevision;
     }>;
 
 export type BountyCommandReceipt =
   | {
       status: "accepted" | "already-applied";
-      result: { kind: "claimed"; claim: BountyClaim };
+      result: {
+        kind: "claimed";
+        claim: BountyClaim;
+        revision: ClaimRevision;
+      };
     }
   | {
       status: "accepted" | "already-applied";
       result: { kind: "completed"; completion: BountyCompletion };
+    }
+  | {
+      status: "accepted" | "already-applied";
+      result: {
+        kind: "released";
+        claim: BountyClaim;
+        revision: ClaimRevision;
+      };
     }
   | { status: "rejected"; error: string };
 
@@ -596,7 +615,7 @@ export function parseBountyCommand(raw: unknown): BountyCommand | null {
       ? { kind: "claim-bounty", requestId, offering, member }
       : null;
   }
-  if (raw.kind === "complete-bounty") {
+  if (raw.kind === "complete-bounty" || raw.kind === "release-bounty") {
     if (
       !hasOnlyKnownKeys(
         raw,
@@ -608,7 +627,7 @@ export function parseBountyCommand(raw: unknown): BountyCommand | null {
     const claim = parseClaimId(raw.claim);
     const revision = parseClaimRevision(raw.revision);
     return claim && revision !== null
-      ? { kind: "complete-bounty", requestId, claim, revision }
+      ? { kind: raw.kind, requestId, claim, revision }
       : null;
   }
   return null;
@@ -619,15 +638,7 @@ function parseBountyClaim(raw: unknown): BountyClaim | null {
     !isRecord(raw) ||
     !hasOnlyKnownKeys(
       raw,
-      new Set([
-        "id",
-        "offering",
-        "member",
-        "scheduledOn",
-        "title",
-        "stars",
-        "revision",
-      ]),
+      new Set(["id", "offering", "member", "scheduledOn", "title", "stars"]),
     )
   ) {
     return null;
@@ -638,19 +649,10 @@ function parseBountyClaim(raw: unknown): BountyClaim | null {
   const scheduledOn = parseLocalDate(raw.scheduledOn);
   const title = parseTaskTitle(raw.title);
   const stars = parseStarAmount(raw.stars);
-  const revision = parseClaimRevision(raw.revision);
-  if (
-    !id ||
-    !offering ||
-    !member ||
-    !scheduledOn ||
-    !title ||
-    stars === null ||
-    revision === null
-  ) {
+  if (!id || !offering || !member || !scheduledOn || !title || stars === null) {
     return null;
   }
-  return { id, offering, member, scheduledOn, title, stars, revision };
+  return { id, offering, member, scheduledOn, title, stars };
 }
 
 function parseBountyCompletion(raw: unknown): BountyCompletion | null {
@@ -695,11 +697,21 @@ export function parseBountyCommandReceipt(
   }
   if (
     raw.result.kind === "claimed" &&
-    hasOnlyKnownKeys(raw.result, new Set(["kind", "claim"]))
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "claim", "revision"]))
   ) {
-    const claim = parseBountyClaim(raw.result.claim);
-    return claim
-      ? { status: raw.status, result: { kind: "claimed", claim } }
+    const legacyClaim = isRecord(raw.result.claim) ? raw.result.claim : null;
+    const revision = parseClaimRevision(
+      raw.result.revision ?? legacyClaim?.revision,
+    );
+    const claim = parseBountyClaim(
+      legacyClaim
+        ? Object.fromEntries(
+            Object.entries(legacyClaim).filter(([key]) => key !== "revision"),
+          )
+        : raw.result.claim,
+    );
+    return claim && revision !== null
+      ? { status: raw.status, result: { kind: "claimed", claim, revision } }
       : null;
   }
   if (
@@ -709,6 +721,16 @@ export function parseBountyCommandReceipt(
     const completion = parseBountyCompletion(raw.result.completion);
     return completion
       ? { status: raw.status, result: { kind: "completed", completion } }
+      : null;
+  }
+  if (
+    raw.result.kind === "released" &&
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "claim", "revision"]))
+  ) {
+    const claim = parseBountyClaim(raw.result.claim);
+    const revision = parseClaimRevision(raw.result.revision);
+    return claim && revision !== null
+      ? { status: raw.status, result: { kind: "released", claim, revision } }
       : null;
   }
   return null;

@@ -10,6 +10,12 @@ import { handleAdminTasks } from "./admin-http";
 import { correctAdminCompletion } from "./admin-store";
 import type { TaskAdminRead } from "./admin-types";
 import {
+  claimBounty,
+  createBounty,
+  loadAvailableBounties,
+  loadBountyClaims,
+} from "./bounty-store";
+import {
   applyEvent,
   loadDefinitions,
   loadEvents,
@@ -20,7 +26,9 @@ import {
   type CreateTaskDraft,
   type LegacyTaskDefinition,
   nowInstant,
+  parseBountyCommand,
   parseLocalDate,
+  parseTaskCreateDraft,
 } from "./types";
 import { view } from "./view";
 
@@ -188,6 +196,38 @@ describe("parent administration", () => {
       assignment: { kind: "rotation", order: ["a", "b", "c"] },
     });
     complete(rotating);
+    const bountyDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      type: "chore",
+      title: "Wash patio",
+      stars: 4,
+      recurrence: { kind: "once" },
+    });
+    expect(bountyDraft?.kind).toBe("bounty");
+    if (!bountyDraft || bountyDraft.kind !== "bounty") {
+      throw new Error("Invalid Bounty fixture");
+    }
+    const bounty = createBounty(tasksDatabase(), bountyDraft);
+    const offering = loadAvailableBounties(tasksDatabase()).find(
+      (row) => row.offering.definition === bounty.id,
+    );
+    expect(offering).toBeDefined();
+    const claimCommand = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: offering?.offering,
+      member: "b",
+    });
+    expect(claimCommand?.kind).toBe("claim-bounty");
+    if (!claimCommand || claimCommand.kind !== "claim-bounty") {
+      throw new Error("Invalid claim fixture");
+    }
+    claimBounty({
+      db: tasksDatabase(),
+      command: claimCommand,
+      today,
+      members: (await readHousehold()).members,
+    });
     expect(
       (
         await saveMember(
@@ -209,6 +249,18 @@ describe("parent administration", () => {
         (row) => row.lineage === rotating.lineage && row.retiredAt === null,
       )?.assignment,
     ).toEqual({ kind: "rotation", order: ["c", "a"] });
+    const released = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.offering.definition === bounty.id,
+    );
+    expect(released).toMatchObject({
+      revision: 1,
+      state: { kind: "released" },
+    });
+    expect(
+      loadAvailableBounties(tasksDatabase()).some(
+        (row) => row.offering.definition === bounty.id,
+      ),
+    ).toBe(true);
     expect(
       (
         await tasks({
@@ -222,6 +274,11 @@ describe("parent administration", () => {
     await snapshot();
     await snapshot();
     expect(loadDefinitions()).toHaveLength(3);
+    expect(
+      loadBountyClaims(tasksDatabase()).filter(
+        (row) => row.claim.offering.definition === bounty.id,
+      ),
+    ).toHaveLength(1);
   });
   test("membership validation and concurrent edits preserve the roster", async () => {
     const collision = await saveMember(

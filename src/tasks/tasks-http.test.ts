@@ -1418,6 +1418,197 @@ describe("Tasks HTTP", () => {
     );
   });
 
+  test("release preserves the offering and snapshot while reclaim captures fresh terms", async () => {
+    const firstDay = new Date("2026-09-13T16:00:00Z");
+    const secondDay = new Date("2026-09-14T16:00:00Z");
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Clean windows",
+          stars: 3,
+          recurrence: { kind: "once" },
+        }),
+      }),
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+    const advertised = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), firstDay)
+    ).json()) as TasksViewRead;
+    const firstOffering = advertised.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(firstOffering);
+
+    await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: firstOffering.offering,
+          member: "dad",
+        }),
+      }),
+      firstDay,
+    );
+    const claimed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), firstDay)
+    ).json()) as TasksViewRead;
+    const firstClaim = claimed.bountyClaims.find(
+      (row) => row.claim.offering.definition === definition.id,
+    );
+    assert.ok(firstClaim);
+
+    const releaseRequest = crypto.randomUUID();
+    const releaseCommand = {
+      kind: "release-bounty",
+      requestId: releaseRequest,
+      claim: firstClaim.claim.id,
+      revision: firstClaim.revision,
+    };
+    const released = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify(releaseCommand),
+      }),
+      firstDay,
+    );
+    assert.equal(released.status, 200);
+    assert.deepEqual((await released.json()).receipt.result, {
+      kind: "released",
+      claim: {
+        id: firstClaim.claim.id,
+        offering: firstOffering.offering,
+        member: "dad",
+        scheduledOn: "2026-09-13",
+        title: "Clean windows",
+        stars: 3,
+      },
+      revision: 1,
+    });
+
+    closeTasksDatabase();
+    const retry = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify(releaseCommand),
+      }),
+      firstDay,
+    );
+    assert.equal((await retry.json()).receipt.status, "already-applied");
+    const releasedView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), firstDay)
+    ).json()) as TasksViewRead;
+    const reopened = releasedView.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(reopened);
+    assert.equal(reopened.id, firstOffering.id);
+    assert.equal(
+      releasedView.bountyClaims.some(
+        (row) => row.claim.id === firstClaim.claim.id,
+      ),
+      false,
+    );
+
+    tasksDatabase()
+      .prepare(
+        "UPDATE bounty_definitions SET title = ?, stars = ? WHERE id = ?",
+      )
+      .run("Polish windows", 8, definition.id);
+    await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: reopened.offering,
+          member: "ellie",
+        }),
+      }),
+      secondDay,
+    );
+    const reclaimed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), secondDay)
+    ).json()) as TasksViewRead;
+    const replacement = reclaimed.bountyClaims.find(
+      (row) => row.claim.offering.definition === definition.id,
+    );
+    assert.ok(replacement);
+    assert.notEqual(replacement.claim.id, firstClaim.claim.id);
+    assert.equal(replacement.claim.member, "ellie");
+    assert.equal(replacement.claim.scheduledOn, "2026-09-14");
+    assert.equal(replacement.claim.title, "Polish windows");
+    assert.equal(replacement.claim.stars, 8);
+
+    for (const kind of ["complete-bounty", "release-bounty"] as const) {
+      const stale = await handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind,
+            requestId: crypto.randomUUID(),
+            claim: firstClaim.claim.id,
+            revision: firstClaim.revision,
+          }),
+        }),
+        secondDay,
+      );
+      assert.equal(stale.status, 409);
+    }
+    const ellieBefore =
+      reclaimed.starBalances.find((row) => row.member === "ellie")?.balance ??
+      0;
+    const completedReplacement = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "complete-bounty",
+          requestId: crypto.randomUUID(),
+          claim: replacement.claim.id,
+          revision: replacement.revision,
+        }),
+      }),
+      secondDay,
+    );
+    assert.equal(completedReplacement.status, 200);
+    const completedView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), secondDay)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      completedView.starBalances.find((row) => row.member === "ellie")?.balance,
+      ellieBefore + 8,
+    );
+    const history = tasksDatabase()
+      .prepare(
+        "SELECT id, member, scheduled_on, title, stars, revision, state FROM bounty_claims WHERE offering_id = ? ORDER BY rowid",
+      )
+      .all(firstOffering.id)
+      .map((row) => ({ ...row }));
+    assert.deepEqual(history, [
+      {
+        id: firstClaim.claim.id,
+        member: "dad",
+        scheduled_on: "2026-09-13",
+        title: "Clean windows",
+        stars: 3,
+        revision: 1,
+        state: "released",
+      },
+      {
+        id: replacement.claim.id,
+        member: "ellie",
+        scheduled_on: "2026-09-14",
+        title: "Polish windows",
+        stars: 8,
+        revision: 1,
+        state: "completed",
+      },
+    ]);
+  });
+
   test("Bounty boundaries reject illegal definition shapes, ineligible members, and legacy events", async () => {
     const invalidBodies = [
       {
@@ -1599,10 +1790,12 @@ describe("Tasks HTTP", () => {
     const claimed = (await (
       await handleGetTasks(req("http://familyos.test/api/tasks"))
     ).json()) as TasksViewRead;
-    const claim = claimed.bountyClaims.find(
+    const claimedBounty = claimed.bountyClaims.find(
       (row) => row.claim.offering.definition === definition.id,
-    )?.claim;
+    );
+    const claim = claimedBounty?.claim;
     assert.ok(claim);
+    assert.ok(claimedBounty);
     const first = await handleBountyCommand(
       req("http://familyos.test/api/tasks", {
         method: "PATCH",
@@ -1610,7 +1803,7 @@ describe("Tasks HTTP", () => {
           kind: "complete-bounty",
           requestId: crypto.randomUUID(),
           claim: claim.id,
-          revision: claim.revision,
+          revision: claimedBounty.revision,
         }),
       }),
     );
@@ -1622,7 +1815,7 @@ describe("Tasks HTTP", () => {
           kind: "complete-bounty",
           requestId: crypto.randomUUID(),
           claim: claim.id,
-          revision: claim.revision,
+          revision: claimedBounty.revision,
         }),
       }),
     );
@@ -1636,5 +1829,201 @@ describe("Tasks HTTP", () => {
       after.starBalances.find((row) => row.member === "ellie")?.balance,
       balanceBefore + 6,
     );
+  });
+
+  test("completion and release serialize against the same claim revision", async () => {
+    const before = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Rake leaves",
+          stars: 9,
+          recurrence: { kind: "once" },
+        }),
+      }),
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+    const available = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const offering = available.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    )?.offering;
+    assert.ok(offering);
+    await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering,
+          member: "dad",
+        }),
+      }),
+    );
+    const claimed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const row = claimed.bountyClaims.find(
+      (candidate) => candidate.claim.offering.definition === definition.id,
+    );
+    assert.ok(row);
+    const commands = ["complete-bounty", "release-bounty"].map((kind) =>
+      handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind,
+            requestId: crypto.randomUUID(),
+            claim: row.claim.id,
+            revision: row.revision,
+          }),
+        }),
+      ),
+    );
+    const responses = await Promise.all(commands);
+    assert.deepEqual(
+      responses.map((response) => response.status).sort(),
+      [200, 409],
+    );
+    const after = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const balanceBefore =
+      before.starBalances.find((balance) => balance.member === "dad")
+        ?.balance ?? 0;
+    const completionWon = responses[0]?.status === 200;
+    assert.equal(
+      after.starBalances.find((balance) => balance.member === "dad")?.balance ??
+        0,
+      completionWon ? balanceBefore + 9 : balanceBefore,
+    );
+    assert.equal(
+      after.availableBounties.some(
+        (candidate) => candidate.offering.definition === definition.id,
+      ),
+      !completionWon,
+    );
+  });
+
+  test("an accepted claim receipt replays after retirement without creating work for a retired member", async () => {
+    const first = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Receipt replay",
+          stars: 2,
+          recurrence: { kind: "once" },
+        }),
+      }),
+    );
+    const second = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Fresh retired claim",
+          stars: 2,
+          recurrence: { kind: "once" },
+        }),
+      }),
+    );
+    const firstDefinition = (await first.json()).definition as BountyDefinition;
+    const secondDefinition = (await second.json())
+      .definition as BountyDefinition;
+    const available = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"))
+    ).json()) as TasksViewRead;
+    const firstOffering = available.availableBounties.find(
+      (row) => row.offering.definition === firstDefinition.id,
+    )?.offering;
+    const secondOffering = available.availableBounties.find(
+      (row) => row.offering.definition === secondDefinition.id,
+    )?.offering;
+    assert.ok(firstOffering);
+    assert.ok(secondOffering);
+    const command = {
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: firstOffering,
+      member: "ellie",
+    };
+    const accepted = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify(command),
+      }),
+    );
+    assert.equal(accepted.status, 200);
+    const acceptedBody = await accepted.json();
+    await writeHousehold({
+      familyName: "TasksHousehold",
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        { id: "ellie", name: "Ellie", status: "retired" },
+      ],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 2,
+    });
+    try {
+      const replay = await handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify(command),
+        }),
+      );
+      assert.equal(replay.status, 200);
+      assert.deepEqual(await replay.json(), {
+        receipt: { ...acceptedBody.receipt, status: "already-applied" },
+      });
+      const fresh = await handleBountyCommand(
+        req("http://familyos.test/api/tasks", {
+          method: "PATCH",
+          body: JSON.stringify({
+            kind: "claim-bounty",
+            requestId: crypto.randomUUID(),
+            offering: secondOffering,
+            member: "ellie",
+          }),
+        }),
+      );
+      assert.equal(fresh.status, 400);
+      const retiredView = (await (
+        await handleGetTasks(req("http://familyos.test/api/tasks"))
+      ).json()) as TasksViewRead;
+      assert.equal(
+        retiredView.bountyClaims.some(
+          (row) => row.claim.offering.definition === firstDefinition.id,
+        ),
+        false,
+      );
+      assert.equal(
+        retiredView.availableBounties.some(
+          (row) => row.offering.definition === firstDefinition.id,
+        ),
+        true,
+      );
+    } finally {
+      await writeHousehold({
+        familyName: "TasksHousehold",
+        members: [
+          { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+          { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+        ],
+        calendarId: null,
+        calendarTimeZone: null,
+        listIds: [],
+        timeZone: "America/New_York",
+        configVersion: 3,
+      });
+    }
   });
 });

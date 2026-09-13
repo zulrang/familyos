@@ -50,9 +50,10 @@ type TaskActions = {
   onSkip: (row: Occurrence) => void;
   onEdit: (row: Occurrence) => void;
   onCompleteBounty: (row: ClaimedBounty) => void;
+  onReleaseBounty: (row: ClaimedBounty) => void;
   onClaimBounty: (row: AvailableBounty) => void;
   onAddBounty: () => void;
-  completingBountyClaims: ReadonlySet<ClaimId>;
+  mutatingBountyClaims: ReadonlySet<ClaimId>;
 };
 
 const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
@@ -114,7 +115,8 @@ function GroupTasks({
   onSkip,
   onEdit,
   onCompleteBounty,
-  completingBountyClaims,
+  onReleaseBounty,
+  mutatingBountyClaims,
 }: TaskActions & {
   group: TaskGroup;
   claimSelection: ClaimSelection | null;
@@ -189,8 +191,9 @@ function GroupTasks({
               label={work.row.claim.title}
               stars={work.row.claim.stars}
               status={{ kind: "open" }}
-              completionPending={completingBountyClaims.has(work.row.claim.id)}
+              mutationPending={mutatingBountyClaims.has(work.row.claim.id)}
               onComplete={() => onCompleteBounty(work.row)}
+              onRelease={!preview ? () => onReleaseBounty(work.row) : undefined}
             />
           ),
         )
