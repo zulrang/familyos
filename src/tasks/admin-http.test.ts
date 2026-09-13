@@ -394,6 +394,7 @@ describe("parent administration", () => {
       ...draft,
       title: "Morning check",
       type: "routine",
+      recurrence: { kind: "weekly", days: ["mon", "fri"] },
       assignment: { kind: "open" },
     });
     const metadataEdit = {
@@ -403,6 +404,7 @@ describe("parent administration", () => {
         ...draft,
         title: "Morning checklist",
         type: "routine",
+        recurrence: { kind: "weekly", days: ["fri", "mon"] },
         assignment: { kind: "open" },
         time: "08:00",
         stars: 1,
@@ -414,7 +416,7 @@ describe("parent administration", () => {
         title: "Morning checklist",
         type: "routine",
         assignment: { kind: "open" },
-        recurrence: { kind: "daily" },
+        recurrence: { kind: "weekly", days: ["mon", "fri"] },
         time: "08:00",
         stars: 1,
       },
@@ -425,7 +427,7 @@ describe("parent administration", () => {
           ...metadataEdit,
           draft: {
             ...metadataEdit.draft,
-            recurrence: { kind: "weekly", days: ["mon"] },
+            recurrence: { kind: "weekly", days: ["tue"] },
           },
         })
       ).status,
