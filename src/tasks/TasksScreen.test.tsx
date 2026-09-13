@@ -376,7 +376,7 @@ describe("TasksScreen", () => {
       recurrence: { kind: "once" },
       revision: 0,
       retiredAt: null,
-    } as BountyDefinition;
+    } as unknown as BountyDefinition;
     const available = {
       kind: "available",
       id: "offering-zero",
@@ -529,6 +529,161 @@ describe("TasksScreen", () => {
     render(<TasksScreen />);
     await user.click(await screen.findByRole("button", { name: "Bounties" }));
     expect(screen.getByText("No Bounties available")).toBeVisible();
+  });
+
+  test("recurring creation never seeds the placeholder date while Tasks are still loading", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-09-14T04:00:00Z"));
+    let resolveTasks: ((response: Response) => void) | undefined;
+    const tasksResponse = new Promise<Response>((resolve) => {
+      resolveTasks = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = urlOf(input);
+        if (url.endsWith("/api/settings")) return json(settings);
+        if (url.endsWith("/api/tasks")) return tasksResponse;
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    render(<TasksScreen />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Bounties" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bounty" }));
+    const dialog = screen.getByRole("dialog", { name: "New Bounty" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Daily" }));
+    const date = within(dialog).getByLabelText("Starting date");
+    expect(date).toHaveValue("2026-09-14");
+
+    resolveTasks?.(json(emptyView()));
+    await act(async () => {});
+  });
+
+  test("recurring creation uses the live Household date after a stale Tasks read crosses midnight", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-09-14T04:00:00Z"));
+    const stale = { ...emptyView(), today: "2026-09-13" } as TasksViewRead;
+    installFetch(stale);
+    render(<TasksScreen />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Bounties" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Bounty" }));
+    const dialog = screen.getByRole("dialog", { name: "New Bounty" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Daily" }));
+    expect(within(dialog).getByLabelText("Starting date")).toHaveValue(
+      "2026-09-14",
+    );
+  });
+
+  test("the Bounty editor creates and claims a selected-weekday offering", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-25T16:00:00Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const initial = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "weekday-bounty",
+      lineage: "weekday-bounty-lineage",
+      type: "chore",
+      title: "Water the garden",
+      stars: 2,
+      recurrence: {
+        kind: "recurring",
+        startsOn: initial.today,
+        cadence: { kind: "weekly", days: ["tue"] },
+      },
+      revision: 0,
+      retiredAt: null,
+    } as unknown as BountyDefinition;
+    const offering = {
+      kind: "available",
+      id: "weekday-offering",
+      offering: {
+        kind: "recurring",
+        definition: definition.id,
+        intervalStart: initial.today,
+      },
+      title: definition.title,
+      stars: definition.stars,
+      definitionRevision: definition.revision,
+    } as AvailableBounty;
+    const afterCreate: TasksViewRead = {
+      ...initial,
+      bountyDefinitions: [definition],
+      availableBounties: [offering],
+    };
+    const afterClaim: TasksViewRead = {
+      ...afterCreate,
+      availableBounties: [],
+      bountyClaims: [
+        {
+          kind: "claimed-bounty",
+          claim: {
+            id: "weekday-claim",
+            offering: offering.offering,
+            member: "dad",
+            scheduledOn: initial.today,
+            title: offering.title,
+            stars: offering.stars,
+          },
+          revision: 0,
+          state: { kind: "unfinished" },
+        } as ClaimedBounty,
+      ],
+      progress: initial.progress.map((row) =>
+        row.member === "dad" ? { ...row, total: 1 } : row,
+      ),
+    };
+    const fetchMock = installScriptedBountyFetch(
+      [initial, afterCreate, afterClaim],
+      [
+        { method: "POST", response: { definition } },
+        { method: "PATCH", response: { receipt: { status: "accepted" } } },
+      ],
+    );
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    await user.click(screen.getByRole("button", { name: "Add Bounty" }));
+    const dialog = screen.getByRole("dialog", { name: "New Bounty" });
+    await user.click(within(dialog).getByRole("button", { name: "Weekdays" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "Choose at least one weekday",
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Add Bounty" }),
+    ).toBeDisabled();
+    await user.click(within(dialog).getByRole("button", { name: "Tue" }));
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Bounty title" }),
+      "Water the garden",
+    );
+    const stars = within(dialog).getByRole("textbox", { name: "Stars" });
+    await user.click(stars);
+    await user.keyboard("2");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add Bounty" }),
+    );
+    expect(await screen.findByText("Water the garden")).toBeVisible();
+    expect(submittedRecurrence(fetchMock)).toEqual({
+      kind: "recurring",
+      startsOn: initial.today,
+      cadence: { kind: "weekly", days: ["tue"] },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Claim Water the garden" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+    const claimCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") && init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(claimCall?.[1]?.body))).toMatchObject({
+      kind: "claim-bounty",
+      offering: offering.offering,
+    });
   });
 
   test("a member releases a Bounty and another member can claim the same offering", async () => {

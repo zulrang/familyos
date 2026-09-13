@@ -78,7 +78,7 @@ export async function handleGetTasks(
   const bountyDefinitions = variants.filter(
     (definition) => definition.kind === "bounty",
   );
-  const availableBounties = loadAvailableBounties(db);
+  const availableBounties = loadAvailableBounties(db, today);
   const bountyClaims = loadBountyClaims(db).filter(
     (row) =>
       row.state.kind === "unfinished" ||
@@ -137,17 +137,24 @@ function hasInactiveAssignee(
   );
 }
 
-export async function handleCreateTask(request: Request): Promise<Response> {
+export async function handleCreateTask(
+  request: Request,
+  now = new Date(),
+): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
   const draft = parseTaskCreateDraft(await readJson(request));
   if (!draft) return jsonError("invalid body", 400);
+  const household = await readHousehold();
   if (draft.kind === "bounty") {
-    const definition = createBounty(tasksDatabase(), draft);
+    const today = parseLocalDate(
+      msToZonedDate(now.getTime(), household.timeZone),
+    );
+    if (!today) return jsonError("invalid household date", 500);
+    const definition = createBounty(tasksDatabase(), draft, today);
     return Response.json({ definition });
   }
   const { kind: _kind, ...assignedDraft } = draft;
-  const household = await readHousehold();
   if (hasInactiveAssignee(assignedDraft.assignment, household.members)) {
     return jsonError("active member required", 400);
   }
