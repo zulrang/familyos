@@ -77,7 +77,7 @@ fi
 LISTEN_PID=
 SLEEP_PID=
 interruptible_sleep() {
-  sleep "$1" &
+  sleep "$1" 9>&- &
   SLEEP_PID=$!
   wait "$SLEEP_PID" 2>/dev/null || true
   SLEEP_PID=
