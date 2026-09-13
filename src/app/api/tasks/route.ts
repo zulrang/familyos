@@ -1,4 +1,5 @@
 import {
+  handleBountyCommand,
   handleCreateTask,
   handleGetTasks,
   handleSaveTask,
@@ -14,4 +15,8 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   return handleSaveTask(request);
+}
+
+export async function PATCH(request: Request) {
+  return handleBountyCommand(request);
 }

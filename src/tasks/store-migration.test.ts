@@ -1,5 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { expect, test } from "vitest";
+import { migrateBountyStore } from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
 
 test("version-one data survives migration; balances start at zero and new credits apply once", () => {
@@ -46,6 +47,39 @@ test("version-one data survives migration; balances start at zero and new credit
     expect(() =>
       db.exec("UPDATE definitions SET title = 'Changed' WHERE id = 'task'"),
     ).toThrow(/retired definition is frozen/);
+  } finally {
+    db.close();
+  }
+});
+
+test("version-two assigned Tasks survive the transactional Bounty expansion", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec(`
+      CREATE TABLE definitions (creation_order INTEGER PRIMARY KEY, id TEXT UNIQUE, lineage TEXT, title TEXT, type TEXT, recurrence TEXT, assignment TEXT, time TEXT, stars INTEGER, retired_at TEXT);
+      CREATE TABLE events (task TEXT, window TEXT, kind TEXT, by TEXT, at TEXT, reason TEXT, PRIMARY KEY (task, window, kind));
+      CREATE TABLE star_adjustments (id TEXT PRIMARY KEY, member TEXT, delta INTEGER, reason TEXT, at TEXT);
+      CREATE TABLE star_balances (member TEXT PRIMARY KEY, balance INTEGER);
+      INSERT INTO definitions VALUES (1, 'assigned', 'lineage', 'Dishes', 'chore', '{"kind":"daily"}', '{"kind":"fixed","member":"a"}', NULL, 3, NULL);
+      INSERT INTO star_balances VALUES ('a', 9);
+      PRAGMA user_version = 2;
+    `);
+    migrateBountyStore(db);
+    migrateBountyStore(db);
+    expect(db.prepare("SELECT title FROM definitions").get()?.title).toBe(
+      "Dishes",
+    );
+    expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
+      9,
+    );
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(3);
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'bounty_%'",
+        )
+        .get()?.count,
+    ).toBe(5);
   } finally {
     db.close();
   }

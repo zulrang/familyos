@@ -19,6 +19,8 @@ import { TaskCelebration } from "./TaskCelebration";
 import styles from "./TaskEditor.module.css";
 import { TasksBoard } from "./TasksBoard";
 import {
+  type AvailableBounty,
+  type ClaimedBounty,
   nowInstant,
   type Occurrence,
   type Recurrence,
@@ -54,6 +56,9 @@ function emptyView(): TasksViewRead {
     progress: [],
     starBalances: [],
     definitions: [],
+    bountyDefinitions: [],
+    availableBounties: [],
+    bountyClaims: [],
     today: "1970-01-01" as TasksViewRead["today"],
     generatedAt: nowInstant(),
   };
@@ -88,6 +93,8 @@ type Draft = DraftFields & {
   assignment: DraftAssignment;
   task: TaskId | null;
 };
+
+type BountyDraft = { title: string; stars: string };
 
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
@@ -160,7 +167,8 @@ function sheetFromDefinition(definition: TaskDefinition): Draft {
 
 type MemberAction =
   | { kind: "claim"; occurrence: Occurrence }
-  | { kind: "complete"; occurrence: Occurrence };
+  | { kind: "complete"; occurrence: Occurrence }
+  | { kind: "claim-bounty"; bounty: AvailableBounty };
 
 const SKIP_PRESETS = ["Away", "Sick", "Not needed"] as const;
 
@@ -281,6 +289,7 @@ export function TasksScreen() {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
   const [sheet, setSheet] = useState<Draft | null>(null);
+  const [bountySheet, setBountySheet] = useState<BountyDraft | null>(null);
   const [memberAction, setMemberAction] = useState<MemberAction | null>(null);
   const [skipping, setSkipping] = useState<Occurrence | null>(null);
   const [skipNote, setSkipNote] = useState("");
@@ -422,6 +431,83 @@ export function TasksScreen() {
     }
   }
 
+  async function claimBountyOffering(bounty: AvailableBounty, member?: string) {
+    if (!member) {
+      setMemberAction({ kind: "claim-bounty", bounty });
+      return;
+    }
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: bounty.offering,
+          member,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) setError("Could not claim Bounty.");
+      await load();
+    } catch {
+      setError("Could not claim Bounty.");
+      await load();
+    }
+  }
+
+  async function completeBountyClaim(row: ClaimedBounty) {
+    if (row.state.kind !== "unfinished") return;
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "complete-bounty",
+          requestId: crypto.randomUUID(),
+          claim: row.claim.id,
+          revision: row.claim.revision,
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) setError("Could not complete Bounty.");
+      await load();
+    } catch {
+      setError("Could not complete Bounty.");
+      await load();
+    }
+  }
+
+  async function saveBounty() {
+    if (!bountySheet) return;
+    const title = bountySheet.title.trim();
+    const stars = Number(bountySheet.stars);
+    if (!title || !Number.isSafeInteger(stars) || stars < 0) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "bounty",
+          type: "chore",
+          title,
+          stars,
+          recurrence: { kind: "once" },
+        }),
+      });
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) {
+        setError("Could not create Bounty.");
+        return;
+      }
+      setBountySheet(null);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function skip(occ: Occurrence, reason: string | null) {
     setSkipping(null);
     setSkipNote("");
@@ -555,6 +641,9 @@ export function TasksScreen() {
             setSkipping(row);
           }}
           onEdit={openEditor}
+          onClaimBounty={(row) => claimBountyOffering(row).catch(() => {})}
+          onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
+          onAddBounty={() => setBountySheet({ title: "", stars: "0" })}
           claimSelection={
             memberAction?.kind === "claim"
               ? {
@@ -599,6 +688,15 @@ export function TasksScreen() {
           onSave={saveTask}
         />
       ) : null}
+      {bountySheet ? (
+        <BountySheet
+          draft={bountySheet}
+          busy={busy}
+          onChange={setBountySheet}
+          onClose={() => setBountySheet(null)}
+          onSave={saveBounty}
+        />
+      ) : null}
       {memberAction?.kind === "complete" ? (
         <MemberPicker
           action={memberAction.kind}
@@ -608,6 +706,18 @@ export function TasksScreen() {
             const action = memberAction;
             setMemberAction(null);
             complete(action.occurrence, member.id).catch(() => {});
+          }}
+        />
+      ) : null}
+      {memberAction?.kind === "claim-bounty" ? (
+        <MemberPicker
+          action={memberAction.kind}
+          members={members}
+          onClose={() => setMemberAction(null)}
+          onPick={(member) => {
+            const bounty = memberAction.bounty;
+            setMemberAction(null);
+            claimBountyOffering(bounty, member.id).catch(() => {});
           }}
         />
       ) : null}
@@ -625,6 +735,92 @@ export function TasksScreen() {
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+function BountySheet({
+  draft,
+  busy,
+  onChange,
+  onClose,
+  onSave,
+}: {
+  draft: BountyDraft;
+  busy: boolean;
+  onChange: (draft: BountyDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const stars = Number(draft.stars);
+  const canSave =
+    draft.title.trim().length > 0 && Number.isSafeInteger(stars) && stars >= 0;
+  return (
+    <div className={styles.overlay}>
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className={styles.backdrop}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="bounty-editor-title"
+        className={styles.panel}
+      >
+        <div className={styles.header}>
+          <h2
+            id="bounty-editor-title"
+            style={{ font: "var(--type-section)", flex: 1 }}
+          >
+            New Bounty
+          </h2>
+          <IconButton icon="x" label="Close" onClick={onClose} />
+        </div>
+        <div className={styles.body}>
+          <label className={styles.title}>
+            Bounty title
+            <input
+              className="fos-input"
+              aria-label="Bounty title"
+              value={draft.title}
+              onChange={(event) =>
+                onChange({ ...draft, title: event.target.value })
+              }
+            />
+          </label>
+          <section className={styles.details}>
+            <h3>Reward</h3>
+            <label>
+              Stars
+              <input
+                className="fos-input"
+                inputMode="numeric"
+                type="text"
+                pattern="[0-9]*"
+                aria-label="Stars"
+                value={draft.stars}
+                onFocus={(event) => event.currentTarget.select()}
+                onClick={(event) => event.currentTarget.select()}
+                onChange={(event) =>
+                  onChange({ ...draft, stars: event.target.value })
+                }
+              />
+            </label>
+          </section>
+        </div>
+        <div className={styles.footer}>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy || !canSave}
+            onClick={onSave}
+          >
+            Add Bounty
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1034,7 +1230,12 @@ function MemberPicker({
   onClose: () => void;
   onPick: (member: ActiveMember) => void;
 }) {
-  const title = action === "claim" ? "Claim task" : "Complete task";
+  const title =
+    action === "claim-bounty"
+      ? "Claim Bounty"
+      : action === "claim"
+        ? "Claim task"
+        : "Complete task";
   return (
     <div
       style={{

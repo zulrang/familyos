@@ -20,6 +20,7 @@ export type TaskRowStatus =
 export function TaskRow({
   label,
   time,
+  stars,
   status,
   onComplete,
   onClaim,
@@ -29,6 +30,7 @@ export function TaskRow({
 }: {
   label: string;
   time?: LocalTime | null;
+  stars?: number;
   status: TaskRowStatus;
   onComplete?: () => void;
   onClaim?: () => void;
@@ -66,6 +68,11 @@ export function TaskRow({
         )}
         {time ? (
           <span className={styles.taskMeta}>{formatTaskTime(time)}</span>
+        ) : null}
+        {stars !== undefined ? (
+          <span className={styles.taskMeta}>
+            {stars} {stars === 1 ? "Star" : "Stars"}
+          </span>
         ) : null}
         {status.kind === "skipped" ? (
           <span className={styles.taskMeta}>{status.reason ?? "Skipped"}</span>

@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataDir } from "@/shared/data-path";
 import type { CompletionCorrection } from "./admin-types";
+import { migrateBountyStore } from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
 import {
   type CreateTaskDraft,
@@ -126,7 +127,6 @@ BEGIN
     );
 END;
 
-PRAGMA user_version = 2;
 `;
 
 type Cached = { dir: string; db: DatabaseSync };
@@ -142,12 +142,19 @@ export function tasksDatabase(): DatabaseSync {
   try {
     db.exec(SCHEMA);
     migrateTaskAdministration(db);
+    migrateBountyStore(db);
   } catch (error) {
     db.close();
     throw error;
   }
   cached = { dir, db };
   return db;
+}
+
+/** Close the process-local handle; the next access reopens persistent storage. */
+export function closeTasksDatabase(): void {
+  cached?.db.close();
+  cached = null;
 }
 
 function parseJson(raw: unknown): unknown {

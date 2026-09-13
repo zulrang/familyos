@@ -18,7 +18,14 @@ import {
   skipOccurrence,
   TasksScreen,
 } from "./TasksScreen";
-import type { Occurrence, TaskDefinition, TasksViewRead } from "./types";
+import type {
+  AvailableBounty,
+  BountyDefinition,
+  ClaimedBounty,
+  Occurrence,
+  TaskDefinition,
+  TasksViewRead,
+} from "./types";
 
 // jsdom does not implement the native modal dialog methods.
 beforeEach(() => {
@@ -77,6 +84,9 @@ function emptyView(): TasksViewRead {
     ],
     starBalances: [],
     definitions: [],
+    bountyDefinitions: [],
+    availableBounties: [],
+    bountyClaims: [],
     today: "2026-08-25" as TasksViewRead["today"],
     generatedAt: "2026-08-25T16:00:00Z" as TasksViewRead["generatedAt"],
   };
@@ -94,12 +104,109 @@ function installFetch(store: TasksViewRead) {
       if (method === "GET" && url.endsWith("/api/tasks")) {
         return json(store);
       }
+      if (method === "PATCH" && url.endsWith("/api/tasks")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        if (body.kind === "claim-bounty") {
+          const offering = body.offering as { definition: string };
+          const available = store.availableBounties.find(
+            (row) => row.offering.definition === offering.definition,
+          );
+          if (!available) return json({ error: "unavailable" }, 409);
+          const member = String(body.member);
+          store.availableBounties = store.availableBounties.filter(
+            (row) => row.id !== available.id,
+          );
+          store.bountyClaims = [
+            ...store.bountyClaims,
+            {
+              kind: "claimed-bounty",
+              claim: {
+                id: `claim-${available.id}`,
+                offering: available.offering,
+                member,
+                scheduledOn: store.today,
+                title: available.title,
+                stars: available.stars,
+                revision: 0,
+              },
+              state: { kind: "unfinished" },
+            } as ClaimedBounty,
+          ];
+          store.progress = store.progress.map((row) =>
+            row.member === member ? { ...row, total: row.total + 1 } : row,
+          );
+          return json({ receipt: { status: "accepted" } });
+        }
+        if (body.kind === "complete-bounty") {
+          const target = store.bountyClaims.find(
+            (row) => row.claim.id === body.claim,
+          );
+          if (!target || target.state.kind !== "unfinished") {
+            return json({ error: "stale" }, 409);
+          }
+          store.bountyClaims = store.bountyClaims.map((row) =>
+            row.claim.id === target.claim.id
+              ? ({
+                  ...row,
+                  state: {
+                    kind: "completed",
+                    completion: {
+                      id: `completion-${row.claim.id}`,
+                      claim: row.claim.id,
+                      by: row.claim.member,
+                      at: store.generatedAt,
+                      creditedStars: row.claim.stars,
+                    },
+                  },
+                } as ClaimedBounty)
+              : row,
+          );
+          store.progress = store.progress.map((row) =>
+            row.member === target.claim.member
+              ? { ...row, done: row.done + 1 }
+              : row,
+          );
+          return json({ receipt: { status: "accepted" } });
+        }
+      }
       if (
         method === "POST" &&
         url.endsWith("/api/tasks") &&
         !url.includes("/events")
       ) {
-        const body = JSON.parse(String(init?.body ?? "{}")) as {
+        const rawBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        if (rawBody.kind === "bounty") {
+          const id = `bounty-${store.bountyDefinitions.length + 1}`;
+          const definition = {
+            kind: "bounty",
+            id,
+            lineage: `lineage-${id}`,
+            type: "chore",
+            title: String(rawBody.title),
+            stars: Number(rawBody.stars),
+            recurrence: { kind: "once" },
+            retiredAt: null,
+          } as BountyDefinition;
+          store.bountyDefinitions = [...store.bountyDefinitions, definition];
+          store.availableBounties = [
+            ...store.availableBounties,
+            {
+              kind: "available",
+              id: `offering-${id}`,
+              offering: { kind: "once", definition: definition.id },
+              title: definition.title,
+              stars: definition.stars,
+            } as AvailableBounty,
+          ];
+          return json({ definition });
+        }
+        const body = rawBody as unknown as {
           title: string;
           type: "chore" | "routine";
           recurrence: TaskDefinition["recurrence"];
@@ -301,6 +408,95 @@ function submittedRecurrence(
 }
 
 describe("TasksScreen", () => {
+  test("Bounties focus creates, advertises, claims, and completes zero-Star work", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = {
+      kind: "bounty",
+      id: "bounty-zero",
+      lineage: "bounty-lineage",
+      type: "chore",
+      title: "Wipe table",
+      stars: 0,
+      recurrence: { kind: "once" },
+      retiredAt: null,
+    } as BountyDefinition;
+    const available = {
+      kind: "available",
+      id: "offering-zero",
+      offering: { kind: "once", definition: definition.id },
+      title: definition.title,
+      stars: definition.stars,
+    } as AvailableBounty;
+    store.bountyDefinitions = [definition];
+    store.availableBounties = [available];
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    expect(screen.getByText("Wipe table")).toBeVisible();
+    expect(screen.getByText("0 Stars")).toBeVisible();
+    expect(screen.getByText("Manage Bounties")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add Bounty" }));
+    const dialog = screen.getByRole("dialog", { name: "New Bounty" });
+    expect(within(dialog).queryByLabelText("Date")).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Time")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Fixed")).not.toBeInTheDocument();
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Bounty title" }),
+      "Take bins out",
+    );
+    const stars = within(dialog).getByRole("textbox", { name: "Stars" });
+    await user.click(stars);
+    await user.keyboard("3");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add Bounty" }),
+    );
+    expect(await screen.findByText("Take bins out")).toBeVisible();
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") && init?.method === "POST",
+    );
+    const createdBody = JSON.parse(String(createCall?.[1]?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(createdBody).toEqual({
+      kind: "bounty",
+      type: "chore",
+      title: "Take bins out",
+      stars: 3,
+      recurrence: { kind: "once" },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Claim Wipe table" }));
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+    await user.click(screen.getByRole("button", { name: "Family Board" }));
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(screen.getByText("Wipe table")).toBeVisible();
+    expect(screen.getByText("0 Stars")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Skip Wipe table" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Wipe table" }));
+    expect(
+      fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Bounties" }));
+    expect(screen.queryByText("Wipe table")).not.toBeInTheDocument();
+    expect(await screen.findByText("Take bins out")).toBeVisible();
+  });
+
+  test("Bounties focus has an empty state before the first offering", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+    await user.click(await screen.findByRole("button", { name: "Bounties" }));
+    expect(screen.getByText("No Bounties available")).toBeVisible();
+  });
+
   test("Stars requests a numeric keyboard and replaces its value when tapped", async () => {
     const user = userEvent.setup();
     installFetch(emptyView());
