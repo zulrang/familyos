@@ -14,12 +14,14 @@ import {
 import {
   type AssignmentPolicy,
   allowsAssignedDraft,
+  assignmentEquals,
   type CreateTaskDraft,
   createDefinition,
   type LegacyTaskDefinition,
   type LocalDate,
   type NonEmpty,
   newTaskId,
+  recurrenceEquals,
   type StarAdjustment,
   type TaskId,
 } from "./types";
@@ -74,8 +76,8 @@ function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
     );
   }
   if (
-    JSON.stringify(previous.assignment) === JSON.stringify(draft.assignment) &&
-    JSON.stringify(previous.recurrence) === JSON.stringify(draft.recurrence)
+    assignmentEquals(previous.assignment, draft.assignment) &&
+    recurrenceEquals(previous.recurrence, draft.recurrence)
   ) {
     tasksDatabase()
       .prepare(

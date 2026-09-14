@@ -11,6 +11,7 @@ import {
 import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
+import { requestId } from "@/shared/request-id";
 import { formatClock, msToZonedDate } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
@@ -31,6 +32,7 @@ import {
   type LegacyTaskDefinition,
   nowInstant,
   type Occurrence,
+  type OfferingId,
   parseLocalDate,
   type Recurrence,
   type TaskId,
@@ -319,6 +321,10 @@ export function TasksScreen() {
   const [mutatingBountyClaims, setMutatingBountyClaims] = useState<
     ReadonlySet<ClaimId>
   >(new Set());
+  const pendingBountyOfferingIds = useRef(new Set<OfferingId>());
+  const [mutatingBountyOfferings, setMutatingBountyOfferings] = useState<
+    ReadonlySet<OfferingId>
+  >(new Set());
   const dismissCelebration = useCallback(() => setCelebration(null), []);
 
   const load = useCallback(async () => {
@@ -369,6 +375,18 @@ export function TasksScreen() {
   function endBountyMutation(claim: ClaimId): void {
     pendingBountyMutationIds.current.delete(claim);
     setMutatingBountyClaims(new Set(pendingBountyMutationIds.current));
+  }
+
+  function beginBountyClaim(offering: OfferingId): boolean {
+    if (pendingBountyOfferingIds.current.has(offering)) return false;
+    pendingBountyOfferingIds.current.add(offering);
+    setMutatingBountyOfferings(new Set(pendingBountyOfferingIds.current));
+    return true;
+  }
+
+  function endBountyClaim(offering: OfferingId): void {
+    pendingBountyOfferingIds.current.delete(offering);
+    setMutatingBountyOfferings(new Set(pendingBountyOfferingIds.current));
   }
 
   function celebrateIfDayComplete(
@@ -486,13 +504,14 @@ export function TasksScreen() {
       setMemberAction({ kind: "claim-bounty", bounty });
       return;
     }
+    if (!beginBountyClaim(bounty.id)) return;
     try {
       const res = await fetch("/api/tasks", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "claim-bounty",
-          requestId: crypto.randomUUID(),
+          requestId: requestId(),
           offering: bounty.offering,
           member,
           definitionRevision: bounty.definitionRevision,
@@ -505,6 +524,8 @@ export function TasksScreen() {
     } catch {
       await load().catch(() => undefined);
       setError("Could not claim Bounty.");
+    } finally {
+      endBountyClaim(bounty.id);
     }
   }
 
@@ -517,7 +538,7 @@ export function TasksScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "complete-bounty",
-          requestId: crypto.randomUUID(),
+          requestId: requestId(),
           claim: row.claim.id,
           revision: row.revision,
         }),
@@ -555,7 +576,7 @@ export function TasksScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "release-bounty",
-          requestId: crypto.randomUUID(),
+          requestId: requestId(),
           claim: row.claim.id,
           revision: row.revision,
         }),
@@ -729,6 +750,7 @@ export function TasksScreen() {
           onCompleteBounty={(row) => completeBountyClaim(row).catch(() => {})}
           onReleaseBounty={(row) => releaseBountyClaim(row).catch(() => {})}
           mutatingBountyClaims={mutatingBountyClaims}
+          mutatingBountyOfferings={mutatingBountyOfferings}
           onAddBounty={() =>
             setEditor({
               kind: "bounty",
