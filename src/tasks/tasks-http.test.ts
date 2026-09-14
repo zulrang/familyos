@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
+import { parseTaskAdminCommand } from "./admin-types";
+import { correctBountyCompletion } from "./bounty-correction-store";
 import {
   addLocalDays,
   type BountyDefinition,
@@ -1728,6 +1730,130 @@ describe("Tasks HTTP", () => {
         state: "completed",
       },
     ]);
+  });
+
+  test("Undo is observed as reopened work and Tasks recompletion records new history", async () => {
+    const now = new Date();
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "bounty",
+          title: "Redo the porch",
+          stars: 6,
+          recurrence: { kind: "once" },
+        }),
+      }),
+      now,
+    );
+    const definition = (await created.json()).definition as BountyDefinition;
+    const offered = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    const offering = offered.availableBounties.find(
+      (row) => row.offering.definition === definition.id,
+    );
+    assert.ok(offering);
+    await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: offering.offering,
+          member: "dad",
+          definitionRevision: offering.definitionRevision,
+        }),
+      }),
+      now,
+    );
+    const claimed = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    const claim = claimed.bountyClaims.find(
+      (row) => row.claim.offering.definition === definition.id,
+    );
+    assert.ok(claim);
+    const completed = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "complete-bounty",
+          requestId: crypto.randomUUID(),
+          claim: claim.claim.id,
+          revision: claim.revision,
+        }),
+      }),
+      now,
+    );
+    const originalCompletion = (await completed.json()).receipt.result
+      .completion;
+    const completedView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    const beforeProgress = completedView.progress.find(
+      (row) => row.member === "dad",
+    );
+    const command = parseTaskAdminCommand({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: claim.claim.id,
+      revision: 1,
+      completion: originalCompletion.id,
+      predecessor: null,
+      reason: "Work needs doing again",
+    });
+    if (!command || command.kind !== "undo-bounty-completion")
+      throw new Error("Invalid Undo fixture");
+    const undone = correctBountyCompletion({
+      db: tasksDatabase(),
+      command,
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        {
+          id: "ellie",
+          name: "Ellie",
+          status: "active",
+          color: "#f6c9c5",
+        },
+      ],
+    });
+    assert.equal(undone.result.claim.state, "reopened");
+
+    const reopenedView = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    const reopened = reopenedView.bountyClaims.find(
+      (row) => row.claim.id === claim.claim.id,
+    );
+    assert.equal(reopened?.state.kind, "reopened");
+    assert.equal(
+      reopenedView.progress.find((row) => row.member === "dad")?.done,
+      (beforeProgress?.done ?? 1) - 1,
+    );
+    const recompleted = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "complete-bounty",
+          requestId: crypto.randomUUID(),
+          claim: claim.claim.id,
+          revision: undone.result.claim.revision,
+        }),
+      }),
+      now,
+    );
+    assert.equal(recompleted.status, 200);
+    const newCompletion = (await recompleted.json()).receipt.result.completion;
+    assert.notEqual(newCompletion.id, originalCompletion.id);
+    assert.equal(
+      tasksDatabase()
+        .prepare(
+          "SELECT COUNT(*) AS count FROM bounty_completions WHERE claim_id = ?",
+        )
+        .get(claim.claim.id)?.count,
+      2,
+    );
   });
 
   test("Bounty boundaries reject illegal definition shapes, ineligible members, and legacy events", async () => {

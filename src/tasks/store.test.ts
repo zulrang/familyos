@@ -101,6 +101,13 @@ describe("tasks sqlite store", () => {
       user_version: number;
     };
     assert.equal(version.user_version, 8);
+    assert.equal(
+      db
+        .prepare("PRAGMA table_info(bounty_definitions)")
+        .all()
+        .some((column) => column.name === "offer_from"),
+      true,
+    );
   });
 
   test("persists full recurrence and assignment unions", () => {
