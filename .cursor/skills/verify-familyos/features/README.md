@@ -8,7 +8,8 @@ This directory is the maintained source for verifying the user-facing behavior o
 - Doctor must report `origin: http://127.0.0.1:4310` (or the `FAMILYOS_VERIFY_PORT` you set), `data` under `/tmp/familyos-verify/`, and `ready: true`.
 - Start unpaired (`trusted_displays: 0`) unless a feature file says otherwise.
 - Drive only the instance that doctor accepted. Never `localhost:3000` or `:3001` unless that is the origin doctor printed.
-- Google Calendar and Google Tasks mutations need `.env.local` plus an operator-completed Google sign-in. Without that, mark those sub-features `verified-unreachable`.
+- Google Calendar, Google Tasks, and Google Photos mutations need `.env.local` plus an operator-completed Google sign-in. Without that, mark those sub-features `verified-unreachable`.
+- Tasks and Rewards data comes from parent admin (`/admin`, needs `FAMILYOS_ADMIN_PIN`). A fresh data dir shows their empty states; that is a pass, not a failure.
 
 ## Driving conventions
 
@@ -45,4 +46,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Calendar](./calendar.md) covers the five-day view, chrome, unconfigured banners, and Google-backed events.
 - [Settings](./settings.md) covers Display, Trusted Displays, Household fields, and Google connection.
 - [Lists](./lists.md) covers the Lists wall, unconfigured banners, and Google-backed list mutations.
-- [Rail stubs](./rail-stubs.md) covers Tasks, Rewards, Meals, Recipes, Photos, and Sleep placeholders.
+- [Tasks](./tasks.md) covers the Family Board, member columns, and the Bounties view.
+- [Rewards](./rewards.md) covers the wall Rewards screen, its empty state, and goal/spend flows.
+- [Photos](./photos.md) covers the Photos screen, the sign-in prompt, and the rail Sleep action.
+- [Rail stubs](./rail-stubs.md) covers the Meals and Recipes placeholders and the `/sleep` URL leftover.

@@ -3,8 +3,8 @@
 A locally hosted kitchen-wall command center for one household and multiple
 paired displays. The implemented product surfaces are a rolling five-day
 calendar, selected Google Tasks lists, household Tasks, a Google Photos
-slideshow, Rewards, Settings, and the fixed navigation rail. Meals, Recipes,
-and Sleep remain stubs.
+slideshow, Rewards, Settings, and the fixed navigation rail. Meals and Recipes
+remain stubs. Sleep on the rail starts the idle slideshow.
 
 You run one FamilyOS server on a computer you control; wall panels connect over
 the local network. Parents can manage assigned Tasks, Bounties, Members,

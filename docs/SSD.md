@@ -16,8 +16,8 @@ rules.
 Implemented surfaces are pairing, the Five-Day Calendar in `src/calendar/`,
 Lists in `src/lists/` (Google Tasks), Tasks in `src/tasks/`, Photos in
 `src/photos/`, Settings, Rewards in `src/rewards/`, parent admin, and the fixed
-left rail. Meals, Recipes, and
-Sleep remain stubs.
+left rail. Meals and Recipes remain stubs. Sleep on the rail starts the idle
+slideshow (see `docs/photos.md`).
 
 ## Guiding Principles
 
@@ -113,8 +113,8 @@ design skill forbids. Where delight and restraint conflict, restraint wins.
 **Decision: Product surfaces ship as complete vertical slices**
 - Choice: The implemented scope is pairing, a rolling 5-day family calendar,
   selected Household Lists, FamilyOS-owned Tasks, a Google Photos slideshow,
-  Settings, Rewards, and parent admin. Meals, Recipes, and Sleep render a “not yet
-  implemented” screen.
+  Settings, Rewards, and parent admin. Meals and Recipes render a “not yet
+  implemented” screen. Sleep is a rail action that starts the idle slideshow.
 - Photos uses the Google Photos Picker API through the household Google
   connection and stores one explicitly selected photo batch. It does not
   browse or subscribe to albums. See `docs/photos.md` for setup, permissions,
@@ -149,7 +149,7 @@ design skill forbids. Where delight and restraint conflict, restraint wins.
 | Tasks (`src/tasks/`) | Task Definitions, Task events, star values, stored Star Balances (keyed by MemberId), the pure Occurrence projection, the Tasks screen and Task editor | Google Tasks rows, Rewards Grant/Spend UX, verification workflow, member roster |
 | Photos (`src/photos/`) | Google Photos Picker session, shared Photo Selection, proxied media, and per-Display slideshow UI | Arbitrary album browsing, live album subscription, Google base URLs in the browser |
 | Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, Display Configuration (Display size, Idle Dim) | Event rendering, unimplemented product surfaces |
-| Stub screens | Placeholder for unimplemented rail ids | Real features, mock data presented as product |
+| Stub screens | Placeholder for unimplemented rail ids (Meals, Recipes) | Real features, mock data presented as product |
 | Kiosk OSK (`kiosk/osk`) | Chromium-wide on-screen keyboard (focus show / blur hide) | FamilyOS UI, Calendar, Settings, Google API |
 
 Household Members are shared server data, not an auth directory. There may be
@@ -241,7 +241,7 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 - Member Colors are presentation. They are unique only among Active Members and
   may be reused after retirement. They are not Google Calendar colors.
 - Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
-- Unimplemented rail items stay stubs. Do not invent a visual language for Meals, Recipes, or Sleep beyond existing chrome. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant. Photos setup and slideshow behavior are documented in `docs/photos.md`.
+- Unimplemented rail items stay stubs. Do not invent a visual language for Meals or Recipes beyond existing chrome. Sleep has no screen; it starts the idle slideshow. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant. Rewards follows `docs/rewards.md`. Photos setup and slideshow behavior are documented in `docs/photos.md`.
 - Task data is FamilyOS-owned and append-only (ADR 0006), except Star Balance
   which is a mutable integer (ADR 0007). Do not store Tasks in Google Tasks,
   materialize occurrence rows, derive Star Balance from completions, add a

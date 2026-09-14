@@ -1,11 +1,11 @@
 ---
 name: verify-familyos
-description: Drive FamilyOS's Next.js wall UI in a browser to prove pairing, calendar, lists, settings, and rail stubs. Use when verifying FamilyOS user-facing changes, capturing calendar/settings/lists proof, or proving a Display pairs.
+description: Drive FamilyOS's Next.js wall UI in a browser to prove pairing, calendar, lists, tasks, rewards, photos, settings, and rail stubs. Use when verifying FamilyOS user-facing changes, capturing calendar/settings/lists proof, or proving a Display pairs.
 ---
 
 # Verify FamilyOS
 
-FamilyOS is a locally hosted kitchen-wall UI. One Server Installation, one Household, several paired Displays. Google Calendar and Google Tasks are the sources of truth once signed in. Pairing, Settings household fields, the five-day calendar chrome, Lists chrome, and rail stubs work without Google.
+FamilyOS is a locally hosted kitchen-wall UI. One Server Installation, one Household, several paired Displays. Google Calendar and Google Tasks are the sources of truth once signed in. Pairing, Settings household fields, the five-day calendar chrome, Lists chrome, Tasks, Rewards, the Photos sign-in prompt, and rail stubs work without Google.
 
 This skill is the recipe for proving that UI the way a person uses it. Read `features/README.md` before driving. Use the matching feature file. The map lists every entry point. Driving one convenient path does not cover the others.
 
@@ -60,11 +60,14 @@ Use the Cursor browser against `origin` from doctor. Prefer ARIA roles and acces
 Stable handles in this repo:
 
 - Pairing: heading `Pair Display`, textbox `Pairing code`, button `Pair`, alert text `That code did not work.` / `That code has expired.` / `That code was already used.`
-- After pair: `nav` links named `Calendar` (`/`), `Lists` (`/lists`), `Settings` (`/settings`), plus stub ids `tasks`, `rewards`, `meals`, `recipes`, `photos`, `sleep`
+- After pair: `nav` links named `Calendar` (`/`), `Lists` (`/lists`), `Tasks` (`/tasks`), `Rewards` (`/rewards`), `Meals` (`/meals`), `Recipes` (`/recipes`), `Photos` (`/photos`), `Settings` (`/settings`), plus a `nav` button named `Sleep` that starts the idle slideshow
 - Calendar: heading is the Family name (default `Family`), buttons `Schedule`, `Filter`, `Today`, `Previous five days`, `Next five days`. Unconfigured banner is either `Add Google credentials in .env.local, then sign in under Settings.` or `Sign in with Google under Settings to load the family calendar.`
-- Settings: heading `Settings`, button `Save` (becomes `Saved` briefly), `Generate pairing code`, dialog titled `Pair Display`, `Family name`, `Add member`, `This Display`
+- Settings: heading `Settings`, button `Save` (becomes `Saved` briefly), `Update` (do not press; it kicks the host server updater), `Generate pairing code`, native `<dialog>` titled `Pair Display`, `Family name`, `Add member`, `This Display`
 - Lists: date heading, same Google banners as calendar with Lists wording
-- Stubs: heading matches the rail label, body `Not yet implemented`
+- Tasks: date heading, `Family Board` heading, button `Bounties` (then `Family Board` to return), `Available Bounties`, `Add Bounty`, `Manage Bounties`
+- Rewards: heading `Rewards`, tagline `Small efforts. Happy moments.`, empty state `Add a household member in parent admin to use Rewards.`
+- Photos: heading `Photos`, unconfigured `Sign in to Google Photos`
+- Stubs (Meals, Recipes, and `/sleep` by URL): heading matches the rail label, body `Not yet implemented`
 
 Pairing code for the type-in path:
 
@@ -73,6 +76,8 @@ Pairing code for the type-in path:
 ```
 
 The QR path is `http://127.0.0.1:<port>/?code=<CODE>` (auto-submits once). Cookie name is `fos_display`. Do not write `data/displays.json` by hand. Do not copy the checkout's `data/` (tokens live there).
+
+In `next dev` the Next.js dev-tools badge (`<nextjs-portal>`) sits over the bottom-left corner and can swallow clicks on the last rail item (`Settings`) at short viewports. Hide it (`document.querySelectorAll('nextjs-portal').forEach(p => p.style.display = 'none')`) or use a taller viewport before clicking. That is a dev overlay, not an app defect.
 
 Google sign-in opens Google's account picker. Do not complete that unless the operator is present and asked you to. Calendar event create/edit and Lists item mutations need a signed-in Household with a selected calendar or selected tasklists. Those paths are `verified-unreachable` without that. Record the route you attempted and the unmet precondition.
 

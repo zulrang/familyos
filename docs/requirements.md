@@ -21,9 +21,10 @@ configuration and data is shared.
 
 ## Product surfaces
 
-The implemented product surfaces are Calendar, Lists, Tasks, Photos, Settings,
-the fixed left navigation rail, and pairing. Meals, Recipes, and Sleep
-remain "not yet implemented" screens.
+The implemented product surfaces are Calendar, Lists, Tasks, Photos, Rewards,
+Settings, the fixed left navigation rail, and pairing. Meals and Recipes
+remain "not yet implemented" screens. Sleep on the rail starts the idle
+slideshow rather than opening a screen.
 
 ### Calendar
 
