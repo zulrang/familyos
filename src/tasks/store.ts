@@ -3,11 +3,14 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataDir } from "@/shared/data-path";
 import type { CompletionCorrection } from "./admin-types";
+import { migrateBountyStore } from "./bounty-store";
 import { migrateTaskAdministration } from "./store-migration";
 import {
+  allowsAssignedDraft,
   type CreateTaskDraft,
   type EventReceipt,
   isRecord,
+  type LegacyTaskDefinition,
   type LocalDate,
   newTaskId,
   parseAssignment,
@@ -21,7 +24,6 @@ import {
   parseTaskType,
   planDefinitionSave,
   type StarAdjustment,
-  type TaskDefinition,
   type TaskEvent,
   type TaskId,
 } from "./types";
@@ -126,8 +128,9 @@ BEGIN
     );
 END;
 
-PRAGMA user_version = 2;
 `;
+
+export class InvalidTaskDefinitionError extends Error {}
 
 type Cached = { dir: string; db: DatabaseSync };
 
@@ -142,12 +145,19 @@ export function tasksDatabase(): DatabaseSync {
   try {
     db.exec(SCHEMA);
     migrateTaskAdministration(db);
+    migrateBountyStore(db);
   } catch (error) {
     db.close();
     throw error;
   }
   cached = { dir, db };
   return db;
+}
+
+/** Close the process-local handle; the next access reopens persistent storage. */
+export function closeTasksDatabase(): void {
+  cached?.db.close();
+  cached = null;
 }
 
 function parseJson(raw: unknown): unknown {
@@ -159,7 +169,7 @@ function parseJson(raw: unknown): unknown {
   }
 }
 
-function definitionFromRow(row: Record<string, unknown>): TaskDefinition {
+function definitionFromRow(row: Record<string, unknown>): LegacyTaskDefinition {
   const id = parseTaskId(row.id);
   const lineage = parseLineageId(row.lineage);
   const title = typeof row.title === "string" ? row.title : "";
@@ -237,7 +247,7 @@ function adjustmentFromRow(row: Record<string, unknown>): StarAdjustment {
   return { id, member, delta, reason, at };
 }
 
-export function insertDefinition(definition: TaskDefinition): void {
+export function insertDefinition(definition: LegacyTaskDefinition): void {
   tasksDatabase()
     .prepare(
       `INSERT INTO definitions
@@ -257,9 +267,14 @@ export function insertDefinition(definition: TaskDefinition): void {
     );
 }
 
-function definitionById(id: TaskId): TaskDefinition | null {
+function definitionById(id: TaskId): LegacyTaskDefinition | null {
   const row = tasksDatabase()
-    .prepare("SELECT * FROM definitions WHERE id = ?")
+    .prepare(
+      `SELECT d.* FROM definitions d
+       WHERE d.id = ? AND NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = d.id
+       )`,
+    )
     .get(id);
   if (!row) return null;
   if (!isRecord(row)) throw new Error("corrupt task definition row");
@@ -279,10 +294,15 @@ export function saveDefinition(input: {
   id: TaskId;
   draft: CreateTaskDraft;
   today: LocalDate;
-}): TaskDefinition {
+}): LegacyTaskDefinition {
   const current = definitionById(input.id);
   if (!current || current.retiredAt !== null) {
     throw new Error("task not found");
+  }
+  if (!allowsAssignedDraft(current, input.draft)) {
+    throw new InvalidTaskDefinitionError(
+      "Open assigned Tasks are no longer supported. Create a Bounty instead.",
+    );
   }
   const plan = planDefinitionSave({
     current,
@@ -315,9 +335,15 @@ export function saveDefinition(input: {
   return plan.replacement;
 }
 
-export function loadDefinitions(): TaskDefinition[] {
+export function loadDefinitions(): LegacyTaskDefinition[] {
   const rows = tasksDatabase()
-    .prepare("SELECT * FROM definitions ORDER BY creation_order")
+    .prepare(
+      `SELECT d.* FROM definitions d
+       WHERE NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = d.id
+       )
+       ORDER BY d.creation_order`,
+    )
     .all();
   return rows.map((row) => {
     if (!isRecord(row)) throw new Error("corrupt task definition row");
@@ -327,10 +353,32 @@ export function loadDefinitions(): TaskDefinition[] {
 
 export function loadEvents(): TaskEvent[] {
   const rows = tasksDatabase()
-    .prepare("SELECT task, window, kind, by, at, reason FROM events")
+    .prepare(
+      `SELECT e.task, e.window, e.kind, e.by, e.at, e.reason FROM events e
+       WHERE NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = e.task
+       )`,
+    )
     .all();
   return rows.map((row) => {
     if (!isRecord(row)) throw new Error("corrupt task event row");
+    return eventFromRow(row);
+  });
+}
+
+/** Raw events retained for legacy definitions that were converted to Bounties. */
+export function loadLegacyBountyArchiveEvents(): TaskEvent[] {
+  const rows = tasksDatabase()
+    .prepare(
+      `SELECT e.task, e.window, e.kind, e.by, e.at, e.reason FROM events e
+       WHERE EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = e.task
+       )
+       ORDER BY e.rowid`,
+    )
+    .all();
+  return rows.map((row) => {
+    if (!isRecord(row)) throw new Error("corrupt archived task event row");
     return eventFromRow(row);
   });
 }
@@ -379,7 +427,17 @@ export function applyEvent(event: TaskEvent): EventReceipt {
   const base = { task: event.task, window: event.window, kind: event.kind };
   const bound = bindEvent(event);
   try {
-    const result = tasksDatabase()
+    const db = tasksDatabase();
+    if (
+      db
+        .prepare("SELECT 1 FROM legacy_bounty_sources WHERE source_task_id = ?")
+        .get(event.task)
+    ) {
+      throw new InvalidTaskDefinitionError(
+        "This work is now a Bounty. Refresh to use its current controls.",
+      );
+    }
+    const result = db
       .prepare(
         `INSERT INTO events (task, window, kind, by, at, reason)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -412,7 +470,7 @@ export function applyEvent(event: TaskEvent): EventReceipt {
 }
 
 export function loadStore(): {
-  definitions: TaskDefinition[];
+  definitions: LegacyTaskDefinition[];
   events: TaskEvent[];
   adjustments: StarAdjustment[];
 } {
@@ -448,7 +506,13 @@ export function loadStoredStarBalances(): import("./types").StarBalance[] {
 
 export function loadCompletionCorrections(): CompletionCorrection[] {
   return tasksDatabase()
-    .prepare("SELECT * FROM completion_corrections ORDER BY sequence")
+    .prepare(
+      `SELECT c.* FROM completion_corrections c
+       WHERE NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = c.task
+       )
+       ORDER BY c.sequence`,
+    )
     .all()
     .map((row) => {
       const task = parseTaskId(row.task);

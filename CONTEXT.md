@@ -72,7 +72,7 @@ _Avoid_: Deleted member
 
 **Star Balance**:
 A Household Member's stored nonnegative star total. Completing an Occurrence
-adds the Task's star value at that moment; later Grants and Spends may change
+adds its Star reward; later Grants and Spends may change
 it, and it is not derived from completions.
 _Avoid_: score, wallet, points total
 
@@ -143,7 +143,7 @@ _Avoid_: Task, chore
 ## Tasks
 
 **Task**:
-An assigned household responsibility on the Tasks product surface. Every Task
+A household responsibility on the Tasks product surface. Every Task
 is either a Chore or a Routine.
 _Avoid_: List Item, to-do, chore (as the umbrella term)
 
@@ -151,16 +151,26 @@ _Avoid_: List Item, to-do, chore (as the umbrella term)
 A Task of work done for the household, such as dishes or trash.
 _Avoid_: Task (when the type matters), List Item
 
+**Bounty**:
+A Chore offered to any Active Member to claim, rather than assigned to a
+particular member in advance.
+_Avoid_: Household chore, up-for-grabs chore
+
+**Bounty Offering**:
+An available, unscheduled opportunity to claim a Bounty. A Once offering
+persists until claimed; a recurring offering is available within its calendar
+interval.
+_Avoid_: Scheduled Occurrence, assigned chore
+
 **Routine**:
 A Task that is a recurring personal-care step, such as brushing teeth.
-Identical to a Chore in everything but the label.
+Routines cannot be Bounties.
 _Avoid_: habit
 
 **Task Definition**:
-The description of a Task — title, type, time, stars, recurrence, and
-assignment. Title, type, time, and stars change on the current definition; a
-change to recurrence or assignment retires it and creates a new version with
-the same Lineage.
+The description, reward, recurrence, and assignment of a Task; assigned Tasks
+may also have a preferred time. Existing Bounty Claims retain their accepted
+description and Star reward even if the definition changes or is retired.
 _Avoid_: template
 
 **Lineage**:
@@ -168,12 +178,14 @@ The stable identity of a Task across versions of its Task Definition.
 _Avoid_: task id
 
 **Occurrence**:
-One dated instance of a Task within a single Window.
+One dated instance of a Task. A claimed Bounty's Occurrence persists until
+completed or released, independently of later recurring offerings.
 _Avoid_: instance, entry
 
 **Window**:
 The span from an Occurrence's scheduled date until the Task's next scheduled
-date. The Occurrence stays open and due for its whole Window, then expires.
+date for an assigned Task. Its Occurrence stays open and due for its whole
+Window, then expires; this expiration does not apply to claimed Bounties.
 _Avoid_: due date, deadline
 
 **Rotation**:
@@ -182,33 +194,43 @@ turn each time an Occurrence is completed — fairness by turns taken, not by
 dates elapsed.
 _Avoid_: schedule
 
-**Open Assignment**:
-An assignment with no designated member; the first Active Member to Claim the
-Occurrence takes it. An unclaimed Occurrence belongs to the Household, not to
-a member.
-_Avoid_: unassigned
-
 **Claim**:
-An Active Member taking an open Occurrence for themselves. A Claim is
-advisory; completion is what counts.
-_Avoid_: lock, reservation
+An Active Member reserving a Bounty Offering for themselves, scheduling its
+Occurrence for the day of the Claim in the Household Time Zone and fixing
+its Star reward to the advertised value at that moment.
+_Avoid_: Advisory assignment
+
+**Bounty Claim**:
+The durable accepted-work record created by a Claim. It keeps its identity,
+claimant, scheduled date, description, and Star reward through completion,
+Undo, Restore, definition edits, and definition retirement. Reclaiming a
+released Bounty Offering creates a new Bounty Claim.
+_Avoid_: Bounty Offering, assignment, synthetic claim
+
+**Release**:
+Giving up a Bounty Claim. Releasing work from an earlier recurring interval
+or a retired Bounty ends that commitment; otherwise its offering reopens.
+_Avoid_: Completion, Skip
 
 **Skip**:
-Marking an Occurrence intentionally not done for its Window. A Skip never
-advances a Rotation.
+Marking an assigned Task's Occurrence intentionally not done for its Window.
+A Skip never advances a Rotation and does not apply to Bounties.
 _Avoid_: dismiss, delete
 
 **Star**:
-The unit of reward on a Task Definition. Completing an Occurrence adds that
-definition's star value to the completing member's Star Balance and counts
-toward Stars Earned. Chores and Routines earn identically.
+The unit of reward for completing a Task, initially added to the completing
+member's Star Balance and counted toward Stars Earned. A Bounty's reward is
+fixed at Claim; other Tasks use their definition's value at completion.
+Administrative corrections may reverse or reassign a completion's credit.
 _Avoid_: point, credit
 
 **Stars Earned**:
-The sum of Task star values over completions that happened in a given
-Household Time Zone range, for the Household or for one member. Skips,
-claims, Grants, and Spends are not included; retired members and closed Task
-Windows are.
+The sum of Star rewards over effective completions that happened in a given
+Household Time Zone range, for the Household or for one member. An Undo
+removes a completion from the sum, Restore uses its original completion time,
+and reassignment attributes it to the current credited member. Skips, claims,
+Grants, and Spends are not included; retired members and closed Task Windows
+are.
 _Avoid_: Star Balance, Window (for the range)
 
 **Reward**:

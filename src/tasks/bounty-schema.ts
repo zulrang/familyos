@@ -1,0 +1,583 @@
+import type { DatabaseSync } from "node:sqlite";
+
+const CLAIMS_V8 = `
+  CREATE TABLE bounty_claims_v8 (
+    id TEXT NOT NULL PRIMARY KEY,
+    offering_id TEXT NOT NULL,
+    definition_id TEXT NOT NULL,
+    member TEXT NOT NULL,
+    scheduled_on TEXT NOT NULL,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    stars INTEGER NOT NULL CHECK (stars >= 0 AND stars <= 9007199254740991),
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    state TEXT NOT NULL CHECK (state IN ('unfinished', 'reopened', 'completed', 'released')),
+    effective_completion_id TEXT,
+    restorable_completion_id TEXT,
+    correction_id TEXT,
+    created_at TEXT NOT NULL,
+    CHECK (
+      (state IN ('unfinished', 'released')
+        AND effective_completion_id IS NULL
+        AND restorable_completion_id IS NULL
+        AND correction_id IS NULL)
+      OR (state = 'completed'
+        AND effective_completion_id IS NOT NULL
+        AND restorable_completion_id IS NULL)
+      OR (state = 'reopened'
+        AND effective_completion_id IS NULL
+        AND restorable_completion_id IS NOT NULL
+        AND correction_id IS NOT NULL)
+    ),
+    FOREIGN KEY (offering_id) REFERENCES bounty_offerings(id),
+    FOREIGN KEY (definition_id) REFERENCES bounty_definitions(id)
+  );
+`;
+
+const COMPLETIONS_V8 = `
+  CREATE TABLE bounty_completions_v8 (
+    id TEXT NOT NULL PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    request_id TEXT NOT NULL UNIQUE,
+    member TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    credited_stars INTEGER NOT NULL CHECK (credited_stars >= 0 AND credited_stars <= 9007199254740991),
+    credit_provenance TEXT NOT NULL CHECK (credit_provenance IN ('recorded', 'legacy-missing')),
+    FOREIGN KEY (claim_id) REFERENCES bounty_claims_v8(id)
+  );
+`;
+
+const HISTORY_V8 = `
+  CREATE TABLE bounty_completion_corrections (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL CHECK (kind IN ('undo', 'restore', 'reassign')),
+    claim_id TEXT NOT NULL,
+    completion_id TEXT NOT NULL,
+    predecessor_id TEXT,
+    from_member TEXT,
+    to_member TEXT,
+    credited_stars INTEGER NOT NULL CHECK (credited_stars >= 0 AND credited_stars <= 9007199254740991),
+    credit_provenance TEXT NOT NULL CHECK (credit_provenance IN ('recorded', 'legacy-missing')),
+    reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+    corrected_at TEXT NOT NULL,
+    CHECK (
+      (kind = 'undo' AND from_member IS NOT NULL AND to_member IS NULL)
+      OR (kind = 'restore' AND from_member IS NULL AND to_member IS NOT NULL)
+      OR (kind = 'reassign' AND from_member IS NOT NULL AND to_member IS NOT NULL
+        AND from_member != to_member)
+    ),
+    FOREIGN KEY (claim_id) REFERENCES bounty_claims(id),
+    FOREIGN KEY (completion_id) REFERENCES bounty_completions(id),
+    FOREIGN KEY (predecessor_id) REFERENCES bounty_completion_corrections(id)
+  );
+  CREATE TABLE bounty_correction_receipts (
+    request_id TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN (
+      'undo-bounty-completion',
+      'restore-bounty-completion',
+      'reassign-bounty-completion'
+    )),
+    payload TEXT NOT NULL,
+    response TEXT NOT NULL
+  );
+`;
+
+const GUARDS_V8 = `
+  CREATE UNIQUE INDEX bounty_claims_one_current_per_offering
+    ON bounty_claims(offering_id) WHERE state != 'released';
+  CREATE TRIGGER bounty_claims_update_guard BEFORE UPDATE ON bounty_claims
+  BEGIN
+    SELECT RAISE(ABORT, 'bounty claim snapshot is immutable') WHERE
+      NEW.id IS NOT OLD.id OR NEW.offering_id IS NOT OLD.offering_id
+      OR NEW.definition_id IS NOT OLD.definition_id OR NEW.member IS NOT OLD.member
+      OR NEW.scheduled_on IS NOT OLD.scheduled_on OR NEW.title IS NOT OLD.title
+      OR NEW.stars IS NOT OLD.stars OR NEW.created_at IS NOT OLD.created_at;
+    SELECT RAISE(ABORT, 'invalid bounty claim transition') WHERE
+      NEW.revision != OLD.revision + 1 OR NOT (
+        (OLD.state = 'unfinished' AND NEW.state IN ('completed', 'released'))
+        OR (OLD.state = 'completed' AND NEW.state IN ('completed', 'reopened'))
+        OR (OLD.state = 'reopened' AND NEW.state IN ('completed', 'released'))
+      );
+    SELECT RAISE(ABORT, 'completion does not belong to bounty claim') WHERE
+      NEW.effective_completion_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completions
+        WHERE id = NEW.effective_completion_id AND claim_id = NEW.id
+      );
+    SELECT RAISE(ABORT, 'restorable completion does not belong to bounty claim') WHERE
+      NEW.restorable_completion_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completions
+        WHERE id = NEW.restorable_completion_id AND claim_id = NEW.id
+      );
+    SELECT RAISE(ABORT, 'correction does not match bounty claim state') WHERE
+      NEW.correction_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completion_corrections x
+        WHERE x.id = NEW.correction_id AND x.claim_id = NEW.id
+          AND x.completion_id = COALESCE(
+            NEW.effective_completion_id,
+            NEW.restorable_completion_id
+          )
+      );
+  END;
+  CREATE TRIGGER bounty_claims_no_delete BEFORE DELETE ON bounty_claims
+    BEGIN SELECT RAISE(ABORT, 'bounty claims cannot be deleted'); END;
+  CREATE TRIGGER bounty_completions_no_update BEFORE UPDATE ON bounty_completions
+    BEGIN SELECT RAISE(ABORT, 'bounty completions are immutable'); END;
+  CREATE TRIGGER bounty_completions_no_delete BEFORE DELETE ON bounty_completions
+    BEGIN SELECT RAISE(ABORT, 'bounty completions are immutable'); END;
+  CREATE TRIGGER bounty_completion_corrections_no_update
+    BEFORE UPDATE ON bounty_completion_corrections
+    BEGIN SELECT RAISE(ABORT, 'bounty completion corrections are immutable'); END;
+  CREATE TRIGGER bounty_completion_corrections_no_delete
+    BEFORE DELETE ON bounty_completion_corrections
+    BEGIN SELECT RAISE(ABORT, 'bounty completion corrections are immutable'); END;
+  CREATE TRIGGER bounty_correction_receipts_no_update
+    BEFORE UPDATE ON bounty_correction_receipts
+    BEGIN SELECT RAISE(ABORT, 'bounty correction receipts are immutable'); END;
+  CREATE TRIGGER bounty_correction_receipts_no_delete
+    BEFORE DELETE ON bounty_correction_receipts
+    BEGIN SELECT RAISE(ABORT, 'bounty correction receipts are immutable'); END;
+`;
+
+export function migrateBountyLifecycleToV8(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(bounty_claims)").all();
+  if (columns.some((column) => column.name === "effective_completion_id")) {
+    const version = Number(
+      db.prepare("PRAGMA user_version").get()?.user_version ?? 0,
+    );
+    if (version < 8) db.exec("PRAGMA user_version = 8");
+    return;
+  }
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      DROP TRIGGER IF EXISTS bounty_claims_update_guard;
+      DROP TRIGGER IF EXISTS bounty_claims_no_delete;
+      DROP TRIGGER IF EXISTS bounty_completions_no_update;
+      DROP TRIGGER IF EXISTS bounty_completions_no_delete;
+      DROP INDEX IF EXISTS bounty_claims_one_current_per_offering;
+      ${CLAIMS_V8}
+      ${COMPLETIONS_V8}
+      INSERT INTO bounty_completions_v8
+        (id, claim_id, request_id, member, completed_at, credited_stars, credit_provenance)
+        SELECT id, claim_id, request_id, member, completed_at, credited_stars, 'recorded'
+        FROM bounty_completions;
+      INSERT INTO bounty_claims_v8
+        (id, offering_id, definition_id, member, scheduled_on, title, stars,
+         revision, state, effective_completion_id, restorable_completion_id,
+         correction_id, created_at)
+        SELECT c.id, c.offering_id, c.definition_id, c.member, c.scheduled_on,
+          c.title, c.stars, c.revision, c.state,
+          CASE WHEN c.state = 'completed' THEN x.id ELSE NULL END,
+          NULL, NULL, c.created_at
+        FROM bounty_claims c
+        LEFT JOIN bounty_completions x ON x.claim_id = c.id;
+      DROP TABLE bounty_completions;
+      DROP TABLE bounty_claims;
+      ALTER TABLE bounty_claims_v8 RENAME TO bounty_claims;
+      ALTER TABLE bounty_completions_v8 RENAME TO bounty_completions;
+      ${HISTORY_V8}
+      ${GUARDS_V8}
+      PRAGMA user_version = 8;
+    `);
+    const foreignKeyError = db.prepare("PRAGMA foreign_key_check").get();
+    if (foreignKeyError)
+      throw new Error("Bounty lifecycle migration broke a foreign key");
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}
+
+const SUBJECTS_AND_HISTORY_V9 = `
+  CREATE TABLE bounty_work_subjects (
+    id TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('accepted-claim', 'legacy-completion-carrier'))
+  );
+  INSERT INTO bounty_work_subjects (id, kind)
+    SELECT id, 'accepted-claim' FROM bounty_claims;
+
+  CREATE TABLE bounty_offerings_v9 (
+    id TEXT NOT NULL PRIMARY KEY,
+    definition_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('once', 'recurring', 'legacy')),
+    interval_start TEXT,
+    source_window TEXT,
+    CHECK (
+      (kind = 'once' AND interval_start IS NULL AND source_window IS NULL)
+      OR (kind = 'recurring' AND interval_start IS NOT NULL AND source_window IS NULL)
+      OR (kind = 'legacy' AND source_window IS NOT NULL)
+    ),
+    FOREIGN KEY (definition_id) REFERENCES bounty_definitions(id)
+  );
+  INSERT INTO bounty_offerings_v9
+    (id, definition_id, kind, interval_start, source_window)
+    SELECT id, definition_id, kind, interval_start, NULL FROM bounty_offerings;
+
+  CREATE TABLE bounty_claims_v9 (
+    id TEXT NOT NULL PRIMARY KEY,
+    offering_id TEXT NOT NULL,
+    definition_id TEXT NOT NULL,
+    member TEXT NOT NULL,
+    scheduled_on TEXT NOT NULL,
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+    stars INTEGER NOT NULL CHECK (stars >= 0 AND stars <= 9007199254740991),
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    state TEXT NOT NULL CHECK (state IN ('unfinished', 'reopened', 'completed', 'released')),
+    effective_completion_id TEXT,
+    restorable_completion_id TEXT,
+    correction_id TEXT,
+    acceptance_provenance TEXT NOT NULL CHECK (acceptance_provenance IN ('native', 'legacy')),
+    created_at TEXT,
+    CHECK (
+      (acceptance_provenance = 'native' AND created_at IS NOT NULL)
+      OR (acceptance_provenance = 'legacy' AND created_at IS NULL)
+    ),
+    CHECK (
+      (state IN ('unfinished', 'released')
+        AND effective_completion_id IS NULL
+        AND restorable_completion_id IS NULL
+        AND correction_id IS NULL)
+      OR (state = 'completed'
+        AND effective_completion_id IS NOT NULL
+        AND restorable_completion_id IS NULL)
+      OR (state = 'reopened'
+        AND effective_completion_id IS NULL
+        AND restorable_completion_id IS NOT NULL
+        AND correction_id IS NOT NULL)
+    ),
+    FOREIGN KEY (id) REFERENCES bounty_work_subjects(id),
+    FOREIGN KEY (offering_id) REFERENCES bounty_offerings_v9(id),
+    FOREIGN KEY (definition_id) REFERENCES bounty_definitions(id)
+  );
+  INSERT INTO bounty_claims_v9
+    (id, offering_id, definition_id, member, scheduled_on, title, stars,
+     revision, state, effective_completion_id, restorable_completion_id,
+     correction_id, acceptance_provenance, created_at)
+    SELECT id, offering_id, definition_id, member, scheduled_on, title, stars,
+      revision, state, effective_completion_id, restorable_completion_id,
+      correction_id, 'native', created_at
+    FROM bounty_claims;
+
+  CREATE TABLE legacy_bounty_completion_carriers (
+    id TEXT NOT NULL PRIMARY KEY,
+    offering_id TEXT NOT NULL,
+    definition_id TEXT NOT NULL,
+    source_task_id TEXT NOT NULL,
+    source_window TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK (revision >= 0),
+    state TEXT NOT NULL CHECK (state IN ('completed', 'released')),
+    effective_completion_id TEXT,
+    correction_id TEXT,
+    CHECK (
+      (state = 'completed' AND effective_completion_id IS NOT NULL)
+      OR (state = 'released'
+        AND effective_completion_id IS NULL
+        AND correction_id IS NOT NULL)
+    ),
+    FOREIGN KEY (id) REFERENCES bounty_work_subjects(id),
+    FOREIGN KEY (offering_id) REFERENCES bounty_offerings_v9(id),
+    FOREIGN KEY (definition_id) REFERENCES bounty_definitions(id),
+    UNIQUE (source_task_id, source_window)
+  );
+
+  CREATE TABLE bounty_completions_v9 (
+    id TEXT NOT NULL PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    request_id TEXT UNIQUE,
+    origin TEXT NOT NULL CHECK (origin IN ('native', 'legacy')),
+    member TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    credited_stars INTEGER NOT NULL CHECK (credited_stars >= 0 AND credited_stars <= 9007199254740991),
+    credit_provenance TEXT NOT NULL CHECK (credit_provenance IN ('recorded', 'legacy-missing')),
+    CHECK (
+      (origin = 'native' AND request_id IS NOT NULL)
+      OR (origin = 'legacy' AND request_id IS NULL)
+    ),
+    FOREIGN KEY (subject_id) REFERENCES bounty_work_subjects(id)
+  );
+  INSERT INTO bounty_completions_v9
+    (id, subject_id, request_id, origin, member, completed_at,
+     credited_stars, credit_provenance)
+    SELECT id, claim_id, request_id, 'native', member, completed_at,
+      credited_stars, credit_provenance
+    FROM bounty_completions;
+
+  CREATE TABLE bounty_completion_corrections_v9 (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL CHECK (kind IN ('undo', 'restore', 'reassign')),
+    subject_id TEXT NOT NULL,
+    completion_id TEXT NOT NULL,
+    predecessor_id TEXT,
+    from_member TEXT,
+    to_member TEXT,
+    credited_stars INTEGER NOT NULL CHECK (credited_stars >= 0 AND credited_stars <= 9007199254740991),
+    credit_provenance TEXT NOT NULL CHECK (credit_provenance IN ('recorded', 'legacy-missing')),
+    reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+    corrected_at TEXT NOT NULL,
+    CHECK (
+      (kind = 'undo' AND from_member IS NOT NULL AND to_member IS NULL)
+      OR (kind = 'restore' AND from_member IS NULL AND to_member IS NOT NULL)
+      OR (kind = 'reassign' AND from_member IS NOT NULL AND to_member IS NOT NULL
+        AND from_member != to_member)
+    ),
+    FOREIGN KEY (subject_id) REFERENCES bounty_work_subjects(id),
+    FOREIGN KEY (completion_id) REFERENCES bounty_completions_v9(id),
+    FOREIGN KEY (predecessor_id) REFERENCES bounty_completion_corrections_v9(id)
+  );
+  INSERT INTO bounty_completion_corrections_v9
+    (sequence, id, kind, subject_id, completion_id, predecessor_id,
+     from_member, to_member, credited_stars, credit_provenance, reason, corrected_at)
+    SELECT sequence, id, kind, claim_id, completion_id, predecessor_id,
+      from_member, to_member, credited_stars, credit_provenance, reason, corrected_at
+    FROM bounty_completion_corrections;
+
+  CREATE TABLE legacy_bounty_sources (
+    source_task_id TEXT NOT NULL PRIMARY KEY,
+    bounty_definition_id TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (source_task_id) REFERENCES definitions(id),
+    FOREIGN KEY (bounty_definition_id) REFERENCES bounty_definitions(id)
+  );
+  CREATE TABLE legacy_bounty_migrations (
+    migration TEXT NOT NULL PRIMARY KEY,
+    completed_at TEXT NOT NULL
+  );
+  CREATE TABLE legacy_bounty_correction_receipts (
+    request_id TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN (
+      'undo-legacy-bounty-completion',
+      'reassign-legacy-bounty-completion'
+    )),
+    payload TEXT NOT NULL,
+    response TEXT NOT NULL
+  );
+`;
+
+const GUARDS_V9 = `
+  CREATE UNIQUE INDEX bounty_offerings_once_definition
+    ON bounty_offerings(definition_id) WHERE kind = 'once';
+  CREATE UNIQUE INDEX bounty_offerings_recurring_interval
+    ON bounty_offerings(definition_id, interval_start) WHERE kind = 'recurring';
+  CREATE UNIQUE INDEX bounty_offerings_legacy_source
+    ON bounty_offerings(definition_id, source_window) WHERE kind = 'legacy';
+  CREATE UNIQUE INDEX bounty_claims_one_current_per_offering
+    ON bounty_claims(offering_id) WHERE state != 'released';
+  CREATE TRIGGER bounty_claims_insert_guard BEFORE INSERT ON bounty_claims
+  BEGIN
+    SELECT RAISE(ABORT, 'bounty claim requires accepted work subject') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_work_subjects
+      WHERE id = NEW.id AND kind = 'accepted-claim'
+    );
+    SELECT RAISE(ABORT, 'bounty claim does not match offering') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_offerings o WHERE o.id = NEW.offering_id
+        AND o.definition_id = NEW.definition_id
+        AND (
+          (NEW.acceptance_provenance = 'native' AND o.kind != 'legacy')
+          OR (NEW.acceptance_provenance = 'legacy' AND o.kind = 'legacy'
+            AND o.source_window = NEW.scheduled_on)
+        )
+    );
+  END;
+  CREATE TRIGGER bounty_offerings_insert_guard BEFORE INSERT ON bounty_offerings
+  WHEN NEW.kind = 'legacy'
+  BEGIN
+    SELECT RAISE(ABORT, 'legacy offering requires mapped source') WHERE NOT EXISTS (
+      SELECT 1 FROM legacy_bounty_sources
+      WHERE source_task_id = NEW.definition_id
+        AND bounty_definition_id = NEW.definition_id
+    );
+  END;
+  CREATE TRIGGER legacy_bounty_carriers_insert_guard
+    BEFORE INSERT ON legacy_bounty_completion_carriers
+  BEGIN
+    SELECT RAISE(ABORT, 'legacy carrier requires carrier work subject') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_work_subjects
+      WHERE id = NEW.id AND kind = 'legacy-completion-carrier'
+    );
+    SELECT RAISE(ABORT, 'legacy carrier source does not match offering') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_offerings o
+      JOIN legacy_bounty_sources s ON s.source_task_id = NEW.source_task_id
+      WHERE o.id = NEW.offering_id AND o.kind = 'legacy'
+        AND o.definition_id = NEW.definition_id
+        AND o.source_window = NEW.source_window
+        AND s.bounty_definition_id = NEW.definition_id
+    );
+  END;
+  CREATE TRIGGER bounty_completions_insert_guard BEFORE INSERT ON bounty_completions
+  BEGIN
+    SELECT RAISE(ABORT, 'native completion requires accepted claim') WHERE
+      NEW.origin = 'native' AND NOT EXISTS (
+        SELECT 1 FROM bounty_claims c JOIN bounty_work_subjects s ON s.id = c.id
+        WHERE c.id = NEW.subject_id AND s.kind = 'accepted-claim'
+      );
+    SELECT RAISE(ABORT, 'legacy completion requires imported work subject') WHERE
+      NEW.origin = 'legacy' AND NOT EXISTS (
+        SELECT 1 FROM bounty_claims WHERE id = NEW.subject_id
+        UNION ALL
+        SELECT 1 FROM legacy_bounty_completion_carriers WHERE id = NEW.subject_id
+      );
+  END;
+  CREATE TRIGGER bounty_corrections_insert_guard
+    BEFORE INSERT ON bounty_completion_corrections
+  BEGIN
+    SELECT RAISE(ABORT, 'bounty correction requires owned completion') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_completions
+      WHERE id = NEW.completion_id AND subject_id = NEW.subject_id
+    );
+    SELECT RAISE(ABORT, 'bounty correction requires work subject') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_claims WHERE id = NEW.subject_id
+      UNION ALL
+      SELECT 1 FROM legacy_bounty_completion_carriers WHERE id = NEW.subject_id
+    );
+  END;
+  CREATE TRIGGER bounty_work_subjects_no_update BEFORE UPDATE ON bounty_work_subjects
+    BEGIN SELECT RAISE(ABORT, 'bounty work subjects are immutable'); END;
+  CREATE TRIGGER bounty_work_subjects_no_delete BEFORE DELETE ON bounty_work_subjects
+    BEGIN SELECT RAISE(ABORT, 'bounty work subjects are immutable'); END;
+  CREATE TRIGGER bounty_offerings_no_update BEFORE UPDATE ON bounty_offerings
+    BEGIN SELECT RAISE(ABORT, 'bounty offerings are immutable'); END;
+  CREATE TRIGGER bounty_offerings_no_delete BEFORE DELETE ON bounty_offerings
+    BEGIN SELECT RAISE(ABORT, 'bounty offerings cannot be deleted'); END;
+  CREATE TRIGGER bounty_claims_update_guard BEFORE UPDATE ON bounty_claims
+  BEGIN
+    SELECT RAISE(ABORT, 'bounty claim snapshot is immutable') WHERE
+      NEW.id IS NOT OLD.id OR NEW.offering_id IS NOT OLD.offering_id
+      OR NEW.definition_id IS NOT OLD.definition_id OR NEW.member IS NOT OLD.member
+      OR NEW.scheduled_on IS NOT OLD.scheduled_on OR NEW.title IS NOT OLD.title
+      OR NEW.stars IS NOT OLD.stars
+      OR NEW.acceptance_provenance IS NOT OLD.acceptance_provenance
+      OR NEW.created_at IS NOT OLD.created_at;
+    SELECT RAISE(ABORT, 'invalid bounty claim transition') WHERE
+      NEW.revision != OLD.revision + 1 OR NOT (
+        (OLD.state = 'unfinished' AND NEW.state IN ('completed', 'released'))
+        OR (OLD.state = 'completed' AND NEW.state IN ('completed', 'reopened'))
+        OR (OLD.state = 'reopened' AND NEW.state IN ('completed', 'released'))
+      );
+    SELECT RAISE(ABORT, 'completion does not belong to bounty claim') WHERE
+      NEW.effective_completion_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completions
+        WHERE id = NEW.effective_completion_id AND subject_id = NEW.id
+      );
+    SELECT RAISE(ABORT, 'restorable completion does not belong to bounty claim') WHERE
+      NEW.restorable_completion_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completions
+        WHERE id = NEW.restorable_completion_id AND subject_id = NEW.id
+      );
+    SELECT RAISE(ABORT, 'correction does not match bounty claim state') WHERE
+      NEW.correction_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completion_corrections x
+        WHERE x.id = NEW.correction_id AND x.subject_id = NEW.id
+          AND x.completion_id = COALESCE(
+            NEW.effective_completion_id,
+            NEW.restorable_completion_id
+          )
+      );
+  END;
+  CREATE TRIGGER bounty_claims_no_delete BEFORE DELETE ON bounty_claims
+    BEGIN SELECT RAISE(ABORT, 'bounty claims cannot be deleted'); END;
+  CREATE TRIGGER legacy_bounty_carriers_update_guard
+    BEFORE UPDATE ON legacy_bounty_completion_carriers
+  BEGIN
+    SELECT RAISE(ABORT, 'legacy completion carrier identity is immutable') WHERE
+      NEW.id IS NOT OLD.id OR NEW.offering_id IS NOT OLD.offering_id
+      OR NEW.definition_id IS NOT OLD.definition_id
+      OR NEW.source_task_id IS NOT OLD.source_task_id
+      OR NEW.source_window IS NOT OLD.source_window;
+    SELECT RAISE(ABORT, 'invalid legacy completion carrier transition') WHERE
+      NEW.revision != OLD.revision + 1 OR NOT (
+        (OLD.state = 'completed' AND NEW.state IN ('completed', 'released'))
+      );
+    SELECT RAISE(ABORT, 'completion does not belong to legacy carrier') WHERE
+      NEW.effective_completion_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completions
+        WHERE id = NEW.effective_completion_id AND subject_id = NEW.id
+      );
+    SELECT RAISE(ABORT, 'correction does not belong to legacy carrier') WHERE
+      NEW.correction_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM bounty_completion_corrections
+        WHERE id = NEW.correction_id AND subject_id = NEW.id
+      );
+  END;
+  CREATE TRIGGER legacy_bounty_carriers_no_delete
+    BEFORE DELETE ON legacy_bounty_completion_carriers
+    BEGIN SELECT RAISE(ABORT, 'legacy completion carriers cannot be deleted'); END;
+  CREATE TRIGGER bounty_completions_no_update BEFORE UPDATE ON bounty_completions
+    BEGIN SELECT RAISE(ABORT, 'bounty completions are immutable'); END;
+  CREATE TRIGGER bounty_completions_no_delete BEFORE DELETE ON bounty_completions
+    BEGIN SELECT RAISE(ABORT, 'bounty completions are immutable'); END;
+  CREATE TRIGGER bounty_completion_corrections_no_update
+    BEFORE UPDATE ON bounty_completion_corrections
+    BEGIN SELECT RAISE(ABORT, 'bounty completion corrections are immutable'); END;
+  CREATE TRIGGER bounty_completion_corrections_no_delete
+    BEFORE DELETE ON bounty_completion_corrections
+    BEGIN SELECT RAISE(ABORT, 'bounty completion corrections are immutable'); END;
+  CREATE TRIGGER legacy_bounty_sources_no_update BEFORE UPDATE ON legacy_bounty_sources
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty source maps are immutable'); END;
+  CREATE TRIGGER legacy_bounty_sources_no_delete BEFORE DELETE ON legacy_bounty_sources
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty source maps are immutable'); END;
+  CREATE TRIGGER legacy_bounty_migrations_no_update BEFORE UPDATE ON legacy_bounty_migrations
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty migration markers are immutable'); END;
+  CREATE TRIGGER legacy_bounty_migrations_no_delete BEFORE DELETE ON legacy_bounty_migrations
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty migration markers are immutable'); END;
+  CREATE TRIGGER legacy_bounty_correction_receipts_no_update
+    BEFORE UPDATE ON legacy_bounty_correction_receipts
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty correction receipts are immutable'); END;
+  CREATE TRIGGER legacy_bounty_correction_receipts_no_delete
+    BEFORE DELETE ON legacy_bounty_correction_receipts
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty correction receipts are immutable'); END;
+`;
+
+/** Adds explicit work subjects and provenance without changing public Claim shapes. */
+export function migrateBountyLifecycleToV9(db: DatabaseSync): void {
+  const claims = db.prepare("PRAGMA table_info(bounty_claims)").all();
+  if (claims.some((column) => column.name === "acceptance_provenance")) {
+    const version = Number(
+      db.prepare("PRAGMA user_version").get()?.user_version ?? 0,
+    );
+    if (version < 9) db.exec("PRAGMA user_version = 9");
+    return;
+  }
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      DROP TRIGGER IF EXISTS bounty_claims_update_guard;
+      DROP TRIGGER IF EXISTS bounty_claims_no_delete;
+      DROP TRIGGER IF EXISTS bounty_offerings_no_update;
+      DROP TRIGGER IF EXISTS bounty_offerings_no_delete;
+      DROP TRIGGER IF EXISTS bounty_completions_no_update;
+      DROP TRIGGER IF EXISTS bounty_completions_no_delete;
+      DROP TRIGGER IF EXISTS bounty_completion_corrections_no_update;
+      DROP TRIGGER IF EXISTS bounty_completion_corrections_no_delete;
+      DROP TRIGGER IF EXISTS bounty_claims_insert_guard;
+      DROP TRIGGER IF EXISTS legacy_bounty_carriers_insert_guard;
+      DROP TRIGGER IF EXISTS bounty_completions_insert_guard;
+      DROP TRIGGER IF EXISTS bounty_corrections_insert_guard;
+      DROP INDEX IF EXISTS bounty_claims_one_current_per_offering;
+      DROP INDEX IF EXISTS bounty_offerings_once_definition;
+      DROP INDEX IF EXISTS bounty_offerings_recurring_interval;
+      ${SUBJECTS_AND_HISTORY_V9}
+      DROP TABLE bounty_completion_corrections;
+      DROP TABLE bounty_completions;
+      DROP TABLE bounty_claims;
+      DROP TABLE bounty_offerings;
+      ALTER TABLE bounty_offerings_v9 RENAME TO bounty_offerings;
+      ALTER TABLE bounty_claims_v9 RENAME TO bounty_claims;
+      ALTER TABLE bounty_completions_v9 RENAME TO bounty_completions;
+      ALTER TABLE bounty_completion_corrections_v9 RENAME TO bounty_completion_corrections;
+      ${GUARDS_V9}
+      PRAGMA user_version = 9;
+    `);
+    const foreignKeyError = db.prepare("PRAGMA foreign_key_check").get();
+    if (foreignKeyError)
+      throw new Error("Bounty work subject migration broke a foreign key");
+    db.exec("COMMIT");
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+}

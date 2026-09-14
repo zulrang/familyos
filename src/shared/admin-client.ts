@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+export { requestId as adminRequestId } from "./request-id";
+
 export type RemoteData<T> =
   | { status: "loading" }
   | { status: "ready"; data: T }
@@ -33,13 +35,6 @@ export async function adminRequest<T>(
     throw new Error(result.error ?? "The request could not be saved.");
   }
   return result as T;
-}
-
-/** getRandomValues works on the household's HTTP origin; randomUUID requires HTTPS. */
-export function adminRequestId(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
 }
 
 export function useAdminData<T>(read: () => Promise<T>) {

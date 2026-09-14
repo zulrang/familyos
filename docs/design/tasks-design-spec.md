@@ -1,14 +1,24 @@
 # Tasks — Technical Design Specification
 
-**Status:** Approved for implementation
+**Status:** Approved; assigned-Task contract remains current
 **Date:** 2026-08-26 (D5/D6 amended, D19 revised ADR 0007, D20 added;
 supersedes `chores-design-spec.md`, 2026-08-23)
 **Audience:** Implementing developer
 
-Domain terms (Task, Chore, Routine, Occurrence, Window, Rotation, Claim, Skip,
-Star, Star Balance, Stars Earned, Grant, Spend, Star Adjustment) are defined
-in `CONTEXT.md`. The storage-ownership decision is recorded in
+Domain terms (Task, Chore, Routine, Occurrence, Window, Rotation, Bounty,
+Bounty Offering, Claim, Bounty Claim, Release, Skip, Star, Star Balance,
+Stars Earned, Grant, Spend, Star Adjustment) are defined in `CONTEXT.md`.
+The storage-ownership decision is recorded in
 `docs/adr/0006-familyos-owned-task-store.md`. Star Balance storage is ADR 0007.
+
+> **Bounty supersession.** [ADR 0008](../adr/0008-bounty-availability-and-claimed-work.md)
+> and the [Bounties design](bounties-design-spec.md) replace this document's
+> open-assignment creation, scheduling, claiming, Household-card, and
+> correction rules for household-offered work. The `open` assignment and
+> `claimed` Task event below are
+> legacy compatibility shapes during cutover. New household work offered to
+> any Active Member is a Bounty; assigned Tasks use fixed or rotation
+> assignment. The Window rules below continue to govern assigned Tasks.
 
 ---
 
@@ -22,13 +32,15 @@ unlike Calendar and Lists, Task data is FamilyOS-owned (ADR 0006).
 ### In scope
 
 - Recurring and one-time Task Definitions, each typed Chore or Routine
-- Rotation, fixed, and open assignment
-- Completion, claiming, and skipping
+- Rotation and fixed assignment for assigned Tasks; Bounties for household
+  work offered to any Active Member
+- Completion and skipping for assigned Tasks; Bounty Claim, Release, and
+  completion follow the Bounties design
 - Definition editing: in-place for title, type, time, and stars;
   retire-and-replace for recurrence and assignment, including the
   Household Member retirement hook
 - The Tasks screen: a Family Board with member cards, personal focus views,
-  and a Household card for open Tasks
+  and a Bounties view for available household work
 
 ### Explicitly out of scope
 
@@ -76,7 +88,7 @@ type Recurrence =
 type AssignmentPolicy =
   | { kind: 'fixed'; member: MemberId }
   | { kind: 'rotation'; order: NonEmptyArray<MemberId> }
-  | { kind: 'open' }                            // first member to claim
+  | { kind: 'open' }             // legacy compatibility; superseded by Bounties
 
 type TaskDefinition = {
   id: TaskId                   // immutable; a new id only when recurrence or assignment changes
@@ -106,7 +118,8 @@ type StarAdjustment = {        // append-only; no v1 writers (Rewards will appen
 type Event =
   | { kind: 'completed'; task: TaskId; window: LocalDate; by: MemberId; at: Instant }
   | { kind: 'verified';  task: TaskId; window: LocalDate; by: MemberId; at: Instant } // schema only; no v1 workflow
-  | { kind: 'claimed';   task: TaskId; window: LocalDate; by: MemberId }
+  // legacy compatibility; superseded by Bounty Claim
+  | { kind: 'claimed'; task: TaskId; window: LocalDate; by: MemberId }
   | { kind: 'skipped';   task: TaskId; window: LocalDate; reason: string | null }
 ```
 
@@ -206,11 +219,14 @@ completions on that id credit the new value. A retire-and-replace freezes the
 old row; a completion against the retired id credits that row's stars at
 insert time.
 
-**Stars Earned** is the sum of those same definition star values over
-`completed` events whose `at` falls in a given Household Time Zone range, for
-the Household or for one member. Skips, claims, Grants, and Spends are not
-included. It is not a v1 endpoint. An in-place star change revalues this fold
-because it reads the definition as it stands.
+For assigned Tasks, **Stars Earned** is the sum of those same definition star
+values over `completed` events whose `at` falls in a given Household Time Zone
+range, for the Household or for one member. Skips, claims, Grants, and Spends
+are not included. It is not a v1 endpoint. An in-place star change revalues
+this fold because it reads the definition as it stands.
+
+Bounty rewards and effective completion history follow the
+[Bounties correction contract](bounties-design-spec.md#completion-corrections).
 
 **Star Adjustment** records a Grant or Spend only. Completions are not
 copied here. Adjustments are applied to the integer at write time and are
@@ -228,7 +244,9 @@ These decisions are final. Each rejected alternative caused a concrete
 problem. Do not reintroduce the alternatives. D1–D9 carry over from the
 original chore spec; D10–D18 were settled in the 2026-08-25 design session.
 D5 and D6 were amended, and D20 added, on 2026-08-26. D19 was revised
-2026-08-26 (ADR 0007).
+2026-08-26 (ADR 0007). D15 and D16 remain the historical record of the open
+Task design; ADR 0008 supersedes them for Bounties and new household-offered
+work.
 
 | # | Decision | Rejected alternative | Reason |
 |---|---|---|---|
@@ -262,6 +280,9 @@ mirrors `src/lists/lists-http.ts`). All routes require a Trusted Display
 credential, like every household read/write.
 
 ### 4.1 `POST` events
+
+This route remains the assigned-Task event path. Bounty lifecycle commands
+use the revisioned command contracts in the Bounties design.
 
 Accepts a batch of events from a Display.
 
@@ -402,10 +423,13 @@ Components: `TasksBoard`, `TaskRow`, the standard FAB.
   stronger control colors from it. Text on these surfaces and white text on
   controls meet a 4.5:1 contrast ratio. Calendar and Lists keep their existing
   surface palette.
-- **Household card.** Appended when unclaimed open or skipped Occurrences
-  exist (D16), with its own focus view. Claim selects an Active Member and
-  moves the row into that member's tasks. An emptied Household focus view
-  remains navigable until leaving it; the empty card is omitted on the board.
+- **Household card (legacy compatibility).** Appended when unclaimed open or
+  skipped Occurrences exist (D16), with its own focus view. Claim selects an
+  Active Member and moves the row into that member's tasks. An emptied
+  Household focus view remains navigable until leaving it; the empty card is
+  omitted on the board.
+  After cutover, available household work appears in the Bounties view and
+  moves to a member only through a Bounty Claim.
 - **Ordering.** Remaining rows first: timed ascending by `time`, then untimed
   in creation order. Completed rows follow, in that same timed-then-untimed
   order among themselves.
@@ -429,6 +453,8 @@ Components: `TasksBoard`, `TaskRow`, the standard FAB.
 ## 7. Acceptance Criteria
 
 Write tests for each scenario. All references are to sections above.
+Open-assignment criteria below document legacy compatibility. Current Bounty
+acceptance and migration behavior is specified in the Bounties design.
 
 ### Model and projection
 

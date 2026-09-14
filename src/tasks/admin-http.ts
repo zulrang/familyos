@@ -13,10 +13,31 @@ import {
 } from "./admin-store";
 import { parseTaskAdminCommand } from "./admin-types";
 import {
+  BountyCorrectionStoreError,
+  correctBountyCompletion,
+  loadBountyCompletionCorrections,
+} from "./bounty-correction-store";
+import {
+  administerBountyDefinition,
+  BountyAdminStoreError,
+  InactiveBountyMemberError,
+  loadBountyClaims,
+  loadBountyCompletions,
+  loadBountyDefinitions,
+  replaceDefinition,
+} from "./bounty-store";
+import {
+  correctLegacyBountyCompletion,
+  LegacyBountyCarrierStoreError,
+  loadLegacyBountyCompletionCarriers,
+} from "./legacy-bounty-carrier-store";
+import {
   loadCompletionCorrections,
   loadEvents,
+  loadLegacyBountyArchiveEvents,
   loadStore,
   loadStoredStarBalances,
+  tasksDatabase,
 } from "./store";
 import { nowInstant, parseLocalDate } from "./types";
 
@@ -36,9 +57,16 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   reconcileRetiredMembers(household.members, today);
   if (request.method === "GET") {
     const store = loadStore();
+    const db = tasksDatabase();
     return adminJson({
       ...store,
+      bountyDefinitions: loadBountyDefinitions(db),
+      bountyClaims: loadBountyClaims(db),
+      bountyCompletions: loadBountyCompletions(db),
+      bountyCompletionCorrections: loadBountyCompletionCorrections(db),
+      legacyBountyCompletionCarriers: loadLegacyBountyCompletionCarriers(db),
       originalEvents: loadEvents(),
+      legacyBountyArchiveEvents: loadLegacyBountyArchiveEvents(),
       corrections: loadCompletionCorrections(),
       balances: loadStoredStarBalances(),
       today,
@@ -47,8 +75,10 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   const command = parseTaskAdminCommand(await request.json().catch(() => null));
   if (!command)
     return adminJson({ error: "Check the task fields and try again." }, 400);
-  if (command.kind === "create" || command.kind === "edit") {
-    const assignment = command.draft.assignment;
+  const assignedDraft =
+    command.kind === "create" || command.kind === "edit" ? command.draft : null;
+  if (assignedDraft) {
+    const assignment = assignedDraft.assignment;
     const assigned =
       assignment.kind === "fixed"
         ? [assignment.member]
@@ -86,6 +116,43 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
       case "retire":
         retireAdminTask(command.task, today);
         break;
+      case "edit-bounty":
+      case "retire-bounty":
+        return adminJson({
+          receipt: administerBountyDefinition({
+            db: tasksDatabase(),
+            command,
+            today,
+          }),
+        });
+      case "undo-bounty-completion":
+      case "restore-bounty-completion":
+      case "reassign-bounty-completion":
+        return adminJson({
+          receipt: correctBountyCompletion({
+            db: tasksDatabase(),
+            command,
+            members: household.members,
+          }),
+        });
+      case "undo-legacy-bounty-completion":
+      case "reassign-legacy-bounty-completion":
+        return adminJson({
+          receipt: correctLegacyBountyCompletion({
+            db: tasksDatabase(),
+            command,
+            members: household.members,
+          }),
+        });
+      case "replace-definition":
+        return adminJson({
+          receipt: replaceDefinition({
+            db: tasksDatabase(),
+            command,
+            today,
+            members: household.members,
+          }),
+        });
       case "correct":
         correctAdminCompletion({ ...command.correction, at: nowInstant() });
         break;
@@ -95,7 +162,14 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     }
     return adminJson({ ok: true });
   } catch (error) {
-    if (error instanceof TaskAdminError)
+    if (error instanceof InactiveBountyMemberError)
+      return adminJson({ error: error.message }, 400);
+    if (
+      error instanceof TaskAdminError ||
+      error instanceof BountyAdminStoreError ||
+      error instanceof BountyCorrectionStoreError ||
+      error instanceof LegacyBountyCarrierStoreError
+    )
       return adminJson({ error: error.message }, 409);
     throw error;
   }

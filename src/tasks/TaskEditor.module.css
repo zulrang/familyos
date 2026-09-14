@@ -8,6 +8,13 @@
   padding: 16px;
   background: rgb(30 50 65 / 18%);
 }
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
 
 .panel {
   position: relative;
@@ -64,6 +71,77 @@
   margin: 0;
   font: var(--type-card-meta);
   font-weight: 600;
+}
+
+.details legend {
+  font: var(--type-card-meta);
+  font-weight: 600;
+}
+
+.recurrenceEditor {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.scheduleChoices {
+  display: flex;
+  gap: 8px;
+}
+
+.scheduleChoices button {
+  flex: 1;
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  color: var(--text-body);
+  box-shadow: var(--shadow-raise);
+  font: var(--type-card-meta);
+  cursor: pointer;
+}
+
+.scheduleChoices button[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--brand-blue);
+  color: var(--text-on-fill);
+}
+
+.weekdayChoices {
+  display: flex;
+  gap: 6px;
+}
+
+.weekdayField {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.weekdayField legend {
+  margin-bottom: 10px;
+  font: var(--type-card-meta);
+}
+
+.weekdayChoices button {
+  flex: 1;
+  min-width: 44px;
+  min-height: 48px;
+  padding-inline: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  color: var(--text-body);
+  box-shadow: var(--shadow-raise);
+  font: var(--type-card-meta);
+  cursor: pointer;
+}
+
+.weekdayChoices button[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--brand-blue);
+  color: var(--text-on-fill);
 }
 
 .fields {

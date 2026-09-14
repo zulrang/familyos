@@ -1,19 +1,46 @@
 import type { MemberId } from "@/members/members";
+import {
+  type BountyRecurrence,
+  parseBountyRecurrence,
+} from "./bounty-calendar";
+import {
+  type DayOfMonth,
+  type LocalDate,
+  parseDayOfMonth,
+  parseLocalDate,
+  parseWeekday,
+  type Weekday,
+} from "./calendar-values";
+
+export {
+  addLocalDays,
+  type DayOfMonth,
+  type LocalDate,
+  parseDayOfMonth,
+  parseLocalDate,
+  parseWeekday,
+  type Weekday,
+} from "./calendar-values";
 
 type Brand<T, B extends string> = T & { readonly __brand: B };
 
 export type TaskId = Brand<string, "TaskId">;
 export type LineageId = Brand<string, "LineageId">;
-export type LocalDate = Brand<string, "LocalDate">;
+export type OfferingId = Brand<string, "OfferingId">;
+export type ClaimId = Brand<string, "ClaimId">;
+export type CompletionId = Brand<string, "CompletionId">;
+export type BountyCorrectionId = Brand<string, "BountyCorrectionId">;
+export type BountyCommandId = Brand<string, "BountyCommandId">;
+export type StarAmount = Brand<number, "StarAmount">;
+export type DefinitionRevision = Brand<number, "DefinitionRevision">;
+export type ClaimRevision = Brand<number, "ClaimRevision">;
+export type TaskTitle = Brand<string, "TaskTitle">;
 export type LocalTime = Brand<string, "LocalTime">;
 export type Instant = Brand<string, "Instant">;
-export type DayOfMonth = Brand<number, "DayOfMonth">;
 
 export type NonEmpty<T> = [T, ...T[]];
 
 export type TaskType = "chore" | "routine";
-
-export type Weekday = "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
 
 export type Recurrence =
   | { kind: "once"; date: LocalDate }
@@ -26,7 +53,7 @@ export type AssignmentPolicy =
   | { kind: "rotation"; order: NonEmpty<MemberId> }
   | { kind: "open" };
 
-export type TaskDefinition = {
+export type LegacyTaskDefinition = {
   id: TaskId;
   lineage: LineageId;
   title: string;
@@ -37,6 +64,193 @@ export type TaskDefinition = {
   stars: number;
   retiredAt: LocalDate | null;
 };
+
+export type AssignedTaskDefinition = Readonly<
+  { kind: "assigned" } & LegacyTaskDefinition
+>;
+
+export type BountyDefinition = Readonly<{
+  kind: "bounty";
+  id: TaskId;
+  lineage: LineageId;
+  type: "chore";
+  title: TaskTitle;
+  stars: StarAmount;
+  recurrence: BountyRecurrence;
+  offerFrom: LocalDate | null;
+  revision: DefinitionRevision;
+  retiredAt: LocalDate | null;
+}>;
+
+export type TaskDefinition = AssignedTaskDefinition | BountyDefinition;
+
+export type OfferingKey =
+  | Readonly<{ kind: "once"; definition: TaskId }>
+  | Readonly<{
+      kind: "recurring";
+      definition: TaskId;
+      intervalStart: LocalDate;
+    }>;
+
+/** An imported reservation keeps its source occurrence without becoming claimable. */
+export type LegacyOfferingKey = Readonly<{
+  kind: "legacy";
+  definition: TaskId;
+  sourceWindow: LocalDate;
+  intervalStart: LocalDate | null;
+}>;
+
+export type AcceptedOfferingKey = OfferingKey | LegacyOfferingKey;
+
+export type AvailableBounty = Readonly<{
+  kind: "available";
+  id: OfferingId;
+  offering: OfferingKey;
+  title: TaskTitle;
+  stars: StarAmount;
+  definitionRevision: DefinitionRevision;
+}>;
+
+export type BountyClaim = Readonly<{
+  id: ClaimId;
+  offering: AcceptedOfferingKey;
+  member: MemberId;
+  scheduledOn: LocalDate;
+  title: TaskTitle;
+  stars: StarAmount;
+}>;
+
+export type ClaimedBounty = Readonly<{
+  kind: "claimed-bounty";
+  claim: BountyClaim;
+  revision: ClaimRevision;
+  state:
+    | { kind: "unfinished" }
+    | {
+        kind: "reopened";
+        undoneCompletion: BountyCompletion;
+        correction: BountyCorrectionId;
+      }
+    | {
+        kind: "completed";
+        completion: BountyCompletion;
+        creditedTo: MemberId;
+        correction: BountyCorrectionId | null;
+      }
+    | { kind: "released" };
+}>;
+
+export function isUnfinishedBountyClaim(
+  row: ClaimedBounty,
+): row is ClaimedBounty & {
+  state:
+    | { kind: "unfinished" }
+    | {
+        kind: "reopened";
+        undoneCompletion: BountyCompletion;
+        correction: BountyCorrectionId;
+      };
+} {
+  return row.state.kind === "unfinished" || row.state.kind === "reopened";
+}
+
+export type BountyCreditProvenance = "recorded" | "legacy-missing";
+
+export type BountyCompletion = Readonly<{
+  id: CompletionId;
+  claim: ClaimId;
+  by: MemberId;
+  at: Instant;
+  creditedStars: StarAmount;
+  creditProvenance: BountyCreditProvenance;
+}>;
+
+type BountyCompletionCorrectionFields = {
+  id: BountyCorrectionId;
+  claim: ClaimId;
+  completion: CompletionId;
+  predecessor: BountyCorrectionId | null;
+  creditedStars: StarAmount;
+  creditProvenance: BountyCreditProvenance;
+  reason: string;
+  at: Instant;
+};
+
+export type BountyCompletionCorrection = Readonly<
+  BountyCompletionCorrectionFields &
+    (
+      | { kind: "undo"; fromMember: MemberId; toMember: null }
+      | { kind: "restore"; fromMember: null; toMember: MemberId }
+      | {
+          kind: "reassign";
+          fromMember: MemberId;
+          toMember: MemberId;
+        }
+    )
+>;
+
+export type CreateBountyDraft = Readonly<{
+  kind: "bounty";
+  type: "chore";
+  title: TaskTitle;
+  stars: StarAmount;
+  recurrence: BountyRecurrence;
+}>;
+
+export type TaskCreateDraft =
+  | ({ kind: "assigned" } & AssignedTaskDraft)
+  | CreateBountyDraft;
+
+export type BountyCommand =
+  | Readonly<{
+      kind: "claim-bounty";
+      requestId: BountyCommandId;
+      offering: OfferingKey;
+      member: MemberId;
+      definitionRevision: DefinitionRevision;
+    }>
+  | Readonly<{
+      kind: "claim-bounty";
+      requestId: BountyCommandId;
+      offering: OfferingKey;
+      member: MemberId;
+      compatibility: "v4-retry";
+    }>
+  | Readonly<{
+      kind: "complete-bounty";
+      requestId: BountyCommandId;
+      claim: ClaimId;
+      revision: ClaimRevision;
+    }>
+  | Readonly<{
+      kind: "release-bounty";
+      requestId: BountyCommandId;
+      claim: ClaimId;
+      revision: ClaimRevision;
+    }>;
+
+export type BountyCommandReceipt =
+  | {
+      status: "accepted" | "already-applied";
+      result: {
+        kind: "claimed";
+        claim: BountyClaim;
+        revision: ClaimRevision;
+      };
+    }
+  | {
+      status: "accepted" | "already-applied";
+      result: { kind: "completed"; completion: BountyCompletion };
+    }
+  | {
+      status: "accepted" | "already-applied";
+      result: {
+        kind: "released";
+        claim: BountyClaim;
+        revision: ClaimRevision;
+      };
+    }
+  | { status: "rejected"; error: string };
 
 export type StarAdjustment = {
   id: string;
@@ -106,7 +320,10 @@ export type TasksViewRead = {
   occurrences: Occurrence[];
   progress: MemberProgress[];
   starBalances: StarBalance[];
-  definitions: TaskDefinition[];
+  definitions: LegacyTaskDefinition[];
+  bountyDefinitions: BountyDefinition[];
+  availableBounties: AvailableBounty[];
+  bountyClaims: ClaimedBounty[];
   today: LocalDate;
   generatedAt: Instant;
 };
@@ -120,7 +337,11 @@ export type CreateTaskDraft = {
   stars: number;
 };
 
-export type SaveTaskDraft = CreateTaskDraft & { id: TaskId };
+export type AssignedTaskDraft = Omit<CreateTaskDraft, "assignment"> & {
+  assignment: Exclude<AssignmentPolicy, { kind: "open" }>;
+};
+
+export type SaveTaskDraft = AssignedTaskDraft & { id: TaskId };
 
 export type DefinitionSavePlan =
   | {
@@ -130,17 +351,11 @@ export type DefinitionSavePlan =
       time: LocalTime | null;
       stars: number;
     }
-  | { kind: "replace"; retiredAt: LocalDate; replacement: TaskDefinition };
-
-const WEEKDAYS = new Set<string>([
-  "sun",
-  "mon",
-  "tue",
-  "wed",
-  "thu",
-  "fri",
-  "sat",
-]);
+  | {
+      kind: "replace";
+      retiredAt: LocalDate;
+      replacement: LegacyTaskDefinition;
+    };
 
 export function isRecord(raw: unknown): raw is Record<string, unknown> {
   return raw !== null && typeof raw === "object" && !Array.isArray(raw);
@@ -158,20 +373,6 @@ export function parseTaskId(raw: unknown): TaskId | null {
 export function parseLineageId(raw: unknown): LineageId | null {
   const value = nonEmptyString(raw);
   return value ? (value as LineageId) : null;
-}
-
-export function parseLocalDate(raw: unknown): LocalDate | null {
-  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
-  const [year, month, day] = raw.split("-").map(Number);
-  const utc = new Date(Date.UTC(year, month - 1, day));
-  if (
-    utc.getUTCFullYear() !== year ||
-    utc.getUTCMonth() !== month - 1 ||
-    utc.getUTCDate() !== day
-  ) {
-    return null;
-  }
-  return raw as LocalDate;
 }
 
 export function parseLocalTime(raw: unknown): LocalTime | null {
@@ -200,20 +401,75 @@ export function newLineageId(): LineageId {
   return crypto.randomUUID() as LineageId;
 }
 
-function parseWeekday(raw: unknown): Weekday | null {
-  return typeof raw === "string" && WEEKDAYS.has(raw) ? (raw as Weekday) : null;
+export function newOfferingId(): OfferingId {
+  return crypto.randomUUID() as OfferingId;
 }
 
-function parseDayOfMonth(raw: unknown): DayOfMonth | null {
-  if (
-    typeof raw !== "number" ||
-    !Number.isInteger(raw) ||
-    raw < 1 ||
-    raw > 28
-  ) {
-    return null;
-  }
-  return raw as DayOfMonth;
+export function newClaimId(): ClaimId {
+  return crypto.randomUUID() as ClaimId;
+}
+
+export function newCompletionId(): CompletionId {
+  return crypto.randomUUID() as CompletionId;
+}
+
+export function newBountyCorrectionId(): BountyCorrectionId {
+  return crypto.randomUUID() as BountyCorrectionId;
+}
+
+function parseBrandedId<B extends string>(
+  raw: unknown,
+): Brand<string, B> | null {
+  const value = nonEmptyString(raw);
+  return value ? (value as Brand<string, B>) : null;
+}
+
+export function parseOfferingId(raw: unknown): OfferingId | null {
+  return parseBrandedId<"OfferingId">(raw);
+}
+
+export function parseClaimId(raw: unknown): ClaimId | null {
+  return parseBrandedId<"ClaimId">(raw);
+}
+
+export function parseCompletionId(raw: unknown): CompletionId | null {
+  return parseBrandedId<"CompletionId">(raw);
+}
+
+export function parseBountyCorrectionId(
+  raw: unknown,
+): BountyCorrectionId | null {
+  return parseBrandedId<"BountyCorrectionId">(raw);
+}
+
+export function parseBountyCommandId(raw: unknown): BountyCommandId | null {
+  return parseBrandedId<"BountyCommandId">(raw);
+}
+
+export function parseStarAmount(raw: unknown): StarAmount | null {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0
+    ? (raw as StarAmount)
+    : null;
+}
+
+export function parseClaimRevision(raw: unknown): ClaimRevision | null {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0
+    ? (raw as ClaimRevision)
+    : null;
+}
+
+export function parseDefinitionRevision(
+  raw: unknown,
+): DefinitionRevision | null {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0
+    ? (raw as DefinitionRevision)
+    : null;
+}
+
+export function parseTaskTitle(raw: unknown): TaskTitle | null {
+  if (typeof raw !== "string") return null;
+  const title = raw.trim();
+  return title ? (title as TaskTitle) : null;
 }
 
 function parseNonEmpty<T>(
@@ -345,10 +601,8 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   const recurrence = parseRecurrence(raw.recurrence);
   const assignment = parseAssignment(raw.assignment);
   if (!title || !type || !recurrence || !assignment) return null;
-  const stars = raw.stars === undefined ? 0 : raw.stars;
-  if (typeof stars !== "number" || !Number.isSafeInteger(stars) || stars < 0) {
-    return null;
-  }
+  const stars = parseStarAmount(raw.stars === undefined ? 0 : raw.stars);
+  if (stars === null) return null;
   let time: LocalTime | null = null;
   if (raw.time !== undefined && raw.time !== null && raw.time !== "") {
     time = parseLocalTime(raw.time);
@@ -357,7 +611,332 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   return { title, type, recurrence, assignment, time, stars };
 }
 
-export function createDefinition(draft: CreateTaskDraft): TaskDefinition {
+const BOUNTY_CREATE_KEYS = new Set([
+  "kind",
+  "type",
+  "title",
+  "stars",
+  "recurrence",
+]);
+
+export function parseCreateBountyDraft(raw: unknown): CreateBountyDraft | null {
+  if (!isRecord(raw)) return null;
+  for (const key of Object.keys(raw)) {
+    if (!BOUNTY_CREATE_KEYS.has(key)) return null;
+  }
+  if (
+    raw.kind !== "bounty" ||
+    (raw.type !== undefined && raw.type !== "chore")
+  ) {
+    return null;
+  }
+  const title = parseTaskTitle(raw.title);
+  const recurrence = parseBountyRecurrence(raw.recurrence);
+  if (!title || !recurrence) return null;
+  const stars = parseStarAmount(raw.stars === undefined ? 0 : raw.stars);
+  if (stars === null) return null;
+  return {
+    kind: "bounty",
+    type: "chore",
+    title,
+    stars,
+    recurrence,
+  };
+}
+
+export function parseTaskCreateDraft(raw: unknown): TaskCreateDraft | null {
+  if (isRecord(raw) && raw.kind === "bounty")
+    return parseCreateBountyDraft(raw);
+  const assigned = parseCreateTaskDraft(raw);
+  if (!assigned || assigned.assignment.kind === "open") {
+    return null;
+  }
+  return {
+    kind: "assigned",
+    ...assigned,
+    assignment: assigned.assignment,
+  };
+}
+
+function hasOnlyKnownKeys(
+  raw: Record<string, unknown>,
+  keys: Set<string>,
+): boolean {
+  return Object.keys(raw).every((key) => keys.has(key));
+}
+
+function parseOfferingKey(raw: unknown): OfferingKey | null {
+  if (!isRecord(raw)) return null;
+  const definition = parseTaskId(raw.definition);
+  if (!definition) return null;
+  if (raw.kind === "once") {
+    return hasOnlyKnownKeys(raw, new Set(["kind", "definition"]))
+      ? { kind: "once", definition }
+      : null;
+  }
+  const intervalStart = parseLocalDate(raw.intervalStart);
+  return raw.kind === "recurring" &&
+    intervalStart &&
+    hasOnlyKnownKeys(raw, new Set(["kind", "definition", "intervalStart"]))
+    ? { kind: "recurring", definition, intervalStart }
+    : null;
+}
+
+function parseAcceptedOfferingKey(raw: unknown): AcceptedOfferingKey | null {
+  const canonical = parseOfferingKey(raw);
+  if (canonical) return canonical;
+  if (
+    !isRecord(raw) ||
+    raw.kind !== "legacy" ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set(["kind", "definition", "sourceWindow", "intervalStart"]),
+    )
+  ) {
+    return null;
+  }
+  const definition = parseTaskId(raw.definition);
+  const sourceWindow = parseLocalDate(raw.sourceWindow);
+  const intervalStart =
+    raw.intervalStart === null ? null : parseLocalDate(raw.intervalStart);
+  return definition &&
+    sourceWindow &&
+    (raw.intervalStart === null || intervalStart)
+    ? { kind: "legacy", definition, sourceWindow, intervalStart }
+    : null;
+}
+
+export function parseBountyCommand(raw: unknown): BountyCommand | null {
+  if (!isRecord(raw)) return null;
+  const requestId = parseBountyCommandId(raw.requestId);
+  if (!requestId) return null;
+  if (raw.kind === "claim-bounty") {
+    if (
+      !hasOnlyKnownKeys(
+        raw,
+        new Set([
+          "kind",
+          "requestId",
+          "offering",
+          "member",
+          "definitionRevision",
+        ]),
+      )
+    ) {
+      return null;
+    }
+    const offering = parseOfferingKey(raw.offering);
+    const member = nonEmptyString(raw.member);
+    const definitionRevision =
+      raw.definitionRevision === undefined
+        ? undefined
+        : parseDefinitionRevision(raw.definitionRevision);
+    return offering && member && definitionRevision !== null
+      ? {
+          kind: "claim-bounty",
+          requestId,
+          offering,
+          member,
+          ...(definitionRevision === undefined
+            ? { compatibility: "v4-retry" as const }
+            : { definitionRevision }),
+        }
+      : null;
+  }
+  if (raw.kind === "complete-bounty" || raw.kind === "release-bounty") {
+    if (
+      !hasOnlyKnownKeys(
+        raw,
+        new Set(["kind", "requestId", "claim", "revision"]),
+      )
+    ) {
+      return null;
+    }
+    const claim = parseClaimId(raw.claim);
+    const revision = parseClaimRevision(raw.revision);
+    return claim && revision !== null
+      ? { kind: raw.kind, requestId, claim, revision }
+      : null;
+  }
+  return null;
+}
+
+function parseBountyClaim(raw: unknown): BountyClaim | null {
+  if (
+    !isRecord(raw) ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set(["id", "offering", "member", "scheduledOn", "title", "stars"]),
+    )
+  ) {
+    return null;
+  }
+  const id = parseClaimId(raw.id);
+  const offering = parseAcceptedOfferingKey(raw.offering);
+  const member = nonEmptyString(raw.member);
+  const scheduledOn = parseLocalDate(raw.scheduledOn);
+  const title = parseTaskTitle(raw.title);
+  const stars = parseStarAmount(raw.stars);
+  if (!id || !offering || !member || !scheduledOn || !title || stars === null) {
+    return null;
+  }
+  return { id, offering, member, scheduledOn, title, stars };
+}
+
+function parseBountyCompletion(raw: unknown): BountyCompletion | null {
+  if (
+    !isRecord(raw) ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set(["id", "claim", "by", "at", "creditedStars", "creditProvenance"]),
+    )
+  ) {
+    return null;
+  }
+  const id = parseCompletionId(raw.id);
+  const claim = parseClaimId(raw.claim);
+  const by = nonEmptyString(raw.by);
+  const at = parseInstant(raw.at);
+  const creditedStars = parseStarAmount(raw.creditedStars);
+  const creditProvenance =
+    raw.creditProvenance === undefined || raw.creditProvenance === "recorded"
+      ? "recorded"
+      : raw.creditProvenance === "legacy-missing"
+        ? "legacy-missing"
+        : null;
+  if (
+    !id ||
+    !claim ||
+    !by ||
+    !at ||
+    creditedStars === null ||
+    !creditProvenance
+  )
+    return null;
+  return { id, claim, by, at, creditedStars, creditProvenance };
+}
+
+export function parseBountyCommandReceipt(
+  raw: unknown,
+): BountyCommandReceipt | null {
+  if (!isRecord(raw)) return null;
+  if (raw.status === "rejected") {
+    if (
+      !hasOnlyKnownKeys(raw, new Set(["status", "error"])) ||
+      typeof raw.error !== "string" ||
+      raw.error.length === 0
+    ) {
+      return null;
+    }
+    return { status: "rejected", error: raw.error };
+  }
+  if (
+    (raw.status !== "accepted" && raw.status !== "already-applied") ||
+    !hasOnlyKnownKeys(raw, new Set(["status", "result"])) ||
+    !isRecord(raw.result)
+  ) {
+    return null;
+  }
+  if (
+    raw.result.kind === "claimed" &&
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "claim", "revision"]))
+  ) {
+    const legacyClaim = isRecord(raw.result.claim) ? raw.result.claim : null;
+    const revision = parseClaimRevision(
+      raw.result.revision ?? legacyClaim?.revision,
+    );
+    const claim = parseBountyClaim(
+      legacyClaim
+        ? Object.fromEntries(
+            Object.entries(legacyClaim).filter(([key]) => key !== "revision"),
+          )
+        : raw.result.claim,
+    );
+    return claim && revision !== null
+      ? { status: raw.status, result: { kind: "claimed", claim, revision } }
+      : null;
+  }
+  if (
+    raw.result.kind === "completed" &&
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "completion"]))
+  ) {
+    const completion = parseBountyCompletion(raw.result.completion);
+    return completion
+      ? { status: raw.status, result: { kind: "completed", completion } }
+      : null;
+  }
+  if (
+    raw.result.kind === "released" &&
+    hasOnlyKnownKeys(raw.result, new Set(["kind", "claim", "revision"]))
+  ) {
+    const claim = parseBountyClaim(raw.result.claim);
+    const revision = parseClaimRevision(raw.result.revision);
+    return claim && revision !== null
+      ? { status: raw.status, result: { kind: "released", claim, revision } }
+      : null;
+  }
+  return null;
+}
+
+export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
+  if (
+    !isRecord(raw) ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set([
+        "kind",
+        "id",
+        "lineage",
+        "type",
+        "title",
+        "stars",
+        "recurrence",
+        "offerFrom",
+        "revision",
+        "retiredAt",
+      ]),
+    ) ||
+    raw.kind !== "bounty" ||
+    raw.type !== "chore"
+  ) {
+    return null;
+  }
+  const id = parseTaskId(raw.id);
+  const lineage = parseLineageId(raw.lineage);
+  const title = parseTaskTitle(raw.title);
+  const stars = parseStarAmount(raw.stars);
+  const revision = parseDefinitionRevision(raw.revision);
+  const recurrence = parseBountyRecurrence(raw.recurrence);
+  const offerFrom =
+    raw.offerFrom === undefined || raw.offerFrom === null
+      ? null
+      : parseLocalDate(raw.offerFrom);
+  const retiredAt =
+    raw.retiredAt === null ? null : parseLocalDate(raw.retiredAt);
+  return id &&
+    lineage &&
+    title &&
+    stars !== null &&
+    revision !== null &&
+    recurrence &&
+    (raw.offerFrom === undefined || raw.offerFrom === null || offerFrom) &&
+    (raw.retiredAt === null || retiredAt)
+    ? {
+        kind: "bounty",
+        id,
+        lineage,
+        type: "chore",
+        title,
+        stars,
+        recurrence,
+        offerFrom,
+        revision,
+        retiredAt,
+      }
+    : null;
+}
+
+export function createDefinition(draft: CreateTaskDraft): LegacyTaskDefinition {
   return {
     id: newTaskId(),
     lineage: newLineageId(),
@@ -367,6 +946,23 @@ export function createDefinition(draft: CreateTaskDraft): TaskDefinition {
     assignment: draft.assignment,
     time: draft.time,
     stars: draft.stars,
+    retiredAt: null,
+  };
+}
+
+export function createBountyDefinition(
+  draft: CreateBountyDraft,
+): BountyDefinition {
+  return {
+    kind: "bounty",
+    id: newTaskId(),
+    lineage: newLineageId(),
+    type: "chore",
+    title: draft.title,
+    stars: draft.stars,
+    recurrence: draft.recurrence,
+    offerFrom: null,
+    revision: 0 as DefinitionRevision,
     retiredAt: null,
   };
 }
@@ -395,6 +991,13 @@ export function recurrenceEquals(left: Recurrence, right: Recurrence): boolean {
       return _exhaustive;
     }
   }
+}
+
+export function allowsAssignedDraft(
+  _current: LegacyTaskDefinition | null,
+  draft: CreateTaskDraft,
+): boolean {
+  return draft.assignment.kind !== "open";
 }
 
 export function assignmentEquals(
@@ -443,7 +1046,7 @@ function replacementRotation(
 }
 
 export function planDefinitionSave(input: {
-  current: TaskDefinition;
+  current: LegacyTaskDefinition;
   draft: CreateTaskDraft;
   today: LocalDate;
   nextId: TaskId;
@@ -503,12 +1106,7 @@ export function parseSaveTaskDraft(raw: unknown): SaveTaskDraft | null {
   const draft = parseCreateTaskDraft(
     Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "id")),
   );
-  return draft ? { id, ...draft } : null;
-}
-
-export function addLocalDays(date: LocalDate, days: number): LocalDate {
-  const [year, month, day] = date.split("-").map(Number);
-  const utc = new Date(Date.UTC(year, month - 1, day + days));
-  const next = `${utc.getUTCFullYear()}-${String(utc.getUTCMonth() + 1).padStart(2, "0")}-${String(utc.getUTCDate()).padStart(2, "0")}`;
-  return next as LocalDate;
+  return draft && draft.assignment.kind !== "open"
+    ? { id, ...draft, assignment: draft.assignment }
+    : null;
 }

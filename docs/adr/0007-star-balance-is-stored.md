@@ -34,3 +34,15 @@ on read. No Grant/Spend writers ship until Rewards (D11).
 - Household Configuration does not hold Star Balance. The roster JSON is the
   wrong place for a value that changes on every completion.
 - Tasks may credit the integer. Grant/Spend UX stays out of Tasks.
+
+## Bounty clarification
+
+[ADR 0008](0008-bounty-availability-and-claimed-work.md) refines completion
+credit for Bounties. A Bounty Claim captures its advertised reward, and its
+completion credits that captured amount. Undo, Restore, and reassignment
+change the balance atomically while preserving completion and correction
+history. Bounty Stars Earned follows effective completion history and the
+current credited member; an undone completion is excluded until it is
+restored or the work is completed again.
+
+Assigned Tasks continue to follow the rules above.

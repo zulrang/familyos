@@ -1,5 +1,7 @@
 import type { HouseholdMember } from "@/members/members";
 import type { CompletionCorrection } from "./admin-types";
+import { releaseBountiesForRetiredMembers } from "./bounty-store";
+import { migrateLegacyOpenWork } from "./legacy-bounty-store-migration";
 import {
   insertDefinition,
   loadCompletionCorrections,
@@ -11,14 +13,17 @@ import {
   taskTransaction,
 } from "./store";
 import {
+  type AssignedTaskDraft,
   type AssignmentPolicy,
-  type CreateTaskDraft,
+  allowsAssignedDraft,
+  assignmentEquals,
   createDefinition,
+  type LegacyTaskDefinition,
   type LocalDate,
   type NonEmpty,
   newTaskId,
+  recurrenceEquals,
   type StarAdjustment,
-  type TaskDefinition,
   type TaskId,
 } from "./types";
 
@@ -64,11 +69,16 @@ export function preserveRotationTurn(
   };
 }
 
-function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
+function saveTask(task: TaskId, draft: AssignedTaskDraft, today: LocalDate) {
   const previous = requireActiveTask(task);
+  if (!allowsAssignedDraft(previous, draft)) {
+    throw new TaskAdminError(
+      "New open Routines are not supported. Assign this Routine to a member or rotation.",
+    );
+  }
   if (
-    JSON.stringify(previous.assignment) === JSON.stringify(draft.assignment) &&
-    JSON.stringify(previous.recurrence) === JSON.stringify(draft.recurrence)
+    assignmentEquals(previous.assignment, draft.assignment) &&
+    recurrenceEquals(previous.recurrence, draft.recurrence)
   ) {
     tasksDatabase()
       .prepare(
@@ -80,7 +90,7 @@ function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
   const completed = loadEffectiveEvents().filter(
     (event) => event.task === task && event.kind === "completed",
   ).length;
-  const replacement: TaskDefinition = {
+  const replacement: LegacyTaskDefinition = {
     ...draft,
     id: newTaskId(),
     lineage: previous.lineage,
@@ -98,13 +108,13 @@ function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
 
 export function editAdminTask(
   task: TaskId,
-  draft: CreateTaskDraft,
+  draft: AssignedTaskDraft,
   today: LocalDate,
 ) {
   return taskTransaction(() => saveTask(task, draft, today));
 }
 
-export function createAdminTask(id: string, draft: CreateTaskDraft) {
+export function createAdminTask(id: string, draft: AssignedTaskDraft) {
   return taskTransaction(() => {
     const existing = loadDefinitions().find((row) => row.id === id);
     if (existing) return existing;
@@ -123,6 +133,7 @@ export function reconcileRetiredMembers(
   members: HouseholdMember[],
   today: LocalDate,
 ) {
+  migrateLegacyOpenWork({ db: tasksDatabase(), today, members });
   const retired = new Set(
     members
       .filter((member) => member.status === "retired")
@@ -156,6 +167,7 @@ export function reconcileRetiredMembers(
           today,
         );
     }
+    releaseBountiesForRetiredMembers(tasksDatabase(), retired);
   });
 }
 

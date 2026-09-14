@@ -16,10 +16,10 @@ import {
 import type {
   CreateTaskDraft,
   Instant,
+  LegacyTaskDefinition,
   LineageId,
   LocalDate,
   LocalTime,
-  TaskDefinition,
   TaskEvent,
   TaskId,
 } from "./types";
@@ -37,7 +37,9 @@ describe("tasks sqlite store", () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
 
-  function definition(overrides: Partial<TaskDefinition> = {}): TaskDefinition {
+  function definition(
+    overrides: Partial<LegacyTaskDefinition> = {},
+  ): LegacyTaskDefinition {
     return {
       id: crypto.randomUUID() as TaskId,
       lineage: crypto.randomUUID() as LineageId,
@@ -53,7 +55,7 @@ describe("tasks sqlite store", () => {
   }
 
   function draftFrom(
-    def: TaskDefinition,
+    def: LegacyTaskDefinition,
     overrides: Partial<CreateTaskDraft> = {},
   ): CreateTaskDraft {
     return {
@@ -67,7 +69,7 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("task history, balances, and correction tables exist at schema version 2", () => {
+  test("assigned Task and Bounty lifecycle tables exist at schema version 9", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -79,10 +81,23 @@ describe("tasks sqlite store", () => {
         .map((row) => row.name)
         .filter((name) => !name.startsWith("sqlite_")),
       [
+        "bounty_admin_command_receipts",
+        "bounty_claims",
+        "bounty_command_receipts",
+        "bounty_completion_corrections",
+        "bounty_completions",
+        "bounty_correction_receipts",
+        "bounty_definitions",
+        "bounty_offerings",
+        "bounty_work_subjects",
         "completion_corrections",
         "completion_credits",
         "definitions",
         "events",
+        "legacy_bounty_completion_carriers",
+        "legacy_bounty_correction_receipts",
+        "legacy_bounty_migrations",
+        "legacy_bounty_sources",
         "star_adjustments",
         "star_balances",
       ],
@@ -90,7 +105,14 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 2);
+    assert.equal(version.user_version, 9);
+    assert.equal(
+      db
+        .prepare("PRAGMA table_info(bounty_definitions)")
+        .all()
+        .some((column) => column.name === "offer_from"),
+      true,
+    );
   });
 
   test("persists full recurrence and assignment unions", () => {
@@ -387,7 +409,9 @@ describe("tasks sqlite store", () => {
     insertDefinition(def);
     const saved = saveDefinition({
       id: def.id,
-      draft: draftFrom(def, { assignment: { kind: "open" } }),
+      draft: draftFrom(def, {
+        assignment: { kind: "rotation", order: ["dad" as MemberId] },
+      }),
       today: "2026-08-25" as LocalDate,
     });
     const receipt = applyEvent({
@@ -468,7 +492,10 @@ describe("tasks sqlite store", () => {
       id: other.id,
       draft: draftFrom(other, {
         stars: 9,
-        assignment: { kind: "open" },
+        assignment: {
+          kind: "rotation",
+          order: ["ellie" as MemberId],
+        },
       }),
       today: "2026-08-25" as LocalDate,
     });
