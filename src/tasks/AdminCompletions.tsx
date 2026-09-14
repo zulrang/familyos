@@ -114,6 +114,18 @@ type CorrectableBounty = ClaimedBounty & {
 
 type BountyCorrectionAction = "undo" | "restore" | "reassign";
 
+function parseBountyCorrectionAction(
+  value: string,
+): BountyCorrectionAction | null {
+  return value === "undo" || value === "restore" || value === "reassign"
+    ? value
+    : null;
+}
+
+function isCorrectableBounty(row: ClaimedBounty): row is CorrectableBounty {
+  return row.state.kind === "completed" || row.state.kind === "reopened";
+}
+
 function bountyCorrectionCommand(input: {
   action: BountyCorrectionAction;
   row: CorrectableBounty;
@@ -217,9 +229,10 @@ function BountyCorrectionForm({
         <select
           value={action}
           disabled={save.status !== "idle"}
-          onChange={(event) =>
-            setAction(event.target.value as BountyCorrectionAction)
-          }
+          onChange={(event) => {
+            const next = parseBountyCorrectionAction(event.target.value);
+            if (next) setAction(next);
+          }}
         >
           {completed ? (
             <>
@@ -426,8 +439,7 @@ export function AdminCompletions({
         const history = data.bountyCompletionCorrections.filter(
           (correction) => correction.claim === row.claim.id,
         );
-        const correctable =
-          row.state.kind === "completed" || row.state.kind === "reopened";
+        const correctable = isCorrectableBounty(row);
         return (
           <article className={styles.card} key={key}>
             <h2>{row.claim.title}</h2>
@@ -442,7 +454,7 @@ export function AdminCompletions({
             </p>
             {selected === key && correctable ? (
               <BountyCorrectionForm
-                row={row as CorrectableBounty}
+                row={row}
                 members={members}
                 onSaved={() => {
                   setSelected(null);

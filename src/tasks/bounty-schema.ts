@@ -140,8 +140,13 @@ const GUARDS_V8 = `
 
 export function migrateBountyLifecycleToV8(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(bounty_claims)").all();
-  if (columns.some((column) => column.name === "effective_completion_id"))
+  if (columns.some((column) => column.name === "effective_completion_id")) {
+    const version = Number(
+      db.prepare("PRAGMA user_version").get()?.user_version ?? 0,
+    );
+    if (version < 8) db.exec("PRAGMA user_version = 8");
     return;
+  }
   db.exec("PRAGMA foreign_keys = OFF");
   try {
     db.exec(`BEGIN IMMEDIATE;

@@ -6,12 +6,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { HouseholdMember } from "@/members/members";
 import { AdminCompletions } from "./AdminCompletions";
 import type { CompletionCorrection, TaskAdminRead } from "./admin-types";
-import type {
-  Instant,
-  LegacyTaskDefinition,
-  LocalDate,
-  TaskEvent,
-  TaskId,
+import {
+  type Instant,
+  type LegacyTaskDefinition,
+  type LocalDate,
+  parseBountyCommandReceipt,
+  parseBountyCorrectionId,
+  parseClaimRevision,
+  type TaskEvent,
+  type TaskId,
 } from "./types";
 
 const members: HouseholdMember[] = [
@@ -80,37 +83,61 @@ function read(
 }
 
 function completedBountyRead(): TaskAdminRead {
-  const completion = {
-    id: "c".repeat(32),
-    claim: "b".repeat(32) as never,
-    by: "dad",
-    at: "2026-09-08T12:00:00Z",
-    creditedStars: 4,
-    creditProvenance: "recorded" as const,
-  };
+  const completionReceipt = parseBountyCommandReceipt({
+    status: "accepted",
+    result: {
+      kind: "completed",
+      completion: {
+        id: "c".repeat(32),
+        claim: "b".repeat(32),
+        by: "dad",
+        at: "2026-09-08T12:00:00Z",
+        creditedStars: 4,
+        creditProvenance: "recorded",
+      },
+    },
+  });
+  const claimReceipt = parseBountyCommandReceipt({
+    status: "accepted",
+    result: {
+      kind: "claimed",
+      claim: {
+        id: "b".repeat(32),
+        offering: { kind: "once", definition: "a".repeat(32) },
+        member: "dad",
+        scheduledOn: "2026-09-08",
+        title: "Wash car",
+        stars: 4,
+      },
+      revision: 1,
+    },
+  });
+  if (
+    !completionReceipt ||
+    !("result" in completionReceipt) ||
+    completionReceipt.result.kind !== "completed" ||
+    !claimReceipt ||
+    !("result" in claimReceipt) ||
+    claimReceipt.result.kind !== "claimed"
+  )
+    throw new Error("Invalid Bounty completion UI fixture");
+  const completion = completionReceipt.result.completion;
   return {
     ...read([], []),
     bountyClaims: [
       {
         kind: "claimed-bounty",
-        claim: {
-          id: "b".repeat(32) as never,
-          offering: { kind: "once", definition: "a".repeat(32) as TaskId },
-          member: "dad",
-          scheduledOn: "2026-09-08" as LocalDate,
-          title: "Wash car" as never,
-          stars: 4 as never,
-        },
-        revision: 1 as never,
+        claim: claimReceipt.result.claim,
+        revision: claimReceipt.result.revision,
         state: {
           kind: "completed",
-          completion: completion as never,
+          completion,
           creditedTo: "dad",
           correction: null,
         },
       },
     ],
-    bountyCompletions: [completion as never],
+    bountyCompletions: [completion],
   };
 }
 
@@ -267,13 +294,57 @@ test("a lost response retries the exact Bounty correction command", async () => 
   expect(screen.getByLabelText("Correction")).toBeDisabled();
   expect(screen.getByLabelText("Credit to")).toBeDisabled();
   expect(screen.getByLabelText("Reason")).toBeDisabled();
-  const firstBody = (fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.body;
+  const firstBody = fetch.mock.calls[0]?.[1]?.body;
   await user.click(
     screen.getByRole("button", { name: "Retry Bounty correction" }),
   );
   await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
   expect(fetch).toHaveBeenCalledTimes(2);
-  expect((fetch.mock.calls[1]?.[1] as RequestInit | undefined)?.body).toBe(
-    firstBody,
+  expect(fetch.mock.calls[1]?.[1]?.body).toBe(firstBody);
+});
+
+test("only Restore is offered while the original Claim remains reopened", async () => {
+  const user = userEvent.setup();
+  const data = completedBountyRead();
+  const completed = data.bountyClaims[0];
+  const revision = parseClaimRevision(2);
+  const correction = parseBountyCorrectionId("undo-correction");
+  if (
+    !completed ||
+    completed.state.kind !== "completed" ||
+    !revision ||
+    !correction
+  )
+    throw new Error("Invalid reopened UI fixture");
+  data.bountyClaims = [
+    {
+      ...completed,
+      revision,
+      state: {
+        kind: "reopened",
+        undoneCompletion: completed.state.completion,
+        correction,
+      },
+    },
+  ];
+  render(
+    <AdminCompletions
+      data={data}
+      members={members}
+      onSaved={() => {}}
+      query=""
+    />,
   );
+  await user.click(
+    screen.getByRole("button", { name: "Correct Bounty completion" }),
+  );
+  expect(
+    screen.getByRole("option", { name: "Restore completion" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("option", { name: "Undo completion" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("option", { name: "Reassign credit" }),
+  ).not.toBeInTheDocument();
 });

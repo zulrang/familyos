@@ -1,19 +1,41 @@
 import { expect, test } from "vitest";
 import { bountyStarsEarned } from "./bounty-earnings";
-import type { ClaimedBounty, Instant } from "./types";
+import {
+  type BountyCompletion,
+  type ClaimedBounty,
+  parseBountyCommandReceipt,
+  parseBountyCorrectionId,
+  parseInstant,
+} from "./types";
 
-const oldCompletion = {
-  id: "old-completion",
-  claim: "claim",
-  by: "dad",
-  at: "2026-09-01T12:00:00Z",
-  creditedStars: 4,
-  creditProvenance: "recorded",
-} as const;
+function completion(input: {
+  id: string;
+  at: string;
+  stars: number;
+}): BountyCompletion {
+  const receipt = parseBountyCommandReceipt({
+    status: "accepted",
+    result: {
+      kind: "completed",
+      completion: {
+        id: input.id,
+        claim: "claim",
+        by: "dad",
+        at: input.at,
+        creditedStars: input.stars,
+        creditProvenance: "recorded",
+      },
+    },
+  });
+  if (!receipt || !("result" in receipt) || receipt.result.kind !== "completed")
+    throw new Error("Invalid completion fixture");
+  return receipt.result.completion;
+}
 
-function claim(state: ClaimedBounty["state"]): ClaimedBounty {
-  return {
-    kind: "claimed-bounty",
+const accepted = parseBountyCommandReceipt({
+  status: "accepted",
+  result: {
+    kind: "claimed",
     claim: {
       id: "claim",
       offering: { kind: "once", definition: "bounty" },
@@ -23,32 +45,60 @@ function claim(state: ClaimedBounty["state"]): ClaimedBounty {
       stars: 4,
     },
     revision: 2,
+  },
+});
+if (!accepted || !("result" in accepted) || accepted.result.kind !== "claimed")
+  throw new Error("Invalid Claim fixture");
+const acceptedClaim = accepted.result;
+const undo = parseBountyCorrectionId("undo");
+const restore = parseBountyCorrectionId("restore");
+const reassign = parseBountyCorrectionId("reassign");
+if (!undo || !restore || !reassign)
+  throw new Error("Invalid correction fixture identity");
+
+const oldCompletion = completion({
+  id: "old-completion",
+  at: "2026-09-01T12:00:00Z",
+  stars: 4,
+});
+
+function instant(value: string) {
+  const parsed = parseInstant(value);
+  if (!parsed) throw new Error("Invalid Instant fixture");
+  return parsed;
+}
+
+function claim(state: ClaimedBounty["state"]): ClaimedBounty {
+  return {
+    kind: "claimed-bounty",
+    claim: acceptedClaim.claim,
+    revision: acceptedClaim.revision,
     state,
-  } as ClaimedBounty;
+  };
 }
 
 const oldRange = {
-  from: "2026-09-01T00:00:00Z" as Instant,
-  before: "2026-09-02T00:00:00Z" as Instant,
+  from: instant("2026-09-01T00:00:00Z"),
+  before: instant("2026-09-02T00:00:00Z"),
 };
 const newRange = {
-  from: "2026-09-10T00:00:00Z" as Instant,
-  before: "2026-09-11T00:00:00Z" as Instant,
+  from: instant("2026-09-10T00:00:00Z"),
+  before: instant("2026-09-11T00:00:00Z"),
 };
 
 test("Stars Earned excludes Undo and Restore uses the original completion time", () => {
   const reopened = claim({
     kind: "reopened",
-    undoneCompletion: oldCompletion as never,
-    correction: "undo" as never,
+    undoneCompletion: oldCompletion,
+    correction: undo,
   });
   expect(bountyStarsEarned([reopened], { ...oldRange, member: "dad" })).toBe(0);
 
   const restored = claim({
     kind: "completed",
-    completion: oldCompletion as never,
+    completion: oldCompletion,
     creditedTo: "dad",
-    correction: "restore" as never,
+    correction: restore,
   });
   expect(bountyStarsEarned([restored], { ...oldRange, member: "dad" })).toBe(4);
   expect(bountyStarsEarned([restored], { ...newRange, member: "dad" })).toBe(0);
@@ -57,13 +107,13 @@ test("Stars Earned excludes Undo and Restore uses the original completion time",
 test("recompletion uses its new time and reassignment follows the current creditor", () => {
   const recompleted = claim({
     kind: "completed",
-    completion: {
-      ...oldCompletion,
+    completion: completion({
       id: "new-completion",
       at: "2026-09-10T12:00:00Z",
-    } as never,
+      stars: 4,
+    }),
     creditedTo: "ellie",
-    correction: "reassign" as never,
+    correction: reassign,
   });
   expect(
     bountyStarsEarned([recompleted], { ...oldRange, member: "ellie" }),
@@ -79,7 +129,11 @@ test("recompletion uses its new time and reassignment follows the current credit
 test("zero-Star effective completions report zero", () => {
   const zero = claim({
     kind: "completed",
-    completion: { ...oldCompletion, creditedStars: 0 } as never,
+    completion: completion({
+      id: "zero-completion",
+      at: "2026-09-01T12:00:00Z",
+      stars: 0,
+    }),
     creditedTo: "dad",
     correction: null,
   });

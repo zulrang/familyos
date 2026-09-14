@@ -439,7 +439,10 @@ test("version-six admin receipts replay after activation-bound migration", () =>
       status: "already-applied",
       definition: { id: bounty.id, title: "Polish car", offerFrom: null },
     });
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(7);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
+    db.exec("PRAGMA user_version = 9");
+    migrateBountyStore(db);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(9);
   } finally {
     db.close();
   }
