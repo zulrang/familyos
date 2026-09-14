@@ -430,11 +430,8 @@ describe("TasksScreen", () => {
     expect(screen.getByText("Wipe table")).toBeVisible();
     expect(screen.getByText("0")).toBeVisible();
     expect(screen.getByText("Stars on completion")).toBeVisible();
-    expect(screen.getByText("Manage Bounties")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute(
-      "href",
-      "/admin/bounties",
-    );
+    expect(screen.queryByText("Manage Bounties")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add Bounty" }),
     ).not.toBeInTheDocument();
