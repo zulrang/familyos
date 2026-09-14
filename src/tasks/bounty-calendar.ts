@@ -161,17 +161,15 @@ function monthlyDate(
 }
 
 function weeklyInterval(
-  schedule: RecurringBountySchedule,
   today: LocalDate,
   days: NonEmptyDistinctWeekdays,
-): BountyInterval | null {
+): BountyInterval {
   const selected = days.map((day) => WEEKDAY_INDEX[day]);
   const todayIndex = weekdayIndex(today);
   const currentOffset = Math.min(
     ...selected.map((day) => (todayIndex - day + 7) % 7),
   );
   const start = addLocalDays(today, -currentOffset);
-  if (start < schedule.startsOn) return null;
   const startIndex = weekdayIndex(start);
   const nextOffset = Math.min(
     ...selected.map((day) => (day - startIndex + 7) % 7 || 7),
@@ -179,15 +177,28 @@ function weeklyInterval(
   return { start, next: addLocalDays(start, nextOffset) };
 }
 
-function monthlyInterval(
-  schedule: RecurringBountySchedule,
-  today: LocalDate,
-  day: DayOfMonth,
-): BountyInterval | null {
+function monthlyInterval(today: LocalDate, day: DayOfMonth): BountyInterval {
   const todayDay = Number(today.slice(8, 10));
   const start = monthlyDate(today, day <= todayDay ? 0 : -1, day);
-  if (start < schedule.startsOn) return null;
   return { start, next: monthlyDate(start, 1, day) };
+}
+
+export function bountyIntervalForCadence(
+  cadence: CalendarCadence,
+  date: LocalDate,
+): BountyInterval {
+  switch (cadence.kind) {
+    case "daily":
+      return { start: date, next: addLocalDays(date, 1) };
+    case "weekly":
+      return weeklyInterval(date, cadence.days);
+    case "monthly":
+      return monthlyInterval(date, cadence.day);
+    default: {
+      const _exhaustive: never = cadence;
+      return _exhaustive;
+    }
+  }
 }
 
 export function currentBountyInterval(
@@ -195,16 +206,6 @@ export function currentBountyInterval(
   today: LocalDate,
 ): BountyInterval | null {
   if (today < schedule.startsOn) return null;
-  switch (schedule.cadence.kind) {
-    case "daily":
-      return { start: today, next: addLocalDays(today, 1) };
-    case "weekly":
-      return weeklyInterval(schedule, today, schedule.cadence.days);
-    case "monthly":
-      return monthlyInterval(schedule, today, schedule.cadence.day);
-    default: {
-      const _exhaustive: never = schedule.cadence;
-      return _exhaustive;
-    }
-  }
+  const interval = bountyIntervalForCadence(schedule.cadence, today);
+  return interval.start < schedule.startsOn ? null : interval;
 }
