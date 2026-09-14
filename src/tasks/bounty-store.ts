@@ -444,6 +444,35 @@ export function migrateBountyStore(db: DatabaseSync): void {
   if (!hasOfferFrom) migrateBountyDefinitionsToV7(db);
   migrateBountyLifecycleToV8(db);
   migrateBountyLifecycleToV9(db);
+  migrateBountyAdminReceiptsToV10(db);
+}
+
+function migrateBountyAdminReceiptsToV10(db: DatabaseSync): void {
+  const version = Number(
+    db.prepare("PRAGMA user_version").get()?.user_version ?? 0,
+  );
+  if (version >= 10) return;
+  try {
+    db.exec(`BEGIN IMMEDIATE;
+      DROP TRIGGER bounty_admin_receipts_no_update;
+      DROP TRIGGER bounty_admin_receipts_no_delete;
+      CREATE TABLE bounty_admin_command_receipts_v10 (
+        request_id TEXT NOT NULL PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('create-bounty', 'edit-bounty', 'retire-bounty', 'replace-definition')),
+        payload TEXT NOT NULL,
+        response TEXT NOT NULL
+      );
+      INSERT INTO bounty_admin_command_receipts_v10 SELECT * FROM bounty_admin_command_receipts;
+      DROP TABLE bounty_admin_command_receipts;
+      ALTER TABLE bounty_admin_command_receipts_v10 RENAME TO bounty_admin_command_receipts;
+      ${BOUNTY_ADMIN_RECEIPT_TRIGGERS}
+      PRAGMA user_version = 10;
+      COMMIT;
+    `);
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function bountyDefinitionFromRow(
@@ -678,6 +707,34 @@ export function administerBountyDefinition(input: {
     if (replay) {
       db.exec("COMMIT");
       return replay;
+    }
+    if (command.kind === "create-bounty") {
+      const created = createBountyDefinition(command.draft);
+      db.prepare(
+        `INSERT INTO bounty_definitions
+          (id, lineage, title, type, recurrence, stars, revision, retired_at, offer_from)
+         VALUES (?, ?, ?, 'chore', ?, ?, 0, NULL, NULL)`,
+      ).run(
+        created.id,
+        created.lineage,
+        created.title,
+        created.recurrence.kind === "once"
+          ? "once"
+          : JSON.stringify(created.recurrence),
+        created.stars,
+      );
+      materializeCurrentOffering(db, created, today);
+      db.prepare(
+        `INSERT INTO bounty_admin_command_receipts
+          (request_id, kind, payload, response) VALUES (?, ?, ?, ?)`,
+      ).run(
+        command.requestId,
+        command.kind,
+        JSON.stringify(command),
+        JSON.stringify(created),
+      );
+      db.exec("COMMIT");
+      return { status: "accepted", definition: created };
     }
     const current = db
       .prepare("SELECT * FROM bounty_definitions WHERE id = ?")

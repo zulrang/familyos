@@ -28,6 +28,7 @@ import {
   type BountyDefinition,
   type LocalDate,
   parseBountyCommandId,
+  parseCreateBountyDraft,
   parseCreateTaskDraft,
   parseStarAmount,
   parseTaskTitle,
@@ -84,6 +85,142 @@ function assignedScheduleDraft(
     return { kind: "monthly", day: String(cadence.day) };
   }
   return { kind: "daily" };
+}
+
+function NewBountyForm({
+  today,
+  onSaved,
+  onCancel,
+}: {
+  today: LocalDate;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [stars, setStars] = useState("0");
+  const [recurrence, setRecurrence] = useState<BountyRecurrenceDraft>({
+    kind: "once",
+  });
+  const [save, setSave] = useState<
+    | { status: "editing"; error?: string }
+    | { status: "saving" }
+    | { status: "retry"; error: string }
+  >({ status: "editing" });
+  const command = useRef<Extract<
+    BountyAdminCommand,
+    { kind: "create-bounty" }
+  > | null>(null);
+  const saving = useRef(false);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (saving.current) return;
+    const schedule = parseBountyRecurrenceDraft(recurrence);
+    const draft = schedule
+      ? parseCreateBountyDraft({
+          kind: "bounty",
+          type: "chore",
+          title,
+          stars: Number(stars),
+          recurrence: schedule,
+        })
+      : null;
+    if (!draft) {
+      setSave({
+        status: "editing",
+        error:
+          "Enter a title, valid schedule, and nonnegative whole-number Star reward.",
+      });
+      return;
+    }
+    command.current ??= {
+      kind: "create-bounty",
+      requestId: bountyRequestId(),
+      draft,
+    };
+    saving.current = true;
+    setSave({ status: "saving" });
+    try {
+      await adminRequest("tasks", command.current);
+      onSaved();
+    } catch (error) {
+      setSave({
+        status: "retry",
+        error:
+          error instanceof Error ? error.message : "Could not create Bounty.",
+      });
+    } finally {
+      saving.current = false;
+    }
+  }
+
+  return (
+    <AdminEditorScreen
+      title="New Bounty"
+      backLabel="Bounties"
+      onBack={onCancel}
+      busy={save.status === "saving"}
+    >
+      {(close) => (
+        <form className={styles.form} onSubmit={submit}>
+          <fieldset
+            className={styles.fields}
+            disabled={save.status !== "editing"}
+          >
+            <label>
+              Title
+              <input
+                required
+                maxLength={200}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+            </label>
+            <BountyRecurrenceEditor
+              draft={recurrence}
+              defaultStartsOn={today}
+              onChange={setRecurrence}
+            />
+            <label>
+              Stars per completion
+              <input
+                required
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={Number.MAX_SAFE_INTEGER}
+                step={1}
+                value={stars}
+                onChange={(event) => setStars(event.target.value)}
+              />
+            </label>
+          </fieldset>
+          {"error" in save && save.error ? (
+            <p role="alert" className={styles.error}>
+              {save.error}
+            </p>
+          ) : null}
+          <div className={styles.actions}>
+            <button type="submit" disabled={save.status === "saving"}>
+              {save.status === "saving"
+                ? "Creating…"
+                : save.status === "retry"
+                  ? "Retry create"
+                  : "Create Bounty"}
+            </button>
+            <button
+              type="button"
+              className={styles.quiet}
+              disabled={save.status === "saving"}
+              onClick={close}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+    </AdminEditorScreen>
+  );
 }
 
 function BountyForm({
@@ -465,7 +602,7 @@ function BountyForm({
 
 export function AdminBounties() {
   const { state, reload } = useAdminData(readTaskAdminData);
-  const [editor, setEditor] = useState<BountyDefinition | null>(null);
+  const [editor, setEditor] = useState<BountyDefinition | "new" | null>(null);
   const [query, setQuery] = useState("");
   const retirementCommand = useRef<RetireBountyCommand | null>(null);
   const retirementSaving = useRef(false);
@@ -539,6 +676,13 @@ export function AdminBounties() {
         <p className={styles.muted}>
           Update available work and keep accepted commitments intact.
         </p>
+        <button
+          type="button"
+          disabled={state.status !== "ready"}
+          onClick={() => setEditor("new")}
+        >
+          Add Bounty
+        </button>
       </div>
       {notice && (
         <p
@@ -693,7 +837,19 @@ export function AdminBounties() {
           </button>
         </>
       )}
-      {editor && state.status === "ready" && (
+      {editor === "new" && state.status === "ready" ? (
+        <NewBountyForm
+          today={state.data.tasks.today}
+          onCancel={() => setEditor(null)}
+          onSaved={() => {
+            setEditor(null);
+            setQuery("");
+            setNotice({ kind: "success", message: "Bounty created." });
+            void reload();
+          }}
+        />
+      ) : null}
+      {editor && editor !== "new" && state.status === "ready" ? (
         <BountyForm
           key={`${editor.id}:${editor.revision}`}
           bounty={editor}
@@ -706,7 +862,7 @@ export function AdminBounties() {
           }}
           onCancel={() => setEditor(null)}
         />
-      )}
+      ) : null}
     </div>
   );
 }
