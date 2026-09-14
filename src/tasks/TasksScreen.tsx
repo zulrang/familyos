@@ -11,15 +11,10 @@ import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
 import { redirectIfPairingRequired } from "@/shared/display-client";
 import { requestId } from "@/shared/request-id";
-import { formatClock, msToZonedDate } from "@/shared/time";
+import { formatClock } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
-import {
-  type BountyRecurrenceDraft,
-  BountyRecurrenceEditor,
-  parseBountyRecurrenceDraft,
-} from "./BountyRecurrenceEditor";
 import { TaskCelebration } from "./TaskCelebration";
 import styles from "./TaskEditor.module.css";
 import { TasksBoard } from "./TasksBoard";
@@ -32,7 +27,6 @@ import {
   nowInstant,
   type Occurrence,
   type OfferingId,
-  parseLocalDate,
   type Recurrence,
   type TaskId,
   type TasksViewRead,
@@ -102,15 +96,7 @@ type Draft = DraftFields & {
   task: TaskId | null;
 };
 
-type BountyDraft = {
-  title: string;
-  stars: string;
-  recurrence: BountyRecurrenceDraft;
-};
-
-type EditorState =
-  | { kind: "assigned"; draft: Draft }
-  | { kind: "bounty"; draft: BountyDraft };
+type EditorState = { kind: "assigned"; draft: Draft };
 
 const RECURRENCE_CHOICES = [
   { label: "Once", value: { kind: "once", date: "" } },
@@ -322,10 +308,6 @@ export function TasksScreen() {
   }, [load]);
 
   const members = settings ? activeMembers(settings.members) : [];
-  const bountyStartsOn = settings
-    ? parseLocalDate(msToZonedDate(now.getTime(), settings.timeZone))
-    : null;
-
   function beginBountyMutation(claim: ClaimId): boolean {
     if (pendingBountyMutationIds.current.has(claim)) return false;
     pendingBountyMutationIds.current.add(claim);
@@ -520,38 +502,6 @@ export function TasksScreen() {
     }
   }
 
-  async function saveBounty() {
-    if (editor?.kind !== "bounty") return;
-    const title = editor.draft.title.trim();
-    const stars = Number(editor.draft.stars);
-    const recurrence = parseBountyRecurrenceDraft(editor.draft.recurrence);
-    if (!title || !Number.isSafeInteger(stars) || stars < 0 || !recurrence)
-      return;
-    setBusy(true);
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "bounty",
-          type: "chore",
-          title,
-          stars,
-          recurrence,
-        }),
-      });
-      if (await redirectIfPairingRequired(res)) return;
-      if (!res.ok) {
-        setError("Could not create Bounty.");
-        return;
-      }
-      setEditor(null);
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function skip(occ: Occurrence, reason: string | null) {
     setSkipping(null);
     setSkipNote("");
@@ -677,16 +627,6 @@ export function TasksScreen() {
           onReleaseBounty={(row) => releaseBountyClaim(row).catch(() => {})}
           mutatingBountyClaims={mutatingBountyClaims}
           mutatingBountyOfferings={mutatingBountyOfferings}
-          onAddBounty={() =>
-            setEditor({
-              kind: "bounty",
-              draft: {
-                title: "",
-                stars: "0",
-                recurrence: { kind: "once" },
-              },
-            })
-          }
         />
       ) : null}
       {members.length > 0 ? (
@@ -721,16 +661,6 @@ export function TasksScreen() {
           onSave={saveTask}
         />
       ) : null}
-      {editor?.kind === "bounty" && bountyStartsOn ? (
-        <BountySheet
-          draft={editor.draft}
-          today={bountyStartsOn}
-          busy={busy}
-          onChange={(draft) => setEditor({ kind: "bounty", draft })}
-          onClose={() => setEditor(null)}
-          onSave={saveBounty}
-        />
-      ) : null}
       {memberAction?.kind === "claim-bounty" ? (
         <MemberPicker
           members={members}
@@ -756,106 +686,6 @@ export function TasksScreen() {
           }}
         />
       ) : null}
-    </div>
-  );
-}
-
-function BountySheet({
-  draft,
-  today,
-  busy,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  draft: BountyDraft;
-  today: TasksViewRead["today"];
-  busy: boolean;
-  onChange: (draft: BountyDraft) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const stars = Number(draft.stars);
-  const recurrence = parseBountyRecurrenceDraft(draft.recurrence);
-  const canSave =
-    draft.title.trim().length > 0 &&
-    Number.isSafeInteger(stars) &&
-    stars >= 0 &&
-    recurrence !== null;
-  return (
-    <div className={styles.overlay}>
-      <button
-        type="button"
-        aria-label="Close"
-        onClick={onClose}
-        className={styles.backdrop}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bounty-editor-title"
-        className={styles.panel}
-      >
-        <div className={styles.header}>
-          <h2
-            id="bounty-editor-title"
-            style={{ font: "var(--type-section)", flex: 1 }}
-          >
-            New Bounty
-          </h2>
-          <IconButton icon="x" label="Close" onClick={onClose} />
-        </div>
-        <div className={styles.body}>
-          <label className={styles.title}>
-            Bounty title
-            <input
-              className="fos-input"
-              aria-label="Bounty title"
-              value={draft.title}
-              disabled={busy}
-              onChange={(event) =>
-                onChange({ ...draft, title: event.target.value })
-              }
-            />
-          </label>
-          <section className={styles.details}>
-            <h3>Reward</h3>
-            <label>
-              Stars
-              <input
-                className="fos-input"
-                inputMode="numeric"
-                type="text"
-                pattern="[0-9]*"
-                aria-label="Stars"
-                value={draft.stars}
-                disabled={busy}
-                onFocus={(event) => event.currentTarget.select()}
-                onClick={(event) => event.currentTarget.select()}
-                onChange={(event) =>
-                  onChange({ ...draft, stars: event.target.value })
-                }
-              />
-            </label>
-          </section>
-          <BountyRecurrenceEditor
-            draft={draft.recurrence}
-            defaultStartsOn={today}
-            disabled={busy}
-            onChange={(recurrence) => onChange({ ...draft, recurrence })}
-          />
-        </div>
-        <div className={styles.footer}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            disabled={busy || !canSave}
-            onClick={onSave}
-          >
-            Add Bounty
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

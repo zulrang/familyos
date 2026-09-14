@@ -14,6 +14,7 @@ function lanHosts(): string[] {
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  devIndicators: false,
   allowedDevOrigins: lanHosts(),
 };
 
