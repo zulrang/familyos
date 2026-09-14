@@ -527,7 +527,10 @@ function claimFromRow(row: Record<string, unknown>): {
     !title ||
     stars === null ||
     revision === null ||
-    !offering
+    !offering ||
+    (row.offering_kind === "legacy" &&
+      row.interval_start !== null &&
+      intervalStart === null)
   ) {
     throw new Error("corrupt Bounty claim row");
   }
@@ -935,10 +938,7 @@ export function loadAvailableBounties(
               d.revision, d.offer_from, d.retired_at
        FROM bounty_offerings o
        JOIN bounty_definitions d ON d.id = o.definition_id
-       WHERE d.retired_at IS NULL AND NOT EXISTS (
-         SELECT 1 FROM bounty_claims c
-         WHERE c.offering_id = o.id AND c.state != 'released'
-       )
+       WHERE o.kind != 'legacy' AND d.retired_at IS NULL
        ORDER BY d.creation_order`,
     )
     .all()
@@ -970,7 +970,12 @@ export function loadAvailableBounties(
             ? { kind: "recurring", definition, intervalStart }
             : null;
       const current = currentOfferingKey(bounty, today);
-      if (!offering || !current || !sameOfferingKey(offering, current))
+      if (
+        !offering ||
+        !current ||
+        !sameOfferingKey(offering, current) ||
+        offeringIsReserved(db, id)
+      )
         return [];
       return [
         {
@@ -983,6 +988,41 @@ export function loadAvailableBounties(
         },
       ];
     });
+}
+
+function offeringIsReserved(db: DatabaseSync, offering: string): boolean {
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM bounty_offerings candidate
+         WHERE candidate.id = ? AND (
+           EXISTS (
+             SELECT 1 FROM bounty_claims c
+             JOIN bounty_offerings reserved ON reserved.id = c.offering_id
+             WHERE c.state != 'released'
+               AND reserved.definition_id = candidate.definition_id
+               AND (
+                 (candidate.kind = 'once' AND reserved.kind IN ('once', 'legacy')
+                   AND reserved.interval_start IS NULL)
+                 OR (candidate.kind = 'recurring'
+                   AND reserved.kind IN ('recurring', 'legacy')
+                   AND reserved.interval_start = candidate.interval_start)
+               )
+           ) OR EXISTS (
+             SELECT 1 FROM legacy_bounty_completion_carriers carrier
+             JOIN bounty_offerings reserved ON reserved.id = carrier.offering_id
+             WHERE carrier.state = 'completed'
+               AND reserved.definition_id = candidate.definition_id
+               AND (
+                 (candidate.kind = 'once' AND reserved.interval_start IS NULL)
+                 OR (candidate.kind = 'recurring'
+                   AND reserved.interval_start = candidate.interval_start)
+               )
+           )
+         )`,
+      )
+      .get(offering),
+  );
 }
 
 export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
@@ -1197,10 +1237,7 @@ export function claimBounty(input: {
          FROM bounty_offerings o
          JOIN bounty_definitions d ON d.id = o.definition_id
          WHERE d.id = ? AND d.revision = ? AND o.kind = ?
-           AND o.interval_start IS ? AND d.retired_at IS NULL AND NOT EXISTS (
-             SELECT 1 FROM bounty_claims c
-             WHERE c.offering_id = o.id AND c.state != 'released'
-           )`,
+           AND o.interval_start IS ? AND d.retired_at IS NULL`,
       )
       .get(
         command.offering.definition,
@@ -1210,7 +1247,8 @@ export function claimBounty(input: {
           ? command.offering.intervalStart
           : null,
       );
-    if (!row) throw new BountyStoreError("This Bounty is no longer available.");
+    if (!row || offeringIsReserved(db, String(row.offering_id)))
+      throw new BountyStoreError("This Bounty is no longer available.");
     const claimId = newClaimId();
     db.prepare(
       "INSERT INTO bounty_work_subjects (id, kind) VALUES (?, 'accepted-claim')",

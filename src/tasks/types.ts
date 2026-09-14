@@ -677,6 +677,30 @@ function parseOfferingKey(raw: unknown): OfferingKey | null {
     : null;
 }
 
+function parseAcceptedOfferingKey(raw: unknown): AcceptedOfferingKey | null {
+  const canonical = parseOfferingKey(raw);
+  if (canonical) return canonical;
+  if (
+    !isRecord(raw) ||
+    raw.kind !== "legacy" ||
+    !hasOnlyKnownKeys(
+      raw,
+      new Set(["kind", "definition", "sourceWindow", "intervalStart"]),
+    )
+  ) {
+    return null;
+  }
+  const definition = parseTaskId(raw.definition);
+  const sourceWindow = parseLocalDate(raw.sourceWindow);
+  const intervalStart =
+    raw.intervalStart === null ? null : parseLocalDate(raw.intervalStart);
+  return definition &&
+    sourceWindow &&
+    (raw.intervalStart === null || intervalStart)
+    ? { kind: "legacy", definition, sourceWindow, intervalStart }
+    : null;
+}
+
 export function parseBountyCommand(raw: unknown): BountyCommand | null {
   if (!isRecord(raw)) return null;
   const requestId = parseBountyCommandId(raw.requestId);
@@ -743,7 +767,7 @@ function parseBountyClaim(raw: unknown): BountyClaim | null {
     return null;
   }
   const id = parseClaimId(raw.id);
-  const offering = parseOfferingKey(raw.offering);
+  const offering = parseAcceptedOfferingKey(raw.offering);
   const member = nonEmptyString(raw.member);
   const scheduledOn = parseLocalDate(raw.scheduledOn);
   const title = parseTaskTitle(raw.title);

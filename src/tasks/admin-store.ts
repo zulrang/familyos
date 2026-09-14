@@ -1,6 +1,7 @@
 import type { HouseholdMember } from "@/members/members";
 import type { CompletionCorrection } from "./admin-types";
 import { releaseBountiesForRetiredMembers } from "./bounty-store";
+import { migrateLegacyOpenWork } from "./legacy-bounty-store-migration";
 import {
   insertDefinition,
   loadCompletionCorrections,
@@ -132,6 +133,7 @@ export function reconcileRetiredMembers(
   members: HouseholdMember[],
   today: LocalDate,
 ) {
+  migrateLegacyOpenWork({ db: tasksDatabase(), today, members });
   const retired = new Set(
     members
       .filter((member) => member.status === "retired")

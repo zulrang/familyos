@@ -336,11 +336,21 @@ const SUBJECTS_AND_HISTORY_V9 = `
   CREATE TABLE legacy_bounty_sources (
     source_task_id TEXT NOT NULL PRIMARY KEY,
     bounty_definition_id TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (source_task_id) REFERENCES definitions(id),
     FOREIGN KEY (bounty_definition_id) REFERENCES bounty_definitions(id)
   );
   CREATE TABLE legacy_bounty_migrations (
     migration TEXT NOT NULL PRIMARY KEY,
     completed_at TEXT NOT NULL
+  );
+  CREATE TABLE legacy_bounty_correction_receipts (
+    request_id TEXT NOT NULL PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN (
+      'undo-legacy-bounty-completion',
+      'reassign-legacy-bounty-completion'
+    )),
+    payload TEXT NOT NULL,
+    response TEXT NOT NULL
   );
 `;
 
@@ -353,6 +363,74 @@ const GUARDS_V9 = `
     ON bounty_offerings(definition_id, source_window) WHERE kind = 'legacy';
   CREATE UNIQUE INDEX bounty_claims_one_current_per_offering
     ON bounty_claims(offering_id) WHERE state != 'released';
+  CREATE TRIGGER bounty_claims_insert_guard BEFORE INSERT ON bounty_claims
+  BEGIN
+    SELECT RAISE(ABORT, 'bounty claim requires accepted work subject') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_work_subjects
+      WHERE id = NEW.id AND kind = 'accepted-claim'
+    );
+    SELECT RAISE(ABORT, 'bounty claim does not match offering') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_offerings o WHERE o.id = NEW.offering_id
+        AND o.definition_id = NEW.definition_id
+        AND (
+          (NEW.acceptance_provenance = 'native' AND o.kind != 'legacy')
+          OR (NEW.acceptance_provenance = 'legacy' AND o.kind = 'legacy'
+            AND o.source_window = NEW.scheduled_on)
+        )
+    );
+  END;
+  CREATE TRIGGER bounty_offerings_insert_guard BEFORE INSERT ON bounty_offerings
+  WHEN NEW.kind = 'legacy'
+  BEGIN
+    SELECT RAISE(ABORT, 'legacy offering requires mapped source') WHERE NOT EXISTS (
+      SELECT 1 FROM legacy_bounty_sources
+      WHERE source_task_id = NEW.definition_id
+        AND bounty_definition_id = NEW.definition_id
+    );
+  END;
+  CREATE TRIGGER legacy_bounty_carriers_insert_guard
+    BEFORE INSERT ON legacy_bounty_completion_carriers
+  BEGIN
+    SELECT RAISE(ABORT, 'legacy carrier requires carrier work subject') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_work_subjects
+      WHERE id = NEW.id AND kind = 'legacy-completion-carrier'
+    );
+    SELECT RAISE(ABORT, 'legacy carrier source does not match offering') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_offerings o
+      JOIN legacy_bounty_sources s ON s.source_task_id = NEW.source_task_id
+      WHERE o.id = NEW.offering_id AND o.kind = 'legacy'
+        AND o.definition_id = NEW.definition_id
+        AND o.source_window = NEW.source_window
+        AND s.bounty_definition_id = NEW.definition_id
+    );
+  END;
+  CREATE TRIGGER bounty_completions_insert_guard BEFORE INSERT ON bounty_completions
+  BEGIN
+    SELECT RAISE(ABORT, 'native completion requires accepted claim') WHERE
+      NEW.origin = 'native' AND NOT EXISTS (
+        SELECT 1 FROM bounty_claims c JOIN bounty_work_subjects s ON s.id = c.id
+        WHERE c.id = NEW.subject_id AND s.kind = 'accepted-claim'
+      );
+    SELECT RAISE(ABORT, 'legacy completion requires imported work subject') WHERE
+      NEW.origin = 'legacy' AND NOT EXISTS (
+        SELECT 1 FROM bounty_claims WHERE id = NEW.subject_id
+        UNION ALL
+        SELECT 1 FROM legacy_bounty_completion_carriers WHERE id = NEW.subject_id
+      );
+  END;
+  CREATE TRIGGER bounty_corrections_insert_guard
+    BEFORE INSERT ON bounty_completion_corrections
+  BEGIN
+    SELECT RAISE(ABORT, 'bounty correction requires owned completion') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_completions
+      WHERE id = NEW.completion_id AND subject_id = NEW.subject_id
+    );
+    SELECT RAISE(ABORT, 'bounty correction requires work subject') WHERE NOT EXISTS (
+      SELECT 1 FROM bounty_claims WHERE id = NEW.subject_id
+      UNION ALL
+      SELECT 1 FROM legacy_bounty_completion_carriers WHERE id = NEW.subject_id
+    );
+  END;
   CREATE TRIGGER bounty_work_subjects_no_update BEFORE UPDATE ON bounty_work_subjects
     BEGIN SELECT RAISE(ABORT, 'bounty work subjects are immutable'); END;
   CREATE TRIGGER bounty_work_subjects_no_delete BEFORE DELETE ON bounty_work_subjects
@@ -434,6 +512,20 @@ const GUARDS_V9 = `
   CREATE TRIGGER bounty_completion_corrections_no_delete
     BEFORE DELETE ON bounty_completion_corrections
     BEGIN SELECT RAISE(ABORT, 'bounty completion corrections are immutable'); END;
+  CREATE TRIGGER legacy_bounty_sources_no_update BEFORE UPDATE ON legacy_bounty_sources
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty source maps are immutable'); END;
+  CREATE TRIGGER legacy_bounty_sources_no_delete BEFORE DELETE ON legacy_bounty_sources
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty source maps are immutable'); END;
+  CREATE TRIGGER legacy_bounty_migrations_no_update BEFORE UPDATE ON legacy_bounty_migrations
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty migration markers are immutable'); END;
+  CREATE TRIGGER legacy_bounty_migrations_no_delete BEFORE DELETE ON legacy_bounty_migrations
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty migration markers are immutable'); END;
+  CREATE TRIGGER legacy_bounty_correction_receipts_no_update
+    BEFORE UPDATE ON legacy_bounty_correction_receipts
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty correction receipts are immutable'); END;
+  CREATE TRIGGER legacy_bounty_correction_receipts_no_delete
+    BEFORE DELETE ON legacy_bounty_correction_receipts
+    BEGIN SELECT RAISE(ABORT, 'legacy Bounty correction receipts are immutable'); END;
 `;
 
 /** Adds explicit work subjects and provenance without changing public Claim shapes. */
@@ -457,6 +549,10 @@ export function migrateBountyLifecycleToV9(db: DatabaseSync): void {
       DROP TRIGGER IF EXISTS bounty_completions_no_delete;
       DROP TRIGGER IF EXISTS bounty_completion_corrections_no_update;
       DROP TRIGGER IF EXISTS bounty_completion_corrections_no_delete;
+      DROP TRIGGER IF EXISTS bounty_claims_insert_guard;
+      DROP TRIGGER IF EXISTS legacy_bounty_carriers_insert_guard;
+      DROP TRIGGER IF EXISTS bounty_completions_insert_guard;
+      DROP TRIGGER IF EXISTS bounty_corrections_insert_guard;
       DROP INDEX IF EXISTS bounty_claims_one_current_per_offering;
       DROP INDEX IF EXISTS bounty_offerings_once_definition;
       DROP INDEX IF EXISTS bounty_offerings_recurring_interval;

@@ -123,6 +123,14 @@ const DEFINITIONS: readonly LegacyDefinitionSeed[] = [
     stars: 1,
   },
   {
+    id: "legacy-once-claimed-skipped",
+    title: "Cancel donation pickup",
+    type: "chore",
+    recurrence: { kind: "once", date: "2026-09-12" },
+    assignment: { kind: "open" },
+    stars: 2,
+  },
+  {
     id: "legacy-once-completed",
     title: "Wash guest sheets",
     type: "chore",
@@ -163,6 +171,14 @@ const DEFINITIONS: readonly LegacyDefinitionSeed[] = [
     recurrence: { kind: "weekly", days: ["sun", "mon"] },
     assignment: { kind: "open" },
     stars: 6,
+  },
+  {
+    id: "legacy-recurring-duplicate-claims",
+    title: "Tidy mudroom",
+    type: "chore",
+    recurrence: { kind: "weekly", days: ["wed", "mon", "wed"] },
+    assignment: { kind: "open" },
+    stars: 4,
   },
   {
     id: "legacy-recurring-retired-claim",
@@ -221,6 +237,14 @@ const DEFINITIONS: readonly LegacyDefinitionSeed[] = [
     stars: 10,
   },
   {
+    id: "legacy-restored-without-claim",
+    title: "Organize attic",
+    type: "chore",
+    recurrence: { kind: "once", date: "2026-09-03" },
+    assignment: { kind: "open" },
+    stars: 4,
+  },
+  {
     id: "legacy-fixed-task",
     title: "Dad medicine",
     type: "chore",
@@ -255,6 +279,7 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
     "legacy-once-open",
     "legacy-once-expired",
     "legacy-once-skipped",
+    "legacy-once-claimed-skipped",
     "legacy-once-retired-member-claim",
     "legacy-undone-without-claim",
   ],
@@ -279,6 +304,16 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
       window: "2026-09-05",
       member: "dad",
     },
+    {
+      source: "legacy-recurring-duplicate-claims",
+      window: "2026-09-14",
+      member: "dad",
+    },
+    {
+      source: "legacy-recurring-duplicate-claims",
+      window: "2026-09-15",
+      member: "kid",
+    },
   ],
   releasedClaims: [
     {
@@ -292,7 +327,11 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
       member: "former",
     },
   ],
-  noNewOffering: ["legacy-once-completed", "legacy-once-retired"],
+  noNewOffering: [
+    "legacy-restored-without-claim",
+    "legacy-once-completed",
+    "legacy-once-retired",
+  ],
   completionCredits: [
     {
       source: "legacy-once-completed",
@@ -318,6 +357,12 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
       stars: 3,
       effectiveBy: null,
     },
+    {
+      source: "legacy-restored-without-claim",
+      window: "2026-09-03",
+      stars: 4,
+      effectiveBy: "kid",
+    },
   ],
   missingCompletionCredits: [
     { source: "legacy-completed-missing-credit", window: "2026-09-08" },
@@ -342,14 +387,17 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
     "legacy-recurring-old-claim": "2026-09-13",
     "legacy-recurring-current-claim": "2026-09-14",
     "legacy-recurring-retired-claim": "2026-09-13",
+    "legacy-recurring-duplicate-claims": "2026-09-14",
   },
   correctionOrder: [
     "correction-reassign-to-kid",
     "correction-recorded-claim-to-kid",
     "correction-undo-recorded-claim",
     "correction-undo-without-claim",
+    "correction-undo-restored-carrier",
+    "correction-restore-carrier-to-kid",
   ],
-  balances: { dad: 9, kid: 5 },
+  balances: { dad: 9, kid: 9 },
 } as const;
 
 function insertDefinition(db: DatabaseSync, definition: LegacyDefinitionSeed) {
@@ -454,6 +502,18 @@ export function createLegacyBountyV2Fixture(
       reason: "Away",
     });
     insertEvent(db, {
+      task: "legacy-once-claimed-skipped",
+      window: "2026-09-12",
+      kind: "claimed",
+      by: "dad",
+    });
+    insertEvent(db, {
+      task: "legacy-once-claimed-skipped",
+      window: "2026-09-12",
+      kind: "skipped",
+      reason: "Pickup cancelled",
+    });
+    insertEvent(db, {
       task: "legacy-recurring-old-claim",
       window: "2026-09-13",
       kind: "claimed",
@@ -462,6 +522,18 @@ export function createLegacyBountyV2Fixture(
     insertEvent(db, {
       task: "legacy-recurring-current-claim",
       window: "2026-09-14",
+      kind: "claimed",
+      by: "kid",
+    });
+    insertEvent(db, {
+      task: "legacy-recurring-duplicate-claims",
+      window: "2026-09-14",
+      kind: "claimed",
+      by: "dad",
+    });
+    insertEvent(db, {
+      task: "legacy-recurring-duplicate-claims",
+      window: "2026-09-15",
       kind: "claimed",
       by: "kid",
     });
@@ -567,6 +639,36 @@ export function createLegacyBountyV2Fixture(
       reason: "Historical mistake",
       at: "2026-09-04T16:00:00Z",
     });
+    insertEvent(db, {
+      task: "legacy-restored-without-claim",
+      window: "2026-09-03",
+      kind: "completed",
+      by: "dad",
+      at: "2026-09-03T14:00:00Z",
+    });
+    insertCorrection(db, {
+      id: "correction-undo-restored-carrier",
+      task: "legacy-restored-without-claim",
+      window: "2026-09-03",
+      by: null,
+      reason: "Temporarily reversed",
+      at: "2026-09-03T15:00:00Z",
+    });
+    db.exec(
+      "UPDATE star_balances SET balance = balance - 4 WHERE member = 'dad'",
+    );
+    insertCorrection(db, {
+      id: "correction-restore-carrier-to-kid",
+      task: "legacy-restored-without-claim",
+      window: "2026-09-03",
+      by: "kid",
+      reason: "Restored to the correct person",
+      at: "2026-09-03T16:00:00Z",
+      previous: "correction-undo-restored-carrier",
+    });
+    db.exec(
+      "INSERT INTO star_balances (member, balance) VALUES ('kid', 4) ON CONFLICT(member) DO UPDATE SET balance = balance + 4",
+    );
     db.prepare(
       "INSERT INTO star_adjustments (id, member, delta, reason, at) VALUES (?, ?, ?, ?, ?)",
     ).run(

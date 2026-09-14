@@ -269,7 +269,12 @@ export function insertDefinition(definition: LegacyTaskDefinition): void {
 
 function definitionById(id: TaskId): LegacyTaskDefinition | null {
   const row = tasksDatabase()
-    .prepare("SELECT * FROM definitions WHERE id = ?")
+    .prepare(
+      `SELECT d.* FROM definitions d
+       WHERE d.id = ? AND NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = d.id
+       )`,
+    )
     .get(id);
   if (!row) return null;
   if (!isRecord(row)) throw new Error("corrupt task definition row");
@@ -332,7 +337,13 @@ export function saveDefinition(input: {
 
 export function loadDefinitions(): LegacyTaskDefinition[] {
   const rows = tasksDatabase()
-    .prepare("SELECT * FROM definitions ORDER BY creation_order")
+    .prepare(
+      `SELECT d.* FROM definitions d
+       WHERE NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = d.id
+       )
+       ORDER BY d.creation_order`,
+    )
     .all();
   return rows.map((row) => {
     if (!isRecord(row)) throw new Error("corrupt task definition row");
@@ -342,7 +353,12 @@ export function loadDefinitions(): LegacyTaskDefinition[] {
 
 export function loadEvents(): TaskEvent[] {
   const rows = tasksDatabase()
-    .prepare("SELECT task, window, kind, by, at, reason FROM events")
+    .prepare(
+      `SELECT e.task, e.window, e.kind, e.by, e.at, e.reason FROM events e
+       WHERE NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = e.task
+       )`,
+    )
     .all();
   return rows.map((row) => {
     if (!isRecord(row)) throw new Error("corrupt task event row");
@@ -394,7 +410,17 @@ export function applyEvent(event: TaskEvent): EventReceipt {
   const base = { task: event.task, window: event.window, kind: event.kind };
   const bound = bindEvent(event);
   try {
-    const result = tasksDatabase()
+    const db = tasksDatabase();
+    if (
+      db
+        .prepare("SELECT 1 FROM legacy_bounty_sources WHERE source_task_id = ?")
+        .get(event.task)
+    ) {
+      throw new InvalidTaskDefinitionError(
+        "This work is now a Bounty. Refresh to use its current controls.",
+      );
+    }
+    const result = db
       .prepare(
         `INSERT INTO events (task, window, kind, by, at, reason)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -463,7 +489,13 @@ export function loadStoredStarBalances(): import("./types").StarBalance[] {
 
 export function loadCompletionCorrections(): CompletionCorrection[] {
   return tasksDatabase()
-    .prepare("SELECT * FROM completion_corrections ORDER BY sequence")
+    .prepare(
+      `SELECT c.* FROM completion_corrections c
+       WHERE NOT EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = c.task
+       )
+       ORDER BY c.sequence`,
+    )
     .all()
     .map((row) => {
       const task = parseTaskId(row.task);

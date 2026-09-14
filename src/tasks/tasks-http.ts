@@ -148,11 +148,12 @@ export async function handleCreateTask(
   const draft = parseTaskCreateDraft(await readJson(request));
   if (!draft) return jsonError("invalid body", 400);
   const household = await readHousehold();
+  const today = parseLocalDate(
+    msToZonedDate(now.getTime(), household.timeZone),
+  );
+  if (!today) return jsonError("invalid household date", 500);
+  reconcileRetiredMembers(household.members, today);
   if (draft.kind === "bounty") {
-    const today = parseLocalDate(
-      msToZonedDate(now.getTime(), household.timeZone),
-    );
-    if (!today) return jsonError("invalid household date", 500);
     const definition = createBounty(tasksDatabase(), draft, today);
     return Response.json({ definition });
   }
@@ -176,6 +177,7 @@ export async function handleSaveTask(request: Request): Promise<Response> {
   }
   const today = parseLocalDate(msToZonedDate(Date.now(), household.timeZone));
   if (!today) return jsonError("invalid household date", 500);
+  reconcileRetiredMembers(household.members, today);
   try {
     const { id, ...fields } = draft;
     return Response.json({
@@ -199,6 +201,10 @@ export async function handlePostTaskEvents(
   if (isUnauthorized(display)) return display;
   const events = parseEventBatch(await readJson(request));
   if (!events) return jsonError("invalid body", 400);
+  const household = await readHousehold();
+  const today = parseLocalDate(msToZonedDate(Date.now(), household.timeZone));
+  if (!today) return jsonError("invalid household date", 500);
+  reconcileRetiredMembers(household.members, today);
   if (events.some((event) => isBountyDefinition(tasksDatabase(), event.task))) {
     return jsonError("Bounties require the Bounty command path", 409);
   }
