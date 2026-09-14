@@ -1,4 +1,7 @@
-import { currentOfferingKey, sameOfferingKey } from "./bounty-offerings";
+import {
+  belongsToOfferingInterval,
+  currentOfferingKey,
+} from "./bounty-offerings";
 import type { BountyDefinition, ClaimedBounty, LocalDate } from "./types";
 
 export type BountyManagementStatus =
@@ -20,7 +23,7 @@ export function bountyManagementStatus(input: {
   const reservation = claims.find(
     (row) =>
       row.state.kind !== "released" &&
-      sameOfferingKey(row.claim.offering, current),
+      belongsToOfferingInterval(row.claim.offering, current),
   );
   if (reservation?.state.kind === "completed") return "Completed";
   if (reservation) return "Claimed";
