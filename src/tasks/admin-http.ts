@@ -13,10 +13,18 @@ import {
 } from "./admin-store";
 import { parseTaskAdminCommand } from "./admin-types";
 import {
+  BountyCorrectionStoreError,
+  correctBountyCompletion,
+  loadBountyCompletionCorrections,
+} from "./bounty-correction-store";
+import {
   administerBountyDefinition,
   BountyAdminStoreError,
+  InactiveBountyMemberError,
   loadBountyClaims,
+  loadBountyCompletions,
   loadBountyDefinitions,
+  replaceDefinition,
 } from "./bounty-store";
 import {
   loadCompletionCorrections,
@@ -48,6 +56,8 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
       ...store,
       bountyDefinitions: loadBountyDefinitions(db),
       bountyClaims: loadBountyClaims(db),
+      bountyCompletions: loadBountyCompletions(db),
+      bountyCompletionCorrections: loadBountyCompletionCorrections(db),
       originalEvents: loadEvents(),
       corrections: loadCompletionCorrections(),
       balances: loadStoredStarBalances(),
@@ -57,8 +67,10 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
   const command = parseTaskAdminCommand(await request.json().catch(() => null));
   if (!command)
     return adminJson({ error: "Check the task fields and try again." }, 400);
-  if (command.kind === "create" || command.kind === "edit") {
-    const assignment = command.draft.assignment;
+  const assignedDraft =
+    command.kind === "create" || command.kind === "edit" ? command.draft : null;
+  if (assignedDraft) {
+    const assignment = assignedDraft.assignment;
     const assigned =
       assignment.kind === "fixed"
         ? [assignment.member]
@@ -83,6 +95,11 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     !memberById(household.members, command.correction.by)
   )
     return adminJson({ error: "Member not found." }, 400);
+  if (
+    command.kind === "reassign-bounty-completion" &&
+    !memberById(household.members, command.member)
+  )
+    return adminJson({ error: "Member not found." }, 400);
   try {
     switch (command.kind) {
       case "create":
@@ -105,6 +122,25 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
             today,
           }),
         });
+      case "undo-bounty-completion":
+      case "restore-bounty-completion":
+      case "reassign-bounty-completion":
+        return adminJson({
+          receipt: correctBountyCompletion({
+            db: tasksDatabase(),
+            command,
+            members: household.members,
+          }),
+        });
+      case "replace-definition":
+        return adminJson({
+          receipt: replaceDefinition({
+            db: tasksDatabase(),
+            command,
+            today,
+            members: household.members,
+          }),
+        });
       case "correct":
         correctAdminCompletion({ ...command.correction, at: nowInstant() });
         break;
@@ -114,9 +150,12 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     }
     return adminJson({ ok: true });
   } catch (error) {
+    if (error instanceof InactiveBountyMemberError)
+      return adminJson({ error: error.message }, 400);
     if (
       error instanceof TaskAdminError ||
-      error instanceof BountyAdminStoreError
+      error instanceof BountyAdminStoreError ||
+      error instanceof BountyCorrectionStoreError
     )
       return adminJson({ error: error.message }, 409);
     throw error;

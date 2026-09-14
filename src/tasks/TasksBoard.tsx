@@ -13,12 +13,13 @@ import { Avatar } from "@/shared/ui/Avatar";
 import { Icon } from "@/shared/ui/Icon";
 import { TaskRow, type TaskRowStatus } from "./TaskRow";
 import styles from "./TasksBoard.module.css";
-import type {
-  AvailableBounty,
-  ClaimedBounty,
-  ClaimId,
-  Occurrence,
-  TasksViewRead,
+import {
+  type AvailableBounty,
+  type ClaimedBounty,
+  type ClaimId,
+  isUnfinishedBountyClaim,
+  type Occurrence,
+  type TasksViewRead,
 } from "./types";
 import { occurrencesForColumn } from "./view";
 
@@ -130,9 +131,7 @@ function GroupTasks({
   const finished = group.rows.filter(
     (row) => row.state === "done" || row.state === "skipped",
   );
-  const unfinishedBounties = group.bounties.filter(
-    (row) => row.state.kind === "unfinished",
-  );
+  const unfinishedBounties = group.bounties.filter(isUnfinishedBountyClaim);
   const completedBounties = group.bounties.filter(
     (row) => row.state.kind === "completed",
   );
@@ -472,9 +471,8 @@ export function TasksBoard({
                       (row) =>
                         row.state === "pending" || row.state === "claimed",
                     ).length +
-                      selected.bounties.filter(
-                        (row) => row.state.kind === "unfinished",
-                      ).length}{" "}
+                      selected.bounties.filter(isUnfinishedBountyClaim)
+                        .length}{" "}
                     remaining
                   </p>
                 </div>

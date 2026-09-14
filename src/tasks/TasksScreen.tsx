@@ -27,6 +27,7 @@ import {
   type AvailableBounty,
   type ClaimedBounty,
   type ClaimId,
+  isUnfinishedBountyClaim,
   type LegacyTaskDefinition,
   nowInstant,
   type Occurrence,
@@ -508,7 +509,7 @@ export function TasksScreen() {
   }
 
   async function completeBountyClaim(row: ClaimedBounty) {
-    if (row.state.kind !== "unfinished") return;
+    if (!isUnfinishedBountyClaim(row)) return;
     if (!beginBountyMutation(row.claim.id)) return;
     try {
       const res = await fetch("/api/tasks", {
@@ -546,7 +547,7 @@ export function TasksScreen() {
   }
 
   async function releaseBountyClaim(row: ClaimedBounty) {
-    if (row.state.kind !== "unfinished") return;
+    if (!isUnfinishedBountyClaim(row)) return;
     if (!beginBountyMutation(row.claim.id)) return;
     try {
       const res = await fetch("/api/tasks", {

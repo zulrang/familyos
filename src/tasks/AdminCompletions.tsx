@@ -1,11 +1,19 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import type { HouseholdMember } from "@/members/members";
 import styles from "@/shared/Admin.module.css";
 import { adminRequest, adminRequestId } from "@/shared/admin-client";
-import type { TaskAdminRead } from "./admin-types";
-import type { TaskEvent } from "./types";
+import type {
+  BountyCompletionCorrectionCommand,
+  TaskAdminRead,
+} from "./admin-types";
+import {
+  type BountyCompletion,
+  type ClaimedBounty,
+  parseBountyCommandId,
+  type TaskEvent,
+} from "./types";
 
 function CorrectionForm({
   event,
@@ -100,6 +108,194 @@ function CorrectionForm({
   );
 }
 
+type CorrectableBounty = ClaimedBounty & {
+  state: Extract<ClaimedBounty["state"], { kind: "completed" | "reopened" }>;
+};
+
+type BountyCorrectionAction = "undo" | "restore" | "reassign";
+
+function bountyCorrectionCommand(input: {
+  action: BountyCorrectionAction;
+  row: CorrectableBounty;
+  completion: BountyCompletion;
+  member: string;
+  reason: string;
+}): BountyCompletionCorrectionCommand {
+  const requestId = parseBountyCommandId(adminRequestId());
+  if (!requestId) throw new Error("Could not create Bounty request identity");
+  const fields = {
+    requestId,
+    claim: input.row.claim.id,
+    revision: input.row.revision,
+    completion: input.completion.id,
+    predecessor: input.row.state.correction,
+    reason: input.reason,
+  };
+  switch (input.action) {
+    case "undo":
+      return { kind: "undo-bounty-completion", ...fields };
+    case "restore":
+      return { kind: "restore-bounty-completion", ...fields };
+    case "reassign":
+      return {
+        kind: "reassign-bounty-completion",
+        ...fields,
+        member: input.member,
+      };
+  }
+}
+
+function BountyCorrectionForm({
+  row,
+  members,
+  onSaved,
+  onCancel,
+}: {
+  row: CorrectableBounty;
+  members: HouseholdMember[];
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const state = row.state;
+  const completed = state.kind === "completed";
+  const completion =
+    state.kind === "completed" ? state.completion : state.undoneCompletion;
+  const [action, setAction] = useState<BountyCorrectionAction>(
+    completed ? "undo" : "restore",
+  );
+  const [member, setMember] = useState(
+    state.kind === "completed" ? state.creditedTo : row.claim.member,
+  );
+  const [reason, setReason] = useState("");
+  const pending = useRef(false);
+  const [save, setSave] = useState<
+    | { status: "idle" }
+    | { status: "sending"; command: BountyCompletionCorrectionCommand }
+    | {
+        status: "retry";
+        command: BountyCompletionCorrectionCommand;
+        error: string;
+      }
+  >({ status: "idle" });
+
+  async function send(command: BountyCompletionCorrectionCommand) {
+    if (pending.current) return;
+    pending.current = true;
+    setSave({ status: "sending", command });
+    try {
+      await adminRequest("tasks", command);
+      onSaved();
+    } catch (error) {
+      setSave({
+        status: "retry",
+        command,
+        error: (error as Error).message,
+      });
+    } finally {
+      pending.current = false;
+    }
+  }
+
+  async function submit(submission: FormEvent) {
+    submission.preventDefault();
+    if (pending.current) return;
+    if (
+      !window.confirm(
+        "Record this Bounty completion correction? Star Balance changes and correction history will be saved together.",
+      )
+    )
+      return;
+    await send(
+      bountyCorrectionCommand({ action, row, completion, member, reason }),
+    );
+  }
+
+  return (
+    <form className={styles.form} onSubmit={submit}>
+      <label>
+        Correction
+        <select
+          value={action}
+          disabled={save.status !== "idle"}
+          onChange={(event) =>
+            setAction(event.target.value as BountyCorrectionAction)
+          }
+        >
+          {completed ? (
+            <>
+              <option value="undo">Undo completion</option>
+              <option value="reassign">Reassign credit</option>
+            </>
+          ) : (
+            <option value="restore">Restore completion</option>
+          )}
+        </select>
+      </label>
+      {action === "reassign" ? (
+        <label>
+          Credit to
+          <select
+            value={member}
+            disabled={save.status !== "idle"}
+            onChange={(event) => setMember(event.target.value)}
+          >
+            {members.map((candidate) => (
+              <option value={candidate.id} key={candidate.id}>
+                {candidate.name}
+                {candidate.status === "retired" ? " (retired)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label>
+        Reason
+        <textarea
+          required
+          maxLength={1000}
+          value={reason}
+          disabled={save.status !== "idle"}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="What needs correcting?"
+        />
+      </label>
+      {save.status === "retry" ? (
+        <p role="alert" className={styles.error}>
+          {save.error}
+        </p>
+      ) : null}
+      <div className={styles.actions}>
+        {save.status === "retry" ? (
+          <>
+            <button type="button" onClick={() => void send(save.command)}>
+              Retry Bounty correction
+            </button>
+            <button type="button" className={styles.quiet} onClick={onSaved}>
+              Cancel and refresh
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="submit" disabled={save.status === "sending"}>
+              {save.status === "sending"
+                ? "Saving…"
+                : "Record Bounty correction"}
+            </button>
+            <button
+              type="button"
+              className={styles.quiet}
+              disabled={save.status === "sending"}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+    </form>
+  );
+}
+
 export function AdminCompletions({
   data,
   members,
@@ -131,13 +327,34 @@ export function AdminCompletions({
       .toLowerCase()
       .includes(query.toLowerCase()),
   );
+  const bountyRows = data.bountyClaims
+    .filter((row) =>
+      data.bountyCompletions.some(
+        (completion) => completion.claim === row.claim.id,
+      ),
+    )
+    .filter((row) => {
+      const memberNames = data.bountyCompletionCorrections.flatMap(
+        (correction) =>
+          correction.claim === row.claim.id
+            ? [correction.fromMember, correction.toMember]
+                .filter((member): member is string => member !== null)
+                .map(name)
+            : [],
+      );
+      return `${row.claim.title} ${row.claim.scheduledOn} ${name(
+        row.claim.member,
+      )} ${memberNames.join(" ")} ${row.state.kind}`
+        .toLowerCase()
+        .includes(query.toLowerCase());
+    });
   return (
     <div className={styles.cards}>
       <p className={styles.muted}>
         Correct who completed a task, undo a mistaken completion, or restore it.
         History is never deleted.
       </p>
-      {!visible.length && (
+      {!visible.length && !bountyRows.length && (
         <p className={styles.card}>No matching completions.</p>
       )}
       {visible.map(({ event, history, by }) => {
@@ -192,6 +409,80 @@ export function AdminCompletions({
                       ? `Completed by ${name(correction.by)}`
                       : "Completion undone"}{" "}
                     · {new Date(correction.at).toLocaleString()}
+                    <br />
+                    {correction.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </article>
+        );
+      })}
+      {bountyRows.map((row) => {
+        const key = `bounty:${row.claim.id}`;
+        const completions = data.bountyCompletions.filter(
+          (completion) => completion.claim === row.claim.id,
+        );
+        const history = data.bountyCompletionCorrections.filter(
+          (correction) => correction.claim === row.claim.id,
+        );
+        const correctable =
+          row.state.kind === "completed" || row.state.kind === "reopened";
+        return (
+          <article className={styles.card} key={key}>
+            <h2>{row.claim.title}</h2>
+            <p className={styles.muted}>
+              Bounty accepted for {row.claim.scheduledOn}
+              <br />
+              {row.state.kind === "completed"
+                ? `Completed by ${name(row.state.creditedTo)} · ${row.state.completion.creditedStars} Stars`
+                : row.state.kind === "reopened"
+                  ? "Completion undone · work reopened"
+                  : "Completion undone · claim released"}
+            </p>
+            {selected === key && correctable ? (
+              <BountyCorrectionForm
+                row={row as CorrectableBounty}
+                members={members}
+                onSaved={() => {
+                  setSelected(null);
+                  onSaved();
+                }}
+                onCancel={() => setSelected(null)}
+              />
+            ) : correctable ? (
+              <button
+                type="button"
+                className={styles.quiet}
+                disabled={selected !== null}
+                onClick={() => setSelected(key)}
+              >
+                Correct Bounty completion
+              </button>
+            ) : null}
+            <details className={styles.history}>
+              <summary>
+                {completions.length} completion
+                {completions.length === 1 ? "" : "s"} + {history.length}{" "}
+                correction{history.length === 1 ? "" : "s"}
+              </summary>
+              <ul>
+                {completions.map((completion) => (
+                  <li key={completion.id}>
+                    Completed by {name(completion.by)} for{" "}
+                    {completion.creditedStars} Stars ·{" "}
+                    {new Date(completion.at).toLocaleString()}
+                  </li>
+                ))}
+                {history.map((correction) => (
+                  <li key={correction.id}>
+                    {correction.kind === "undo"
+                      ? `Undone from ${name(correction.fromMember ?? "unknown")}`
+                      : correction.kind === "restore"
+                        ? `Restored to ${name(correction.toMember ?? "unknown")}`
+                        : `Reassigned from ${name(correction.fromMember ?? "unknown")} to ${name(correction.toMember ?? "unknown")}`}{" "}
+                    · {correction.creditedStars} Stars ·{" "}
+                    {new Date(correction.at).toLocaleString()}
                     <br />
                     {correction.reason}
                   </li>

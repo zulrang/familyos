@@ -69,7 +69,7 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("assigned Task and recurring Bounty tables exist at schema version 6", () => {
+  test("assigned Task and Bounty lifecycle tables exist at schema version 8", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -84,7 +84,9 @@ describe("tasks sqlite store", () => {
         "bounty_admin_command_receipts",
         "bounty_claims",
         "bounty_command_receipts",
+        "bounty_completion_corrections",
         "bounty_completions",
+        "bounty_correction_receipts",
         "bounty_definitions",
         "bounty_offerings",
         "completion_corrections",
@@ -98,7 +100,7 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 6);
+    assert.equal(version.user_version, 8);
   });
 
   test("persists full recurrence and assignment unions", () => {

@@ -898,6 +898,98 @@ describe("Tasks HTTP", () => {
     assert.equal(missing.status, 400);
   });
 
+  test("public create/save reject new open Routines but preserve legacy metadata edits", async () => {
+    const createOpenRoutine = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Nope",
+          type: "routine",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "open" },
+        }),
+      }),
+    );
+    assert.equal(createOpenRoutine.status, 400);
+
+    const legacyId = crypto.randomUUID();
+    tasksDatabase()
+      .prepare(
+        `INSERT INTO definitions
+          (id, lineage, title, type, recurrence, assignment, time, stars, retired_at)
+         VALUES (?, ?, 'Morning check', 'routine', '{"kind":"daily"}',
+                 '{"kind":"open"}', NULL, 0, NULL)`,
+      )
+      .run(legacyId, crypto.randomUUID());
+    const metadata = {
+      id: legacyId,
+      title: "Morning checklist",
+      type: "routine",
+      recurrence: { kind: "daily" },
+      assignment: { kind: "open" },
+      time: "08:00",
+      stars: 1,
+    };
+    assert.equal(
+      (
+        await handleSaveTask(
+          req("http://familyos.test/api/tasks", {
+            method: "PUT",
+            body: JSON.stringify(metadata),
+          }),
+        )
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await handleSaveTask(
+          req("http://familyos.test/api/tasks", {
+            method: "PUT",
+            body: JSON.stringify({
+              ...metadata,
+              recurrence: { kind: "weekly", days: ["mon"] },
+            }),
+          }),
+        )
+      ).status,
+      400,
+    );
+
+    const assigned = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Assigned",
+          type: "routine",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "fixed", member: "dad" },
+        }),
+      }),
+    );
+    const { definition } = (await assigned.json()) as {
+      definition: LegacyTaskDefinition;
+    };
+    assert.equal(
+      (
+        await handleSaveTask(
+          req("http://familyos.test/api/tasks", {
+            method: "PUT",
+            body: JSON.stringify({
+              id: definition.id,
+              title: definition.title,
+              type: "routine",
+              recurrence: definition.recurrence,
+              assignment: { kind: "open" },
+              stars: 0,
+            }),
+          }),
+        )
+      ).status,
+      400,
+    );
+  });
+
   test("PUT overwrites details in place and keeps the same id", async () => {
     const created = await handleCreateTask(
       req("http://familyos.test/api/tasks", {

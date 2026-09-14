@@ -408,3 +408,94 @@ test("recurring management status follows the current interval while retaining o
   expect(within(future).getByText("Waiting")).toBeVisible();
   expect(within(future).getByText(/Mon from 2026-09-15/)).toBeVisible();
 });
+
+test("schedule and work-mode changes show only legal fields and submit one replacement", async () => {
+  const user = userEvent.setup();
+  const definition = {
+    kind: "bounty",
+    id: "a".repeat(32),
+    lineage: "1".repeat(32),
+    type: "chore",
+    title: "Wash car",
+    stars: 4,
+    recurrence: { kind: "once" },
+    offerFrom: null,
+    revision: 0,
+    retiredAt: null,
+  };
+  const commands: Record<string, unknown>[] = [];
+  let reads = 0;
+  vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+    if (init.method === "POST") {
+      commands.push(JSON.parse(String(init.body)));
+      return Response.json({
+        receipt: {
+          status: "accepted",
+          replacement: {
+            kind: "assigned",
+            id: "b".repeat(32),
+            lineage: definition.lineage,
+          },
+        },
+      });
+    }
+    if (url.endsWith("/members")) {
+      return Response.json({
+        members: [
+          { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        ],
+        version: 1,
+      });
+    }
+    reads += 1;
+    return Response.json({
+      definitions: reads === 1 ? [] : [{ id: "b".repeat(32) }],
+      bountyDefinitions: reads === 1 ? [definition] : [],
+      bountyClaims: [],
+      events: [],
+      originalEvents: [],
+      corrections: [],
+      adjustments: [],
+      balances: [],
+      today: "2026-09-13",
+    });
+  });
+
+  render(<AdminBounties />);
+  await user.click(
+    await screen.findByRole("button", { name: "Edit Wash car" }),
+  );
+  expect(screen.getByRole("button", { name: "Once" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.queryByLabelText(/starting date/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/^date$/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/time/i)).not.toBeInTheDocument();
+
+  await user.selectOptions(screen.getByLabelText("Work mode"), "assigned");
+  expect(screen.getByLabelText("Repeat")).toBeVisible();
+  expect(screen.getByLabelText("Assignment")).toBeVisible();
+  expect(screen.getByLabelText("Time (optional)")).toBeVisible();
+  await user.selectOptions(screen.getByLabelText("Repeat"), "once");
+  expect(screen.getByLabelText("Date")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Save Bounty" }));
+  await waitFor(() => expect(commands).toHaveLength(1));
+  expect(commands[0]).toMatchObject({
+    kind: "replace-definition",
+    source: {
+      kind: "bounty",
+      definition: definition.id,
+      revision: 0,
+    },
+    replacement: {
+      kind: "assigned",
+      type: "chore",
+      title: "Wash car",
+      recurrence: { kind: "once", date: "2026-09-13" },
+      assignment: { kind: "fixed", member: "dad" },
+      time: null,
+      stars: 4,
+    },
+  });
+});

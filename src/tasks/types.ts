@@ -29,6 +29,7 @@ export type LineageId = Brand<string, "LineageId">;
 export type OfferingId = Brand<string, "OfferingId">;
 export type ClaimId = Brand<string, "ClaimId">;
 export type CompletionId = Brand<string, "CompletionId">;
+export type BountyCorrectionId = Brand<string, "BountyCorrectionId">;
 export type BountyCommandId = Brand<string, "BountyCommandId">;
 export type StarAmount = Brand<number, "StarAmount">;
 export type DefinitionRevision = Brand<number, "DefinitionRevision">;
@@ -76,6 +77,7 @@ export type BountyDefinition = Readonly<{
   title: TaskTitle;
   stars: StarAmount;
   recurrence: BountyRecurrence;
+  offerFrom: LocalDate | null;
   revision: DefinitionRevision;
   retiredAt: LocalDate | null;
 }>;
@@ -114,9 +116,35 @@ export type ClaimedBounty = Readonly<{
   revision: ClaimRevision;
   state:
     | { kind: "unfinished" }
-    | { kind: "completed"; completion: BountyCompletion }
+    | {
+        kind: "reopened";
+        undoneCompletion: BountyCompletion;
+        correction: BountyCorrectionId;
+      }
+    | {
+        kind: "completed";
+        completion: BountyCompletion;
+        creditedTo: MemberId;
+        correction: BountyCorrectionId | null;
+      }
     | { kind: "released" };
 }>;
+
+export function isUnfinishedBountyClaim(
+  row: ClaimedBounty,
+): row is ClaimedBounty & {
+  state:
+    | { kind: "unfinished" }
+    | {
+        kind: "reopened";
+        undoneCompletion: BountyCompletion;
+        correction: BountyCorrectionId;
+      };
+} {
+  return row.state.kind === "unfinished" || row.state.kind === "reopened";
+}
+
+export type BountyCreditProvenance = "recorded" | "legacy-missing";
 
 export type BountyCompletion = Readonly<{
   id: CompletionId;
@@ -124,7 +152,32 @@ export type BountyCompletion = Readonly<{
   by: MemberId;
   at: Instant;
   creditedStars: StarAmount;
+  creditProvenance: BountyCreditProvenance;
 }>;
+
+type BountyCompletionCorrectionFields = {
+  id: BountyCorrectionId;
+  claim: ClaimId;
+  completion: CompletionId;
+  predecessor: BountyCorrectionId | null;
+  creditedStars: StarAmount;
+  creditProvenance: BountyCreditProvenance;
+  reason: string;
+  at: Instant;
+};
+
+export type BountyCompletionCorrection = Readonly<
+  BountyCompletionCorrectionFields &
+    (
+      | { kind: "undo"; fromMember: MemberId; toMember: null }
+      | { kind: "restore"; fromMember: null; toMember: MemberId }
+      | {
+          kind: "reassign";
+          fromMember: MemberId;
+          toMember: MemberId;
+        }
+    )
+>;
 
 export type CreateBountyDraft = Readonly<{
   kind: "bounty";
@@ -346,6 +399,10 @@ export function newCompletionId(): CompletionId {
   return crypto.randomUUID() as CompletionId;
 }
 
+export function newBountyCorrectionId(): BountyCorrectionId {
+  return crypto.randomUUID() as BountyCorrectionId;
+}
+
 function parseBrandedId<B extends string>(
   raw: unknown,
 ): Brand<string, B> | null {
@@ -363,6 +420,12 @@ export function parseClaimId(raw: unknown): ClaimId | null {
 
 export function parseCompletionId(raw: unknown): CompletionId | null {
   return parseBrandedId<"CompletionId">(raw);
+}
+
+export function parseBountyCorrectionId(
+  raw: unknown,
+): BountyCorrectionId | null {
+  return parseBrandedId<"BountyCorrectionId">(raw);
 }
 
 export function parseBountyCommandId(raw: unknown): BountyCommandId | null {
@@ -571,7 +634,13 @@ export function parseTaskCreateDraft(raw: unknown): TaskCreateDraft | null {
   if (isRecord(raw) && raw.kind === "bounty")
     return parseCreateBountyDraft(raw);
   const assigned = parseCreateTaskDraft(raw);
-  return assigned ? { kind: "assigned", ...assigned } : null;
+  if (
+    !assigned ||
+    (assigned.type === "routine" && assigned.assignment.kind === "open")
+  ) {
+    return null;
+  }
+  return { kind: "assigned", ...assigned };
 }
 
 function hasOnlyKnownKeys(
@@ -680,7 +749,7 @@ function parseBountyCompletion(raw: unknown): BountyCompletion | null {
     !isRecord(raw) ||
     !hasOnlyKnownKeys(
       raw,
-      new Set(["id", "claim", "by", "at", "creditedStars"]),
+      new Set(["id", "claim", "by", "at", "creditedStars", "creditProvenance"]),
     )
   ) {
     return null;
@@ -690,8 +759,22 @@ function parseBountyCompletion(raw: unknown): BountyCompletion | null {
   const by = nonEmptyString(raw.by);
   const at = parseInstant(raw.at);
   const creditedStars = parseStarAmount(raw.creditedStars);
-  if (!id || !claim || !by || !at || creditedStars === null) return null;
-  return { id, claim, by, at, creditedStars };
+  const creditProvenance =
+    raw.creditProvenance === undefined || raw.creditProvenance === "recorded"
+      ? "recorded"
+      : raw.creditProvenance === "legacy-missing"
+        ? "legacy-missing"
+        : null;
+  if (
+    !id ||
+    !claim ||
+    !by ||
+    !at ||
+    creditedStars === null ||
+    !creditProvenance
+  )
+    return null;
+  return { id, claim, by, at, creditedStars, creditProvenance };
 }
 
 export function parseBountyCommandReceipt(
@@ -769,6 +852,7 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
         "title",
         "stars",
         "recurrence",
+        "offerFrom",
         "revision",
         "retiredAt",
       ]),
@@ -784,6 +868,10 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
   const stars = parseStarAmount(raw.stars);
   const revision = parseDefinitionRevision(raw.revision);
   const recurrence = parseBountyRecurrence(raw.recurrence);
+  const offerFrom =
+    raw.offerFrom === undefined || raw.offerFrom === null
+      ? null
+      : parseLocalDate(raw.offerFrom);
   const retiredAt =
     raw.retiredAt === null ? null : parseLocalDate(raw.retiredAt);
   return id &&
@@ -792,6 +880,7 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
     stars !== null &&
     revision !== null &&
     recurrence &&
+    (raw.offerFrom === undefined || raw.offerFrom === null || offerFrom) &&
     (raw.retiredAt === null || retiredAt)
     ? {
         kind: "bounty",
@@ -801,6 +890,7 @@ export function parseBountyDefinition(raw: unknown): BountyDefinition | null {
         title,
         stars,
         recurrence,
+        offerFrom,
         revision,
         retiredAt,
       }
@@ -832,6 +922,7 @@ export function createBountyDefinition(
     title: draft.title,
     stars: draft.stars,
     recurrence: draft.recurrence,
+    offerFrom: null,
     revision: 0 as DefinitionRevision,
     retiredAt: null,
   };
@@ -861,6 +952,18 @@ export function recurrenceEquals(left: Recurrence, right: Recurrence): boolean {
       return _exhaustive;
     }
   }
+}
+
+export function allowsAssignedDraft(
+  current: LegacyTaskDefinition | null,
+  draft: CreateTaskDraft,
+): boolean {
+  if (draft.type !== "routine" || draft.assignment.kind !== "open") return true;
+  return (
+    current?.type === "routine" &&
+    current.assignment.kind === "open" &&
+    recurrenceEquals(current.recurrence, draft.recurrence)
+  );
 }
 
 export function assignmentEquals(

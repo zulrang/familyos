@@ -7,8 +7,8 @@ import { handleAdminMembers } from "@/members/admin-http";
 import { readHousehold, writeHousehold } from "@/settings/settings";
 import { handleAdminSession } from "@/shared/admin-auth";
 import { handleAdminTasks } from "./admin-http";
-import { correctAdminCompletion } from "./admin-store";
-import type { TaskAdminRead } from "./admin-types";
+import { correctAdminCompletion, createAdminTask } from "./admin-store";
+import { parseTaskAdminCommand, type TaskAdminRead } from "./admin-types";
 import {
   claimBounty,
   completeBounty,
@@ -17,9 +17,11 @@ import {
   loadBountyClaims,
   loadBountyDefinitions,
   releaseBounty,
+  replaceDefinition,
 } from "./bounty-store";
 import {
   applyEvent,
+  closeTasksDatabase,
   loadDefinitions,
   loadEvents,
   loadStoredStarBalances,
@@ -122,6 +124,65 @@ describe("parent administration", () => {
       loadStoredStarBalances().find((row) => row.member === member)?.balance ??
       0
     );
+  }
+
+  async function completedBounty(
+    overrides: {
+      title?: string;
+      stars?: number;
+      member?: string;
+      recurrence?: unknown;
+    } = {},
+  ) {
+    const draft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: overrides.title ?? "Wash car",
+      stars: overrides.stars ?? 4,
+      recurrence: overrides.recurrence ?? { kind: "once" },
+    });
+    if (!draft || draft.kind !== "bounty")
+      throw new Error("Invalid Bounty fixture");
+    const definition = createBounty(tasksDatabase(), draft, today);
+    const offering = loadAvailableBounties(tasksDatabase(), today).find(
+      (row) => row.offering.definition === definition.id,
+    );
+    if (!offering) throw new Error("Missing Bounty offering fixture");
+    const claim = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: offering.offering,
+      member: overrides.member ?? "a",
+      definitionRevision: offering.definitionRevision,
+    });
+    if (!claim || claim.kind !== "claim-bounty")
+      throw new Error("Invalid Bounty Claim fixture");
+    const claimed = claimBounty({
+      db: tasksDatabase(),
+      command: claim,
+      today,
+      members: (await readHousehold()).members,
+    });
+    if (!("result" in claimed) || claimed.result.kind !== "claimed")
+      throw new Error("Bounty was not claimed");
+    const completion = parseBountyCommand({
+      kind: "complete-bounty",
+      requestId: crypto.randomUUID(),
+      claim: claimed.result.claim.id,
+      revision: claimed.result.revision,
+    });
+    if (!completion || completion.kind !== "complete-bounty")
+      throw new Error("Invalid Bounty Completion fixture");
+    const completed = completeBounty({
+      db: tasksDatabase(),
+      command: completion,
+    });
+    if (!("result" in completed) || completed.result.kind !== "completed")
+      throw new Error("Bounty was not completed");
+    return {
+      definition,
+      claim: claimed.result.claim,
+      completion: completed.result.completion,
+    };
   }
 
   test("paired-display credentials cannot bypass the PIN on reads or writes", async () => {
@@ -230,6 +291,403 @@ describe("parent administration", () => {
     expect(loadBountyClaims(tasksDatabase())[0]?.claim).toMatchObject({
       title: "Polish car",
       stars: 7,
+    });
+  });
+  test("definition replacement preserves lineage and accepts only legal conversions", async () => {
+    const serverToday = (await snapshot()).today;
+    const bountyDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Wash car",
+      stars: 4,
+      recurrence: { kind: "once" },
+    });
+    expect(bountyDraft?.kind).toBe("bounty");
+    if (!bountyDraft || bountyDraft.kind !== "bounty") return;
+    const bounty = createBounty(tasksDatabase(), bountyDraft, serverToday);
+    const available = loadAvailableBounties(tasksDatabase(), serverToday)[0];
+    const claimCommand = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: available?.offering,
+      member: "a",
+      definitionRevision: available?.definitionRevision,
+    });
+    expect(claimCommand?.kind).toBe("claim-bounty");
+    if (!claimCommand || claimCommand.kind !== "claim-bounty") return;
+    const acceptedClaim = claimBounty({
+      db: tasksDatabase(),
+      command: claimCommand,
+      today: serverToday,
+      members: (await readHousehold()).members,
+    });
+    if (
+      !("result" in acceptedClaim) ||
+      acceptedClaim.result.kind !== "claimed"
+    ) {
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    const convertToAssigned = {
+      kind: "replace-definition",
+      requestId,
+      source: {
+        kind: "bounty",
+        definition: bounty.id,
+        revision: bounty.revision,
+      },
+      replacement: {
+        kind: "assigned",
+        title: "Wash car",
+        type: "chore",
+        recurrence: { kind: "weekly", days: ["sun"] },
+        assignment: { kind: "fixed", member: "a" },
+        time: "10:00",
+        stars: 4,
+      },
+    };
+    const converted = await tasks(convertToAssigned);
+    expect(converted.status).toBe(200);
+    const receipt = (await converted.json()).receipt;
+    expect(receipt).toMatchObject({
+      status: "accepted",
+      replacement: { kind: "assigned", lineage: bounty.lineage },
+    });
+    expect((await tasks(convertToAssigned)).status).toBe(200);
+    expect(
+      (
+        await tasks({
+          ...convertToAssigned,
+          replacement: { ...convertToAssigned.replacement, stars: 5 },
+        })
+      ).status,
+    ).toBe(409);
+    const assigned = loadDefinitions().find(
+      (definition) => definition.id === receipt.replacement.id,
+    );
+    expect(assigned).toMatchObject({
+      lineage: bounty.lineage,
+      retiredAt: null,
+      assignment: { kind: "fixed", member: "a" },
+    });
+    expect(
+      loadBountyDefinitions(tasksDatabase()).find(
+        (definition) => definition.id === bounty.id,
+      ),
+    ).toMatchObject({ retiredAt: serverToday });
+    const completion = parseBountyCommand({
+      kind: "complete-bounty",
+      requestId: crypto.randomUUID(),
+      claim: acceptedClaim.result.claim.id,
+      revision: acceptedClaim.result.revision,
+    });
+    expect(completion?.kind).toBe("complete-bounty");
+    if (!completion || completion.kind !== "complete-bounty") return;
+    expect(
+      completeBounty({ db: tasksDatabase(), command: completion }),
+    ).toMatchObject({
+      status: "accepted",
+      result: { kind: "completed", completion: { creditedStars: 4 } },
+    });
+
+    const back = await tasks({
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: { kind: "assigned", definition: assigned?.id },
+      replacement: {
+        kind: "bounty",
+        title: "Wash car",
+        stars: 6,
+        recurrence: { kind: "once" },
+      },
+    });
+    expect(back.status).toBe(200);
+    expect((await back.json()).receipt).toMatchObject({
+      status: "accepted",
+      replacement: { kind: "bounty", lineage: bounty.lineage },
+    });
+
+    for (const replacement of [
+      { ...convertToAssigned.replacement, kind: "typo" },
+      {
+        ...convertToAssigned.replacement,
+        assignment: { kind: "open" },
+      },
+      {
+        kind: "bounty",
+        title: "Mixed",
+        stars: 1,
+        recurrence: { kind: "once" },
+        assignment: { kind: "fixed", member: "a" },
+      },
+    ]) {
+      expect(
+        (
+          await tasks({
+            ...convertToAssigned,
+            requestId: crypto.randomUUID(),
+            replacement,
+          })
+        ).status,
+      ).toBe(400);
+    }
+  });
+
+  test("new open Routines are rejected at the administration boundary", async () => {
+    expect(
+      (
+        await tasks({
+          kind: "create",
+          id: crypto.randomUUID(),
+          draft: {
+            ...draft,
+            type: "routine",
+            assignment: { kind: "open" },
+          },
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  test("legacy open Routines allow metadata edits without allowing a new schedule", async () => {
+    await snapshot();
+    const legacy = createAdminTask(crypto.randomUUID(), {
+      ...draft,
+      title: "Morning check",
+      type: "routine",
+      assignment: { kind: "open" },
+    });
+    const metadataEdit = {
+      kind: "edit",
+      task: legacy.id,
+      draft: {
+        ...draft,
+        title: "Morning checklist",
+        type: "routine",
+        assignment: { kind: "open" },
+        time: "08:00",
+        stars: 1,
+      },
+    };
+    expect((await tasks(metadataEdit)).status).toBe(200);
+    expect(loadDefinitions().find((row) => row.id === legacy.id)).toMatchObject(
+      {
+        title: "Morning checklist",
+        type: "routine",
+        assignment: { kind: "open" },
+        recurrence: { kind: "daily" },
+        time: "08:00",
+        stars: 1,
+      },
+    );
+    expect(
+      (
+        await tasks({
+          ...metadataEdit,
+          draft: {
+            ...metadataEdit.draft,
+            recurrence: { kind: "weekly", days: ["mon"] },
+          },
+        })
+      ).status,
+    ).toBe(409);
+  });
+
+  test("an accepted conversion replays after its assigned member retires", async () => {
+    const serverToday = (await snapshot()).today;
+    const draft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Porch",
+      stars: 2,
+      recurrence: { kind: "once" },
+    });
+    expect(draft?.kind).toBe("bounty");
+    if (!draft || draft.kind !== "bounty") return;
+    const source = createBounty(tasksDatabase(), draft, serverToday);
+    const command = {
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: {
+        kind: "bounty",
+        definition: source.id,
+        revision: source.revision,
+      },
+      replacement: {
+        kind: "assigned",
+        title: "Porch",
+        type: "chore",
+        recurrence: { kind: "daily" },
+        assignment: { kind: "fixed", member: "a" },
+        time: null,
+        stars: 2,
+      },
+    };
+    expect((await tasks(command)).status).toBe(200);
+    const household = await readHousehold();
+    await writeHousehold({
+      ...household,
+      members: household.members.map((member) =>
+        member.id === "a"
+          ? { id: member.id, name: member.name, status: "retired" as const }
+          : member,
+      ),
+      configVersion: household.configVersion + 1,
+    });
+    const replay = await tasks(command);
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).receipt.status).toBe("already-applied");
+  });
+
+  test("schedule replacement waits for the next matching interval and preserves old claims", async () => {
+    const members = (await readHousehold()).members;
+    const sourceDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Bins",
+      stars: 3,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-01",
+        cadence: { kind: "weekly", days: ["mon"] },
+      },
+    });
+    expect(sourceDraft?.kind).toBe("bounty");
+    if (!sourceDraft || sourceDraft.kind !== "bounty") return;
+    const source = createBounty(tasksDatabase(), sourceDraft, today);
+    const offered = loadAvailableBounties(tasksDatabase(), today)[0];
+    const claim = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: offered?.offering,
+      member: "a",
+      definitionRevision: offered?.definitionRevision,
+    });
+    expect(claim?.kind).toBe("claim-bounty");
+    if (!claim || claim.kind !== "claim-bounty") return;
+    const claimReceipt = claimBounty({
+      db: tasksDatabase(),
+      command: claim,
+      today,
+      members,
+    });
+    if (!("result" in claimReceipt) || claimReceipt.result.kind !== "claimed")
+      return;
+
+    const replacementCommand = parseTaskAdminCommand({
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: {
+        kind: "bounty",
+        definition: source.id,
+        revision: source.revision,
+      },
+      replacement: {
+        kind: "bounty",
+        title: "Bins",
+        stars: 3,
+        recurrence: {
+          kind: "recurring",
+          startsOn: "2026-09-01",
+          cadence: { kind: "weekly", days: ["mon", "fri"] },
+        },
+      },
+    });
+    expect(replacementCommand?.kind).toBe("replace-definition");
+    if (!replacementCommand || replacementCommand.kind !== "replace-definition")
+      return;
+    const replacement = replaceDefinition({
+      db: tasksDatabase(),
+      command: replacementCommand,
+      today,
+      members,
+    });
+    expect(replacement.replacement.id).not.toBe(source.id);
+    expect(replacement.replacement.lineage).toBe(source.lineage);
+    expect(loadAvailableBounties(tasksDatabase(), today)).toHaveLength(0);
+    const beforeFriday = parseLocalDate("2026-09-10");
+    const friday = parseLocalDate("2026-09-11");
+    expect(beforeFriday).not.toBeNull();
+    expect(friday).not.toBeNull();
+    if (!beforeFriday || !friday) return;
+    expect(loadAvailableBounties(tasksDatabase(), beforeFriday)).toHaveLength(
+      0,
+    );
+    expect(loadAvailableBounties(tasksDatabase(), friday)).toContainEqual(
+      expect.objectContaining({
+        offering: expect.objectContaining({
+          definition: replacement.replacement.id,
+          intervalStart: friday,
+        }),
+      }),
+    );
+
+    const release = parseBountyCommand({
+      kind: "release-bounty",
+      requestId: crypto.randomUUID(),
+      claim: claimReceipt.result.claim.id,
+      revision: claimReceipt.result.revision,
+    });
+    expect(release?.kind).toBe("release-bounty");
+    if (!release || release.kind !== "release-bounty") return;
+    releaseBounty({ db: tasksDatabase(), command: release });
+    expect(
+      loadAvailableBounties(tasksDatabase(), today).some(
+        (item) => item.offering.definition === source.id,
+      ),
+    ).toBe(false);
+  });
+
+  test("semantically unchanged recurrence edits keep definition and offering identity", () => {
+    const sourceDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Plants",
+      stars: 2,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-01",
+        cadence: { kind: "weekly", days: ["mon", "fri"] },
+      },
+    });
+    expect(sourceDraft?.kind).toBe("bounty");
+    if (!sourceDraft || sourceDraft.kind !== "bounty") return;
+    const source = createBounty(tasksDatabase(), sourceDraft, today);
+    const offering = loadAvailableBounties(tasksDatabase(), today)[0];
+    const command = parseTaskAdminCommand({
+      kind: "replace-definition",
+      requestId: crypto.randomUUID(),
+      source: {
+        kind: "bounty",
+        definition: source.id,
+        revision: source.revision,
+      },
+      replacement: {
+        kind: "bounty",
+        title: "Healthy plants",
+        stars: 5,
+        recurrence: {
+          kind: "recurring",
+          startsOn: "2026-09-01",
+          cadence: { kind: "weekly", days: ["fri", "mon"] },
+        },
+      },
+    });
+    expect(command?.kind).toBe("replace-definition");
+    if (!command || command.kind !== "replace-definition") return;
+    expect(
+      replaceDefinition({ db: tasksDatabase(), command, today, members: [] }),
+    ).toMatchObject({
+      status: "accepted",
+      replacement: { id: source.id },
+    });
+    expect(loadBountyDefinitions(tasksDatabase())).toHaveLength(1);
+    expect(loadBountyDefinitions(tasksDatabase())[0]).toMatchObject({
+      id: source.id,
+      title: "Healthy plants",
+      stars: 5,
+      revision: 1,
+      retiredAt: null,
+    });
+    expect(loadAvailableBounties(tasksDatabase(), today)[0]).toMatchObject({
+      id: offering?.id,
+      offering: { definition: source.id },
     });
   });
   test("retiring a Bounty preserves claims while stopping every reopened offering", async () => {
@@ -619,6 +1077,441 @@ describe("parent administration", () => {
       (await tasks({ ...restored, id: crypto.randomUUID(), previous: null }))
         .status,
     ).toBe(409);
+  });
+  test("undo reopens the original Bounty Claim and reverses its recorded credit", async () => {
+    const original = await completedBounty({ stars: 4 });
+    const before = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === original.claim.id,
+    );
+    expect(before?.state.kind).toBe("completed");
+
+    const requestId = crypto.randomUUID();
+    const undo = {
+      kind: "undo-bounty-completion",
+      requestId,
+      claim: original.claim.id,
+      revision: before?.revision,
+      completion: original.completion.id,
+      predecessor: null,
+      reason: "Tapped accidentally",
+    };
+    const response = await tasks(undo);
+    expect(response.status).toBe(200);
+    expect((await response.json()).receipt).toMatchObject({
+      status: "accepted",
+      result: { kind: "undone", claim: { revision: 2 } },
+    });
+    expect(balance("a")).toBe(0);
+    expect(loadBountyClaims(tasksDatabase())).toContainEqual(
+      expect.objectContaining({
+        claim: original.claim,
+        revision: 2,
+        state: expect.objectContaining({
+          kind: "reopened",
+          undoneCompletion: expect.objectContaining({
+            id: original.completion.id,
+          }),
+        }),
+      }),
+    );
+
+    closeTasksDatabase();
+    const replay = await tasks(undo);
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).receipt.status).toBe("already-applied");
+    expect(balance("a")).toBe(0);
+  });
+  test("Bounty Undo rejects atomically when the credited balance was spent", async () => {
+    const original = await completedBounty({ stars: 4 });
+    const completed = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === original.claim.id,
+    );
+    expect(
+      (
+        await tasks({
+          kind: "adjust-stars",
+          id: crypto.randomUUID(),
+          member: "a",
+          delta: -4,
+          reason: "Already spent",
+        })
+      ).status,
+    ).toBe(200);
+    const response = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: completed?.revision,
+      completion: original.completion.id,
+      predecessor: null,
+      reason: "Wrong completion",
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "This correction would make the credited member's Star Balance negative. Adjust the balance first.",
+    });
+    const after = await snapshot();
+    expect(
+      after.bountyClaims.find((row) => row.claim.id === original.claim.id),
+    ).toMatchObject({ revision: 1, state: { kind: "completed" } });
+    expect(after.bountyCompletionCorrections).toEqual([]);
+    expect(balance("a")).toBe(0);
+  });
+  test("Restore reinstates the original Bounty Completion identity, time, and credit", async () => {
+    const original = await completedBounty({ stars: 4 });
+    const completed = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === original.claim.id,
+    );
+    const undo = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: completed?.revision,
+      completion: original.completion.id,
+      predecessor: null,
+      reason: "Check again",
+    });
+    const undone = (await undo.json()).receipt;
+    const restore = {
+      kind: "restore-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: undone.result.claim.revision,
+      completion: original.completion.id,
+      predecessor: undone.result.correction.id,
+      reason: "Completion was correct",
+    };
+    const restored = await tasks(restore);
+    expect(restored.status).toBe(200);
+    expect((await restored.json()).receipt).toMatchObject({
+      status: "accepted",
+      result: { kind: "restored", claim: { revision: 3, state: "completed" } },
+    });
+    const after = (await snapshot()).bountyClaims.find(
+      (row) => row.claim.id === original.claim.id,
+    );
+    expect(after).toMatchObject({
+      revision: 3,
+      state: {
+        kind: "completed",
+        completion: {
+          id: original.completion.id,
+          at: original.completion.at,
+          creditedStars: 4,
+        },
+        creditedTo: "a",
+      },
+    });
+    expect(balance("a")).toBe(4);
+    expect((await snapshot()).bountyCompletionCorrections).toHaveLength(2);
+    expect((await tasks(restore)).status).toBe(200);
+    expect(balance("a")).toBe(4);
+  });
+  test("Bounty reassignment and later Undo transfer the recorded credit", async () => {
+    const original = await completedBounty({ stars: 4 });
+    await tasks({
+      kind: "edit-bounty",
+      requestId: crypto.randomUUID(),
+      definition: original.definition.id,
+      revision: 0,
+      draft: { title: "Wash and wax car", stars: 20 },
+    });
+    const completed = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === original.claim.id,
+    );
+    const reassigned = await tasks({
+      kind: "reassign-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: completed?.revision,
+      completion: original.completion.id,
+      predecessor: null,
+      member: "b",
+      reason: "Bailey did the work",
+    });
+    expect(reassigned.status).toBe(200);
+    const reassignment = (await reassigned.json()).receipt;
+    expect(balance("a")).toBe(0);
+    expect(balance("b")).toBe(4);
+    expect((await snapshot()).bountyClaims[0]).toMatchObject({
+      revision: 2,
+      state: { kind: "completed", creditedTo: "b" },
+    });
+
+    expect(
+      (
+        await tasks({
+          kind: "undo-bounty-completion",
+          requestId: crypto.randomUUID(),
+          claim: original.claim.id,
+          revision: reassignment.result.claim.revision,
+          completion: original.completion.id,
+          predecessor: reassignment.result.correction.id,
+          reason: "Completion was mistaken",
+        })
+      ).status,
+    ).toBe(200);
+    expect(balance("a")).toBe(0);
+    expect(balance("b")).toBe(0);
+    expect((await snapshot()).bountyCompletionCorrections).toMatchObject([
+      { kind: "reassign", fromMember: "a", toMember: "b", creditedStars: 4 },
+      { kind: "undo", fromMember: "b", toMember: null, creditedStars: 4 },
+    ]);
+  });
+  test("recompletion creates new history and invalidates delayed completion and Restore", async () => {
+    const original = await completedBounty({ stars: 4 });
+    const before = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === original.claim.id,
+    );
+    const delayed = parseBountyCommand({
+      kind: "complete-bounty",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: before?.revision,
+    });
+    expect(delayed?.kind).toBe("complete-bounty");
+    const undoneResponse = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: before?.revision,
+      completion: original.completion.id,
+      predecessor: null,
+      reason: "Try the work again",
+    });
+    const undone = (await undoneResponse.json()).receipt;
+    expect(() => {
+      if (!delayed || delayed.kind !== "complete-bounty") return;
+      completeBounty({ db: tasksDatabase(), command: delayed });
+    }).toThrow("changed");
+
+    const recomplete = parseBountyCommand({
+      kind: "complete-bounty",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: undone.result.claim.revision,
+    });
+    if (!recomplete || recomplete.kind !== "complete-bounty")
+      throw new Error("Invalid recompletion fixture");
+    const recompleted = completeBounty({
+      db: tasksDatabase(),
+      command: recomplete,
+    });
+    if (!("result" in recompleted) || recompleted.result.kind !== "completed")
+      throw new Error("Bounty did not recomplete");
+    expect(recompleted.result.completion.id).not.toBe(original.completion.id);
+    expect(Date.parse(recompleted.result.completion.at)).not.toBeNaN();
+    expect(balance("a")).toBe(4);
+    expect((await snapshot()).bountyCompletions).toHaveLength(2);
+
+    const staleRestore = await tasks({
+      kind: "restore-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: undone.result.claim.revision,
+      completion: original.completion.id,
+      predecessor: undone.result.correction.id,
+      reason: "Too late",
+    });
+    expect(staleRestore.status).toBe(409);
+    expect(balance("a")).toBe(4);
+  });
+  test("release of reopened work invalidates Restore and permits a new Claim", async () => {
+    const original = await completedBounty({ stars: 0 });
+    const before = loadBountyClaims(tasksDatabase())[0];
+    const undoneResponse = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: before?.revision,
+      completion: original.completion.id,
+      predecessor: null,
+      reason: "Not done",
+    });
+    const undone = (await undoneResponse.json()).receipt;
+    const release = parseBountyCommand({
+      kind: "release-bounty",
+      requestId: crypto.randomUUID(),
+      claim: original.claim.id,
+      revision: undone.result.claim.revision,
+    });
+    if (!release || release.kind !== "release-bounty")
+      throw new Error("Invalid release fixture");
+    expect(
+      releaseBounty({ db: tasksDatabase(), command: release }),
+    ).toMatchObject({ status: "accepted", result: { kind: "released" } });
+    expect(
+      (
+        await tasks({
+          kind: "restore-bounty-completion",
+          requestId: crypto.randomUUID(),
+          claim: original.claim.id,
+          revision: undone.result.claim.revision,
+          completion: original.completion.id,
+          predecessor: undone.result.correction.id,
+          reason: "Too late",
+        })
+      ).status,
+    ).toBe(409);
+    const offering = loadAvailableBounties(tasksDatabase(), today).find(
+      (row) => row.offering.definition === original.definition.id,
+    );
+    expect(offering).toBeDefined();
+    if (!offering) return;
+    const claim = parseBountyCommand({
+      kind: "claim-bounty",
+      requestId: crypto.randomUUID(),
+      offering: offering.offering,
+      member: "b",
+      definitionRevision: offering.definitionRevision,
+    });
+    if (!claim || claim.kind !== "claim-bounty")
+      throw new Error("Invalid reclaimed fixture");
+    const reclaimed = claimBounty({
+      db: tasksDatabase(),
+      command: claim,
+      today,
+      members: (await readHousehold()).members,
+    });
+    expect(reclaimed).toMatchObject({
+      status: "accepted",
+      result: { kind: "claimed", claim: { member: "b" } },
+    });
+    if ("result" in reclaimed && reclaimed.result.kind === "claimed")
+      expect(reclaimed.result.claim.id).not.toBe(original.claim.id);
+  });
+  test("Undo releases a retired claimant but keeps active claimants on retired definitions", async () => {
+    const retiredClaimant = await completedBounty({ member: "a" });
+    const first = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === retiredClaimant.claim.id,
+    );
+    const household = await readHousehold();
+    await writeHousehold({
+      ...household,
+      members: household.members.map((member) =>
+        member.id === "a"
+          ? { id: member.id, name: member.name, status: "retired" as const }
+          : member,
+      ),
+      configVersion: household.configVersion + 1,
+    });
+    const retiredUndo = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: retiredClaimant.claim.id,
+      revision: first?.revision,
+      completion: retiredClaimant.completion.id,
+      predecessor: null,
+      reason: "Alex has retired",
+    });
+    expect(retiredUndo.status).toBe(200);
+    expect((await retiredUndo.json()).receipt.result.claim).toMatchObject({
+      revision: 3,
+      state: "released",
+    });
+    expect(loadAvailableBounties(tasksDatabase(), today)).toContainEqual(
+      expect.objectContaining({
+        offering: expect.objectContaining({
+          definition: retiredClaimant.definition.id,
+        }),
+      }),
+    );
+
+    const activeClaimant = await completedBounty({ member: "b" });
+    expect(
+      (
+        await tasks({
+          kind: "retire-bounty",
+          requestId: crypto.randomUUID(),
+          definition: activeClaimant.definition.id,
+          revision: 0,
+        })
+      ).status,
+    ).toBe(200);
+    const second = loadBountyClaims(tasksDatabase()).find(
+      (row) => row.claim.id === activeClaimant.claim.id,
+    );
+    const activeUndo = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: crypto.randomUUID(),
+      claim: activeClaimant.claim.id,
+      revision: second?.revision,
+      completion: activeClaimant.completion.id,
+      predecessor: null,
+      reason: "Bailey should redo it",
+    });
+    expect(activeUndo.status).toBe(200);
+    expect((await activeUndo.json()).receipt.result.claim.state).toBe(
+      "reopened",
+    );
+    expect(
+      loadAvailableBounties(tasksDatabase(), today).some(
+        (offering) =>
+          offering.offering.definition === activeClaimant.definition.id,
+      ),
+    ).toBe(false);
+  });
+  test("retired claimant release reopens only the current recurring interval", async () => {
+    const recurring = await completedBounty({
+      recurrence: {
+        kind: "recurring",
+        startsOn: today,
+        cadence: { kind: "daily" },
+      },
+    });
+    const completed = loadBountyClaims(tasksDatabase())[0];
+    const household = await readHousehold();
+    await writeHousehold({
+      ...household,
+      members: household.members.map((member) =>
+        member.id === "a"
+          ? { id: member.id, name: member.name, status: "retired" as const }
+          : member,
+      ),
+      configVersion: household.configVersion + 1,
+    });
+    expect(
+      (
+        await tasks({
+          kind: "undo-bounty-completion",
+          requestId: crypto.randomUUID(),
+          claim: recurring.claim.id,
+          revision: completed?.revision,
+          completion: recurring.completion.id,
+          predecessor: null,
+          reason: "Claimant retired",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      loadAvailableBounties(tasksDatabase(), today).find(
+        (offering) => offering.offering.definition === recurring.definition.id,
+      )?.offering,
+    ).toEqual({
+      kind: "recurring",
+      definition: recurring.definition.id,
+      intervalStart: today,
+    });
+
+    const tomorrow = parseLocalDate("2026-09-09");
+    if (!tomorrow) throw new Error("Invalid tomorrow fixture");
+    const tomorrowOffering = loadAvailableBounties(
+      tasksDatabase(),
+      tomorrow,
+    ).find(
+      (offering) => offering.offering.definition === recurring.definition.id,
+    );
+    expect(tomorrowOffering?.offering).toEqual({
+      kind: "recurring",
+      definition: recurring.definition.id,
+      intervalStart: tomorrow,
+    });
+    expect(tomorrowOffering?.id).not.toBe(
+      loadAvailableBounties(tasksDatabase(), today).find(
+        (offering) => offering.offering.definition === recurring.definition.id,
+      )?.id,
+    );
   });
   test("correction uses stars captured at completion time after definition edits", async () => {
     const definition = await create();

@@ -999,6 +999,87 @@ describe("TasksScreen", () => {
     ).not.toBeInTheDocument();
   });
 
+  test("reopened Bounty work appears with normal Complete and Release actions", async () => {
+    const user = userEvent.setup();
+    const initial = emptyView();
+    const reopened = {
+      kind: "claimed-bounty",
+      claim: {
+        id: "claim-reopened",
+        offering: { kind: "once", definition: "bounty-reopened" },
+        member: "dad",
+        scheduledOn: initial.today,
+        title: "Wash car again",
+        stars: 4,
+      },
+      revision: 2,
+      state: {
+        kind: "reopened",
+        undoneCompletion: {
+          id: "completion-undone",
+          claim: "claim-reopened",
+          by: "dad",
+          at: initial.generatedAt,
+          creditedStars: 4,
+          creditProvenance: "recorded",
+        },
+        correction: "correction-undo",
+      },
+    } as ClaimedBounty;
+    initial.bountyClaims = [reopened];
+    initial.progress = initial.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 1 } : row,
+    );
+    const completed: TasksViewRead = {
+      ...initial,
+      bountyClaims: [
+        {
+          ...reopened,
+          revision: 3,
+          state: {
+            kind: "completed",
+            completion: {
+              id: "completion-new",
+              claim: reopened.claim.id,
+              by: "dad",
+              at: initial.generatedAt,
+              creditedStars: 4,
+              creditProvenance: "recorded",
+            },
+            creditedTo: "dad",
+            correction: null,
+          },
+        } as ClaimedBounty,
+      ],
+      progress: initial.progress.map((row) =>
+        row.member === "dad" ? { ...row, done: 1 } : row,
+      ),
+    };
+    const fetchMock = installScriptedBountyFetch(
+      [initial, completed],
+      [{ method: "PATCH", response: { receipt: { status: "accepted" } } }],
+    );
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Release Wash car again" }),
+    ).toBeEnabled();
+    await user.click(screen.getByRole("checkbox", { name: "Wash car again" }));
+    const mutation = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input).endsWith("/api/tasks") && init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(mutation?.[1]?.body))).toMatchObject({
+      kind: "complete-bounty",
+      claim: "claim-reopened",
+      revision: 2,
+    });
+    expect(await screen.findByText("1 completed or skipped")).toBeVisible();
+  });
+
   test("Stars requests a numeric keyboard and replaces its value when tapped", async () => {
     const user = userEvent.setup();
     installFetch(emptyView());

@@ -22,6 +22,7 @@ import {
 } from "./bounty-store";
 import {
   applyEvent,
+  InvalidTaskDefinitionError,
   insertDefinition,
   loadStore,
   loadStoredStarBalances,
@@ -31,6 +32,7 @@ import {
 import {
   type AssignmentPolicy,
   createDefinition,
+  isUnfinishedBountyClaim,
   parseBountyCommand,
   parseEventBatch,
   parseLocalDate,
@@ -81,7 +83,7 @@ export async function handleGetTasks(
   const availableBounties = loadAvailableBounties(db, today);
   const bountyClaims = loadBountyClaims(db).filter(
     (row) =>
-      row.state.kind === "unfinished" ||
+      isUnfinishedBountyClaim(row) ||
       (row.state.kind === "completed" &&
         msToZonedDate(
           Date.parse(row.state.completion.at),
@@ -182,6 +184,9 @@ export async function handleSaveTask(request: Request): Promise<Response> {
   } catch (error) {
     if (error instanceof Error && error.message === "task not found") {
       return jsonError("task not found", 404);
+    }
+    if (error instanceof InvalidTaskDefinitionError) {
+      return jsonError(error.message, 400);
     }
     throw error;
   }
