@@ -25,6 +25,7 @@ import {
   parseBountyCorrectionId,
   parseCompletionId,
   parseInstant,
+  parseLocalDate,
   parseStarAmount,
 } from "./types";
 
@@ -170,6 +171,22 @@ function carrierFromRow(
     revision: row.revision,
   });
   if (!identity) throw new Error("corrupt legacy Bounty carrier identity");
+  const intervalStart =
+    row.interval_start === null ? null : parseLocalDate(row.interval_start);
+  if (
+    row.offering_kind !== "legacy" ||
+    row.offering_definition !== identity.definition ||
+    row.offering_source_window !== identity.sourceWindow ||
+    (row.interval_start !== null && !intervalStart)
+  ) {
+    throw new Error("corrupt legacy Bounty carrier offering");
+  }
+  const offering = {
+    kind: "legacy" as const,
+    definition: identity.definition,
+    sourceWindow: identity.sourceWindow,
+    intervalStart,
+  };
   const history = loadHistory(db, identity.id);
   if (row.state === "completed") {
     const effectiveCompletion = loadCompletion(
@@ -197,6 +214,7 @@ function carrierFromRow(
     return {
       kind: "legacy-bounty-completion-carrier",
       ...identity,
+      offering,
       history,
       state: {
         kind: "completed",
@@ -219,6 +237,7 @@ function carrierFromRow(
     return {
       kind: "legacy-bounty-completion-carrier",
       ...identity,
+      offering,
       history,
       state: {
         kind: "released",
@@ -235,9 +254,12 @@ export function loadLegacyBountyCompletionCarriers(
 ): LegacyBountyCompletionCarrier[] {
   return db
     .prepare(
-      `SELECT c.*, d.title
+      `SELECT c.*, d.title, o.kind AS offering_kind,
+              o.definition_id AS offering_definition,
+              o.interval_start, o.source_window AS offering_source_window
        FROM legacy_bounty_completion_carriers c
        JOIN bounty_definitions d ON d.id = c.definition_id
+       JOIN bounty_offerings o ON o.id = c.offering_id
        ORDER BY c.source_window DESC, c.rowid DESC`,
     )
     .all()

@@ -118,6 +118,12 @@ function earlierBountyCarrier(): LegacyBountyCompletionCarrier {
     sourceTask: required(parseTaskId("legacy-dishes")),
     sourceWindow: required(parseLocalDate("2026-09-03")),
     definition: required(parseTaskId("legacy-dishes")),
+    offering: {
+      kind: "legacy",
+      definition: required(parseTaskId("legacy-dishes")),
+      sourceWindow: required(parseLocalDate("2026-09-03")),
+      intervalStart: null,
+    },
     title: required(parseTaskTitle("Wash old dishes")),
     revision: required(parseLegacyBountyCarrierRevision(1)),
     history: [

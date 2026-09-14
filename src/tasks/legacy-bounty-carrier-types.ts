@@ -6,6 +6,7 @@ import {
   type CompletionId,
   type Instant,
   isRecord,
+  type LegacyOfferingKey,
   type LocalDate,
   parseBountyCommandId,
   parseBountyCorrectionId,
@@ -83,6 +84,7 @@ type LegacyBountyCompletionCarrierFields = Readonly<{
   sourceTask: TaskId;
   sourceWindow: LocalDate;
   definition: TaskId;
+  offering: LegacyOfferingKey;
   /** Current display title of the mapped Bounty Definition. */
   title: TaskTitle;
   revision: LegacyBountyCarrierRevision;
@@ -218,7 +220,10 @@ export function parseLegacyBountyCarrierIdentity(raw: {
   definition: unknown;
   title: unknown;
   revision: unknown;
-}): Omit<LegacyBountyCompletionCarrierFields, "kind" | "history"> | null {
+}): Omit<
+  LegacyBountyCompletionCarrierFields,
+  "kind" | "history" | "offering"
+> | null {
   const id = parseLegacyBountyCarrierId(raw.id);
   const sourceTask = parseTaskId(raw.sourceTask);
   const sourceWindow = parseLocalDate(raw.sourceWindow);

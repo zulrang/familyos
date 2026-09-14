@@ -82,6 +82,12 @@ test("loads restored legacy history and the mapped Bounty's current title", () =
     sourceTask: "legacy-restored-without-claim",
     sourceWindow: "2026-09-03",
     definition: "legacy-restored-without-claim",
+    offering: {
+      kind: "legacy",
+      definition: "legacy-restored-without-claim",
+      sourceWindow: "2026-09-03",
+      intervalStart: null,
+    },
     title: "Organize loft",
     revision: 2,
     state: {

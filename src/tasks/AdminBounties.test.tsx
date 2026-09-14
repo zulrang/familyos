@@ -26,6 +26,62 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("a completed legacy carrier marks its current Bounty completed", async () => {
+  const definition = {
+    kind: "bounty",
+    id: "a".repeat(32),
+    lineage: "1".repeat(32),
+    type: "chore",
+    title: "Earlier delivery",
+    stars: 4,
+    recurrence: { kind: "once" },
+    offerFrom: null,
+    revision: 0,
+    retiredAt: null,
+  };
+  vi.stubGlobal("fetch", async (url: string) =>
+    url.endsWith("/members")
+      ? Response.json({ members: [], version: 1 })
+      : Response.json({
+          definitions: [],
+          bountyDefinitions: [definition],
+          bountyClaims: [],
+          legacyBountyCompletionCarriers: [
+            {
+              kind: "legacy-bounty-completion-carrier",
+              id: "legacy-carrier",
+              definition: definition.id,
+              sourceTask: definition.id,
+              sourceWindow: "2026-09-10",
+              offering: {
+                kind: "legacy",
+                definition: definition.id,
+                sourceWindow: "2026-09-10",
+                intervalStart: null,
+              },
+              title: definition.title,
+              revision: 0,
+              history: [],
+              state: { kind: "completed" },
+            },
+          ],
+          events: [],
+          originalEvents: [],
+          corrections: [],
+          adjustments: [],
+          balances: [],
+          today: "2026-09-13",
+        }),
+  );
+
+  render(<AdminBounties />);
+  const card = (
+    await screen.findByRole("heading", { name: "Earlier delivery" })
+  ).closest("article");
+  expect(card).not.toBeNull();
+  if (card) expect(within(card).getByText("Completed")).toBeVisible();
+});
+
 test("parents can manage available, completed, and retired Bounty definitions", async () => {
   const user = userEvent.setup();
   const initialDefinitions = [
@@ -161,6 +217,7 @@ test("parents can manage available, completed, and retired Bounty definitions", 
       definitions: [],
       bountyDefinitions,
       bountyClaims: claims,
+      legacyBountyCompletionCarriers: [],
       events: [],
       originalEvents: [],
       corrections: [],
@@ -285,6 +342,7 @@ test("one retirement command owns duplicate taps and blocks refresh until it set
       definitions: [],
       bountyDefinitions,
       bountyClaims: [],
+      legacyBountyCompletionCarriers: [],
       events: [],
       originalEvents: [],
       corrections: [],
@@ -381,6 +439,7 @@ test("recurring management status follows the current interval while retaining o
           state: { kind: "unfinished" },
         },
       ],
+      legacyBountyCompletionCarriers: [],
       events: [],
       originalEvents: [],
       corrections: [],
@@ -452,6 +511,7 @@ test("schedule and work-mode changes show only legal fields and submit one repla
       definitions: reads === 1 ? [] : [{ id: "b".repeat(32) }],
       bountyDefinitions: reads === 1 ? [definition] : [],
       bountyClaims: [],
+      legacyBountyCompletionCarriers: [],
       events: [],
       originalEvents: [],
       corrections: [],

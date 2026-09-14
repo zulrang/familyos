@@ -579,9 +579,14 @@ export function AdminBounties() {
             const claims = state.data.tasks.bountyClaims.filter(
               (row) => row.claim.offering.definition === bounty.id,
             );
+            const carriers =
+              state.data.tasks.legacyBountyCompletionCarriers.filter(
+                (row) => row.definition === bounty.id,
+              );
             const status = bountyManagementStatus({
               definition: bounty,
               claims,
+              carriers,
               today: state.data.tasks.today,
             });
             return (

@@ -2,6 +2,7 @@ import {
   belongsToOfferingInterval,
   currentOfferingKey,
 } from "./bounty-offerings";
+import type { LegacyBountyCompletionCarrier } from "./legacy-bounty-carrier-types";
 import type { BountyDefinition, ClaimedBounty, LocalDate } from "./types";
 
 export type BountyManagementStatus =
@@ -14,19 +15,35 @@ export type BountyManagementStatus =
 export function bountyManagementStatus(input: {
   definition: BountyDefinition;
   claims: readonly ClaimedBounty[];
+  carriers: readonly LegacyBountyCompletionCarrier[];
   today: LocalDate;
 }): BountyManagementStatus {
-  const { definition, claims, today } = input;
+  const { definition, claims, carriers, today } = input;
   if (definition.retiredAt !== null) return "Retired";
   const current = currentOfferingKey(definition, today);
   if (!current) return "Waiting";
-  const reservation = claims.find(
+  const reservations = claims.filter(
     (row) =>
       row.state.kind !== "released" &&
       belongsToOfferingInterval(row.claim.offering, current),
   );
-  if (reservation?.state.kind === "completed") return "Completed";
-  if (reservation) return "Claimed";
+  if (
+    reservations.some(
+      (row) => row.state.kind === "unfinished" || row.state.kind === "reopened",
+    )
+  ) {
+    return "Claimed";
+  }
+  if (
+    reservations.some((row) => row.state.kind === "completed") ||
+    carriers.some(
+      (carrier) =>
+        carrier.state.kind === "completed" &&
+        belongsToOfferingInterval(carrier.offering, current),
+    )
+  ) {
+    return "Completed";
+  }
   return "Available";
 }
 
