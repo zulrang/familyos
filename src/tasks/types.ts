@@ -92,6 +92,16 @@ export type OfferingKey =
       intervalStart: LocalDate;
     }>;
 
+/** An imported reservation keeps its source occurrence without becoming claimable. */
+export type LegacyOfferingKey = Readonly<{
+  kind: "legacy";
+  definition: TaskId;
+  sourceWindow: LocalDate;
+  intervalStart: LocalDate | null;
+}>;
+
+export type AcceptedOfferingKey = OfferingKey | LegacyOfferingKey;
+
 export type AvailableBounty = Readonly<{
   kind: "available";
   id: OfferingId;
@@ -103,7 +113,7 @@ export type AvailableBounty = Readonly<{
 
 export type BountyClaim = Readonly<{
   id: ClaimId;
-  offering: OfferingKey;
+  offering: AcceptedOfferingKey;
   member: MemberId;
   scheduledOn: LocalDate;
   title: TaskTitle;

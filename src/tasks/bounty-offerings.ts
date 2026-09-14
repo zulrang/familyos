@@ -1,5 +1,10 @@
 import { currentBountyInterval } from "./bounty-calendar";
-import type { BountyDefinition, LocalDate, OfferingKey } from "./types";
+import type {
+  AcceptedOfferingKey,
+  BountyDefinition,
+  LocalDate,
+  OfferingKey,
+} from "./types";
 
 export function currentOfferingKey(
   definition: BountyDefinition,
@@ -27,9 +32,31 @@ export function currentOfferingKey(
 }
 
 export function sameOfferingKey(
-  left: OfferingKey,
-  right: OfferingKey,
+  left: AcceptedOfferingKey,
+  right: AcceptedOfferingKey,
 ): boolean {
+  if (left.kind === "legacy" && right.kind === "legacy") {
+    return (
+      left.definition === right.definition &&
+      left.sourceWindow === right.sourceWindow
+    );
+  }
+  if (left.kind === "legacy") {
+    return (
+      left.definition === right.definition &&
+      ((right.kind === "once" && left.intervalStart === null) ||
+        (right.kind === "recurring" &&
+          left.intervalStart === right.intervalStart))
+    );
+  }
+  if (right.kind === "legacy") {
+    return (
+      left.definition === right.definition &&
+      ((left.kind === "once" && right.intervalStart === null) ||
+        (left.kind === "recurring" &&
+          right.intervalStart === left.intervalStart))
+    );
+  }
   return (
     left.kind === right.kind &&
     left.definition === right.definition &&

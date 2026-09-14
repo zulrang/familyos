@@ -1497,7 +1497,7 @@ describe("Tasks HTTP", () => {
     assert.equal(
       tasksDatabase()
         .prepare(
-          "SELECT COUNT(*) AS count FROM bounty_completions WHERE claim_id = ?",
+          "SELECT COUNT(*) AS count FROM bounty_completions WHERE subject_id = ?",
         )
         .get(claimId)?.count,
       1,
@@ -1849,7 +1849,7 @@ describe("Tasks HTTP", () => {
     assert.equal(
       tasksDatabase()
         .prepare(
-          "SELECT COUNT(*) AS count FROM bounty_completions WHERE claim_id = ?",
+          "SELECT COUNT(*) AS count FROM bounty_completions WHERE subject_id = ?",
         )
         .get(claim.claim.id)?.count,
       2,

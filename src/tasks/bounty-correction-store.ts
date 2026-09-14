@@ -55,7 +55,7 @@ function correctionFromRow(
   row: Record<string, unknown>,
 ): BountyCompletionCorrection {
   const id = parseBountyCorrectionId(row.id);
-  const claim = parseClaimId(row.claim_id);
+  const claim = parseClaimId(row.claim_id ?? row.subject_id);
   const completion = parseCompletionId(row.completion_id);
   const predecessor =
     row.predecessor_id === null
@@ -153,7 +153,11 @@ export function loadBountyCompletionCorrections(
   db: DatabaseSync,
 ): BountyCompletionCorrection[] {
   return db
-    .prepare("SELECT * FROM bounty_completion_corrections ORDER BY sequence")
+    .prepare(
+      `SELECT x.* FROM bounty_completion_corrections x
+       JOIN bounty_work_subjects s ON s.id = x.subject_id
+       WHERE s.kind = 'accepted-claim' ORDER BY x.sequence`,
+    )
     .all()
     .map((row) => {
       if (!isRecord(row)) throw new Error("corrupt Bounty correction row");
@@ -296,7 +300,7 @@ function insertCorrection(input: NewCorrection): BountyCompletionCorrection {
   input.db
     .prepare(
       `INSERT INTO bounty_completion_corrections
-        (id, kind, claim_id, completion_id, predecessor_id, from_member,
+        (id, kind, subject_id, completion_id, predecessor_id, from_member,
          to_member, credited_stars, credit_provenance, reason, corrected_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
@@ -361,7 +365,7 @@ function effectiveCredit(
   if (!completionId || !claimId)
     throw new Error("corrupt effective Bounty credit identity");
   const completion = db
-    .prepare("SELECT * FROM bounty_completions WHERE id = ? AND claim_id = ?")
+    .prepare("SELECT * FROM bounty_completions WHERE id = ? AND subject_id = ?")
     .get(completionId, claimId);
   if (!isRecord(completion)) throw new Error("corrupt effective completion");
   const stars = parseStarAmount(completion.credited_stars);

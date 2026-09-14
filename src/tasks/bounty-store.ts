@@ -10,8 +10,12 @@ import {
   sameBountyRecurrence,
 } from "./bounty-calendar";
 import { currentOfferingKey, sameOfferingKey } from "./bounty-offerings";
-import { migrateBountyLifecycleToV8 } from "./bounty-schema";
 import {
+  migrateBountyLifecycleToV8,
+  migrateBountyLifecycleToV9,
+} from "./bounty-schema";
+import {
+  type AcceptedOfferingKey,
   type AvailableBounty,
   type BountyClaim,
   type BountyCommand,
@@ -439,6 +443,7 @@ export function migrateBountyStore(db: DatabaseSync): void {
     .some((column) => column.name === "offer_from");
   if (!hasOfferFrom) migrateBountyDefinitionsToV7(db);
   migrateBountyLifecycleToV8(db);
+  migrateBountyLifecycleToV9(db);
 }
 
 function bountyDefinitionFromRow(
@@ -500,15 +505,19 @@ function claimFromRow(row: Record<string, unknown>): {
   const stars = parseStarAmount(row.stars);
   const revision = parseClaimRevision(row.revision);
   const intervalStart =
-    row.offering_kind === "recurring"
+    row.offering_kind === "recurring" || row.offering_kind === "legacy"
       ? parseLocalDate(row.interval_start)
       : null;
-  const offering: OfferingKey | null =
+  const sourceWindow =
+    row.offering_kind === "legacy" ? parseLocalDate(row.source_window) : null;
+  const offering: AcceptedOfferingKey | null =
     definition && row.offering_kind === "once" && row.interval_start === null
       ? { kind: "once", definition }
       : definition && row.offering_kind === "recurring" && intervalStart
         ? { kind: "recurring", definition, intervalStart }
-        : null;
+        : definition && row.offering_kind === "legacy" && sourceWindow
+          ? { kind: "legacy", definition, sourceWindow, intervalStart }
+          : null;
   if (
     !id ||
     !definition ||
@@ -537,7 +546,7 @@ function claimFromRow(row: Record<string, unknown>): {
 
 function completionFromRow(row: Record<string, unknown>): BountyCompletion {
   const id = parseCompletionId(row.id);
-  const claim = parseClaimId(row.claim_id);
+  const claim = parseClaimId(row.claim_id ?? row.subject_id);
   const at = parseInstant(row.completed_at);
   const creditedStars = parseStarAmount(row.credited_stars);
   const creditProvenance =
@@ -979,7 +988,7 @@ export function loadAvailableBounties(
 export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
   return db
     .prepare(
-      `SELECT c.*, o.kind AS offering_kind, o.interval_start,
+      `SELECT c.*, o.kind AS offering_kind, o.interval_start, o.source_window,
               x.id AS completion_id, x.member AS completion_member,
               x.completed_at, x.credited_stars, x.credit_provenance,
               u.id AS undone_completion_id,
@@ -1024,7 +1033,7 @@ export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
             kind: "reopened" as const,
             undoneCompletion: completionFromRow({
               id: row.undone_completion_id,
-              claim_id: row.id,
+              subject_id: row.id,
               member: row.undone_completion_member,
               completed_at: row.undone_completed_at,
               credited_stars: row.undone_credited_stars,
@@ -1038,7 +1047,7 @@ export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
         throw new Error("corrupt Bounty claim state");
       const completion = completionFromRow({
         id: row.completion_id,
-        claim_id: row.id,
+        subject_id: row.id,
         member: row.completion_member,
         completed_at: row.completed_at,
         credited_stars: row.credited_stars,
@@ -1076,7 +1085,11 @@ export function loadBountyClaims(db: DatabaseSync): ClaimedBounty[] {
 
 export function loadBountyCompletions(db: DatabaseSync): BountyCompletion[] {
   return db
-    .prepare("SELECT * FROM bounty_completions ORDER BY completed_at, rowid")
+    .prepare(
+      `SELECT x.* FROM bounty_completions x
+       JOIN bounty_work_subjects s ON s.id = x.subject_id
+       WHERE s.kind = 'accepted-claim' ORDER BY x.completed_at, x.rowid`,
+    )
     .all()
     .map((row) => {
       if (!isRecord(row)) throw new Error("corrupt Bounty completion row");
@@ -1200,9 +1213,13 @@ export function claimBounty(input: {
     if (!row) throw new BountyStoreError("This Bounty is no longer available.");
     const claimId = newClaimId();
     db.prepare(
+      "INSERT INTO bounty_work_subjects (id, kind) VALUES (?, 'accepted-claim')",
+    ).run(claimId);
+    db.prepare(
       `INSERT INTO bounty_claims
-        (id, offering_id, definition_id, member, scheduled_on, title, stars, revision, state, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'unfinished', ?)`,
+        (id, offering_id, definition_id, member, scheduled_on, title, stars,
+         revision, state, acceptance_provenance, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'unfinished', 'native', ?)`,
     ).run(
       claimId,
       row.offering_id,
@@ -1216,7 +1233,7 @@ export function claimBounty(input: {
     const claimed = claimFromRow(
       db
         .prepare(
-          `SELECT c.*, o.kind AS offering_kind, o.interval_start
+          `SELECT c.*, o.kind AS offering_kind, o.interval_start, o.source_window
            FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
            WHERE c.id = ?`,
         )
@@ -1274,8 +1291,9 @@ export function completeBounty(input: {
     const at = nowInstant();
     db.prepare(
       `INSERT INTO bounty_completions
-        (id, claim_id, request_id, member, completed_at, credited_stars, credit_provenance)
-       VALUES (?, ?, ?, ?, ?, ?, 'recorded')`,
+        (id, subject_id, request_id, origin, member, completed_at,
+         credited_stars, credit_provenance)
+       VALUES (?, ?, ?, 'native', ?, ?, ?, 'recorded')`,
     ).run(completionId, command.claim, command.requestId, member, at, stars);
     db.prepare(
       `UPDATE bounty_claims
@@ -1324,7 +1342,7 @@ function releaseClaimRow(
   const released = claimFromRow(
     db
       .prepare(
-        `SELECT c.*, o.kind AS offering_kind, o.interval_start
+        `SELECT c.*, o.kind AS offering_kind, o.interval_start, o.source_window
          FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
          WHERE c.id = ?`,
       )
@@ -1347,7 +1365,7 @@ export function releaseBounty(input: {
     }
     const row = db
       .prepare(
-        `SELECT c.*, o.kind AS offering_kind, o.interval_start
+        `SELECT c.*, o.kind AS offering_kind, o.interval_start, o.source_window
          FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
          WHERE c.id = ?`,
       )
@@ -1387,7 +1405,7 @@ export function releaseBountiesForRetiredMembers(
   if (retiredMembers.size === 0) return;
   const claims = db
     .prepare(
-      `SELECT c.*, o.kind AS offering_kind, o.interval_start
+      `SELECT c.*, o.kind AS offering_kind, o.interval_start, o.source_window
        FROM bounty_claims c JOIN bounty_offerings o ON o.id = c.offering_id
        WHERE c.state IN ('unfinished', 'reopened')`,
     )

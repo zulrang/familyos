@@ -69,7 +69,7 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("assigned Task and Bounty lifecycle tables exist at schema version 8", () => {
+  test("assigned Task and Bounty lifecycle tables exist at schema version 9", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -89,10 +89,14 @@ describe("tasks sqlite store", () => {
         "bounty_correction_receipts",
         "bounty_definitions",
         "bounty_offerings",
+        "bounty_work_subjects",
         "completion_corrections",
         "completion_credits",
         "definitions",
         "events",
+        "legacy_bounty_completion_carriers",
+        "legacy_bounty_migrations",
+        "legacy_bounty_sources",
         "star_adjustments",
         "star_balances",
       ],
@@ -100,7 +104,7 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 8);
+    assert.equal(version.user_version, 9);
     assert.equal(
       db
         .prepare("PRAGMA table_info(bounty_definitions)")

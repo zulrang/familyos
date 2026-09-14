@@ -85,14 +85,14 @@ test("version-two assigned Tasks survive the transactional Bounty expansion", ()
     expect(db.prepare("SELECT balance FROM star_balances").get()?.balance).toBe(
       9,
     );
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(9);
     expect(
       db
         .prepare(
           "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'bounty_%'",
         )
         .get()?.count,
-    ).toBe(8);
+    ).toBe(9);
   } finally {
     db.close();
   }
@@ -189,7 +189,7 @@ test("version-three claims and durable receipts survive the release expansion", 
     migrateBountyStore(db);
     migrateBountyStore(db);
 
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(9);
     expect(
       db
         .prepare("SELECT revision FROM bounty_definitions WHERE id='bounty'")
@@ -198,7 +198,33 @@ test("version-three claims and durable receipts survive the release expansion", 
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(
       db.prepare("PRAGMA foreign_key_list(bounty_completions)").get()?.table,
-    ).toBe("bounty_claims");
+    ).toBe("bounty_work_subjects");
+    expect(
+      db
+        .prepare("SELECT kind FROM bounty_work_subjects WHERE id='claim'")
+        .get(),
+    ).toEqual({ kind: "accepted-claim" });
+    expect(
+      db
+        .prepare(
+          "SELECT acceptance_provenance, created_at FROM bounty_claims WHERE id='claim'",
+        )
+        .get(),
+    ).toEqual({
+      acceptance_provenance: "native",
+      created_at: "2026-09-13T12:00:00Z",
+    });
+    expect(
+      db
+        .prepare(
+          "SELECT subject_id, origin, request_id FROM bounty_completions WHERE id='v3-completion'",
+        )
+        .get(),
+    ).toEqual({
+      subject_id: "completed-claim",
+      origin: "native",
+      request_id: "accepted-v3-completion",
+    });
     expect(
       db
         .prepare("PRAGMA table_info(bounty_offerings)")
@@ -439,7 +465,7 @@ test("version-six admin receipts replay after activation-bound migration", () =>
       status: "already-applied",
       definition: { id: bounty.id, title: "Polish car", offerFrom: null },
     });
-    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(8);
+    expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(9);
     db.exec("PRAGMA user_version = 9");
     migrateBountyStore(db);
     expect(db.prepare("PRAGMA user_version").get()?.user_version).toBe(9);
