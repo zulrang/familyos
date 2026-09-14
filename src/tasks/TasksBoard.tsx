@@ -18,6 +18,7 @@ import type {
   ClaimedBounty,
   ClaimId,
   Occurrence,
+  OfferingId,
   TasksViewRead,
 } from "./types";
 import { occurrencesForColumn } from "./view";
@@ -55,6 +56,7 @@ type TaskActions = {
   onClaimBounty: (row: AvailableBounty) => void;
   onAddBounty: () => void;
   mutatingBountyClaims: ReadonlySet<ClaimId>;
+  mutatingBountyOfferings: ReadonlySet<OfferingId>;
 };
 
 const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
@@ -544,6 +546,9 @@ export function TasksBoard({
                     label={row.title}
                     stars={row.stars}
                     status={{ kind: "open" }}
+                    mutationPending={actions.mutatingBountyOfferings.has(
+                      row.id,
+                    )}
                     onClaim={() => actions.onClaimBounty(row)}
                   />
                 ))
