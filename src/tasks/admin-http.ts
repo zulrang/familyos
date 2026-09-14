@@ -118,6 +118,7 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
         break;
       case "edit-bounty":
       case "retire-bounty":
+      case "create-bounty":
         return adminJson({
           receipt: administerBountyDefinition({
             db: tasksDatabase(),

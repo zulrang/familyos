@@ -34,8 +34,9 @@ lifecycle trade-off. This design revises open-task behavior in the existing
 - Claiming preserves the accepted description. Description edits affect
   available and future work, not existing claims. Currently the only work
   description field is the title; a separate instructions field is not implied.
-- Reuse the focus screen inside Tasks with an always-visible Bounties entry
-  and an Add Bounty action; do not add a main-rail navigation item.
+- Reuse the focus screen inside Tasks with an always-visible Bounties entry;
+  creation and editing are available only in the admin app. Do not add a
+  main-rail navigation item or a creation affordance to the shared display.
 - Show available offerings first, with a Manage Bounties entry for all
   definitions, including those with no currently available work.
 - Once Bounties are available immediately and have no date input. Bounties
@@ -237,7 +238,7 @@ existing shared-display interaction model.
 3. Add atomic persistence and an idempotent migration. Preserve legacy IDs,
    completion credits, corrections, and balances; recover data through the
    migration rules above instead of replaying reward-producing commands.
-4. Integrate the Tasks Bounties view, member claims, contextual creation,
+4. Integrate the Tasks Bounties view, member claims, admin-only creation,
    Manage Bounties, and Star values. Remove Bounty date/time/Skip inputs.
 5. Verify persistence across multiple days, overlapping claims, calendar edit
    boundaries, same-interval and expired releases, immutable snapshots,

@@ -26,8 +26,7 @@
 .boardHeading p {
   color: var(--neutral-600);
 }
-.bountiesEntry,
-.bountyHeader .rowAction {
+.bountiesEntry {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -41,7 +40,7 @@
   cursor: pointer;
 }
 .bountyFocus {
-  max-width: 920px;
+  max-width: 1250px;
   margin-inline: auto;
   overflow: hidden;
   border-radius: 24px;
@@ -54,13 +53,15 @@
   justify-content: space-between;
   gap: 18px;
   padding: 24px 26px;
-  background: #fff3c4;
+}
+.bountyHeader {
+  background: transparent;
 }
 .bountyHeader h2,
 .manageBounties h2 {
   font: var(--type-section);
 }
-.bountyHeader p,
+.bountyHeader p:not(.bountyEyebrow),
 .manageBounties p {
   margin-top: 5px;
   font: var(--type-card-meta);
@@ -68,6 +69,94 @@
 .manageBounties {
   border-top: 1px solid var(--surface-sunken);
   background: var(--surface-sunken);
+}
+.bountyHeader .bountyEyebrow {
+  margin: 0 0 8px;
+  color: #77601c;
+  font: var(--fw-bold) 13px / 1.3 var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.bountyContext {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 26px 16px;
+  color: var(--text-muted);
+  font: var(--type-card-meta);
+}
+.bountyList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 26px 24px;
+}
+.bountyRow {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  min-height: 112px;
+  overflow: hidden;
+  padding-right: 20px;
+  border-radius: 16px;
+  background: #f4f7f9;
+}
+.bountyReward {
+  align-self: stretch;
+  width: 175px;
+  flex-shrink: 0;
+  display: grid;
+  place-content: center;
+  padding: 16px;
+  background: #fff0ba;
+  color: #805719;
+  text-align: center;
+}
+.bountyReward > div {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.bountyReward strong {
+  min-width: 0;
+  font: 900 52px / 1.05 var(--font-sans);
+  letter-spacing: -0.04em;
+  overflow-wrap: anywhere;
+}
+.bountyReward > span {
+  margin-top: 7px;
+  font: var(--fw-bold) 13px / 1.2 var(--font-sans);
+}
+.bountyTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  font: var(--fw-bold) 23px / 1.25 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.bountyTitle svg {
+  color: #52626f;
+}
+.bountyClaim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 120px;
+  min-height: 48px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  color: var(--text-body);
+  font: var(--fw-bold) 16px / 1.3 var(--font-sans);
+  cursor: pointer;
+}
+.bountyClaim:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 .scroll {
   flex: 1;
@@ -486,5 +575,30 @@
   }
   .memberChoice {
     font-size: 16px;
+  }
+  .bountyContext span {
+    display: none;
+  }
+  .bountyList {
+    padding-inline: 16px;
+  }
+  .bountyRow {
+    gap: 12px;
+    padding-right: 10px;
+    flex-wrap: wrap;
+    padding-bottom: 12px;
+  }
+  .bountyReward {
+    width: 120px;
+  }
+  .bountyReward > div {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .bountyTitle {
+    padding: 10px;
+  }
+  .bountyClaim {
+    margin-left: auto;
   }
 }

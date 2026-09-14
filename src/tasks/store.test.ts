@@ -69,7 +69,7 @@ describe("tasks sqlite store", () => {
     };
   }
 
-  test("assigned Task and Bounty lifecycle tables exist at schema version 9", () => {
+  test("assigned Task and Bounty lifecycle tables exist at schema version 10", () => {
     const db = tasksDatabase();
     const tables = db
       .prepare(
@@ -105,7 +105,7 @@ describe("tasks sqlite store", () => {
     const version = db.prepare("PRAGMA user_version").get() as {
       user_version: number;
     };
-    assert.equal(version.user_version, 9);
+    assert.equal(version.user_version, 10);
     assert.equal(
       db
         .prepare("PRAGMA table_info(bounty_definitions)")

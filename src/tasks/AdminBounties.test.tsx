@@ -26,6 +26,132 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("parents create Once and recurring Bounties with validated zero-Star rewards", async () => {
+  const user = userEvent.setup();
+  const commands: Record<string, unknown>[] = [];
+  const taskData = {
+    definitions: [],
+    bountyDefinitions: [],
+    bountyClaims: [],
+    bountyCompletions: [],
+    bountyCompletionCorrections: [],
+    legacyBountyCompletionCarriers: [],
+    events: [],
+    originalEvents: [],
+    legacyBountyArchiveEvents: [],
+    corrections: [],
+    adjustments: [],
+    balances: [],
+    today: "2026-09-13",
+  };
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/members")) {
+      return Response.json({ members: [], version: 1 });
+    }
+    if (init?.method === "POST") {
+      commands.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return Response.json({ receipt: { status: "accepted" } });
+    }
+    return Response.json(taskData);
+  });
+
+  render(<AdminBounties />);
+  await user.click(await screen.findByRole("button", { name: "Add Bounty" }));
+  const once = document.body;
+  await user.type(within(once).getByLabelText("Title"), "Wipe table");
+  expect(within(once).getByLabelText("Stars per completion")).toHaveValue(0);
+  await user.click(within(once).getByRole("button", { name: "Create Bounty" }));
+  await waitFor(() => expect(commands).toHaveLength(1));
+  expect(commands[0]).toMatchObject({
+    kind: "create-bounty",
+    draft: {
+      kind: "bounty",
+      type: "chore",
+      title: "Wipe table",
+      stars: 0,
+      recurrence: { kind: "once" },
+    },
+  });
+
+  await user.click(await screen.findByRole("button", { name: "Add Bounty" }));
+  const recurring = document.body;
+  await user.click(within(recurring).getByRole("button", { name: "Weekdays" }));
+  expect(within(recurring).getByRole("alert")).toHaveTextContent(
+    "Choose at least one weekday",
+  );
+  await user.type(within(recurring).getByLabelText("Title"), "Water plants");
+  await user.click(within(recurring).getByRole("button", { name: "Tue" }));
+  await user.click(
+    within(recurring).getByRole("button", { name: "Create Bounty" }),
+  );
+  await waitFor(() => expect(commands).toHaveLength(2));
+  expect(commands[1]).toMatchObject({
+    kind: "create-bounty",
+    draft: {
+      title: "Water plants",
+      stars: 0,
+      recurrence: {
+        kind: "recurring",
+        startsOn: "2026-09-13",
+        cadence: { kind: "weekly", days: ["tue"] },
+      },
+    },
+  });
+});
+
+test("Bounty creation keeps one command identity across in-flight guards and retry", async () => {
+  const user = userEvent.setup();
+  const commands: Record<string, unknown>[] = [];
+  let settleFirst: ((response: Response) => void) | undefined;
+  const firstSave = new Promise<Response>((resolve) => {
+    settleFirst = resolve;
+  });
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/members")) {
+      return Response.json({ members: [], version: 1 });
+    }
+    if (init?.method === "POST") {
+      commands.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return commands.length === 1
+        ? firstSave
+        : Response.json({ receipt: { status: "already-applied" } });
+    }
+    return Response.json({
+      definitions: [],
+      bountyDefinitions: [],
+      bountyClaims: [],
+      bountyCompletions: [],
+      bountyCompletionCorrections: [],
+      legacyBountyCompletionCarriers: [],
+      events: [],
+      originalEvents: [],
+      legacyBountyArchiveEvents: [],
+      corrections: [],
+      adjustments: [],
+      balances: [],
+      today: "2026-09-13",
+    });
+  });
+
+  render(<AdminBounties />);
+  await user.click(await screen.findByRole("button", { name: "Add Bounty" }));
+  await user.type(screen.getByLabelText("Title"), "Wipe table");
+  const create = screen.getByRole("button", { name: "Create Bounty" });
+  act(() => {
+    create.click();
+    create.click();
+  });
+  expect(commands).toHaveLength(1);
+  if (!settleFirst) throw new Error("Missing first save resolver");
+  settleFirst(
+    Response.json({ error: "Connection interrupted" }, { status: 503 }),
+  );
+  const retry = await screen.findByRole("button", { name: "Retry create" });
+  await user.click(retry);
+  await waitFor(() => expect(commands).toHaveLength(2));
+  expect(commands[1]).toEqual(commands[0]);
+});
+
 test("a completed legacy carrier marks its current Bounty completed", async () => {
   const definition = {
     kind: "bounty",

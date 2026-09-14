@@ -47,12 +47,17 @@ type TaskActions = {
   onCompleteBounty: (row: ClaimedBounty) => void;
   onReleaseBounty: (row: ClaimedBounty) => void;
   onClaimBounty: (row: AvailableBounty) => void;
-  onAddBounty: () => void;
   mutatingBountyClaims: ReadonlySet<ClaimId>;
   mutatingBountyOfferings: ReadonlySet<OfferingId>;
 };
 
 const BOARD_PREVIEW_COUNT = 3;
+
+function bountyOfferingsByReward(
+  offerings: readonly AvailableBounty[],
+): AvailableBounty[] {
+  return [...offerings].sort((left, right) => right.stars - left.stars);
+}
 
 function paletteStyle(palette: MemberTaskPalette): CSSProperties {
   return {
@@ -417,35 +422,53 @@ export function TasksBoard({
           <section className={styles.bountyFocus} aria-label="Bounties">
             <header className={styles.bountyHeader}>
               <div>
+                <p className={styles.bountyEyebrow}>
+                  A little help. A happy home.
+                </p>
                 <h2>Available Bounties</h2>
-                <p>Pick some work and choose who will take it.</p>
+                <p>
+                  Pick some work. Choose who will take it. Earn Stars when it’s
+                  done.
+                </p>
               </div>
-              <button
-                type="button"
-                className={styles.rowAction}
-                onClick={actions.onAddBounty}
-              >
-                Add Bounty
-              </button>
             </header>
-            <div className={styles.groupTasks}>
+            <div className={styles.bountyContext}>
+              <strong>{tasks.availableBounties.length} available</strong>
+              <span>Every bit of help counts</span>
+            </div>
+            <div className={styles.bountyList}>
               {tasks.availableBounties.length === 0 ? (
                 <div className={styles.empty}>
                   <Icon name="star" size={32} />
                   <p>No Bounties available</p>
                 </div>
               ) : (
-                tasks.availableBounties.map((row) => (
-                  <TaskRow
-                    key={row.id}
-                    label={row.title}
-                    stars={row.stars}
-                    status={{ kind: "open" }}
-                    mutationPending={actions.mutatingBountyOfferings.has(
-                      row.id,
-                    )}
-                    onClaim={() => actions.onClaimBounty(row)}
-                  />
+                bountyOfferingsByReward(tasks.availableBounties).map((row) => (
+                  <article key={row.id} className={styles.bountyRow}>
+                    <div className={styles.bountyReward}>
+                      <div>
+                        <Icon name="star" size={36} />
+                        <strong>{row.stars}</strong>
+                      </div>
+                      <span>
+                        {row.stars === 1 ? "Star" : "Stars"} on completion
+                      </span>
+                    </div>
+                    <h3 className={styles.bountyTitle}>
+                      <Icon name="list" size={30} />
+                      <span>{row.title}</span>
+                    </h3>
+                    <button
+                      type="button"
+                      className={styles.bountyClaim}
+                      aria-label={`Claim ${row.title}`}
+                      disabled={actions.mutatingBountyOfferings.has(row.id)}
+                      onClick={() => actions.onClaimBounty(row)}
+                    >
+                      Claim
+                      <Icon name="chevron-right" size={20} />
+                    </button>
+                  </article>
                 ))
               )}
             </div>

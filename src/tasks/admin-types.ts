@@ -112,6 +112,11 @@ export type BountyDefinitionDraft = Readonly<{
 
 export type BountyAdminCommand =
   | Readonly<{
+      kind: "create-bounty";
+      requestId: BountyCommandId;
+      draft: CreateBountyDraft;
+    }>
+  | Readonly<{
       kind: "edit-bounty";
       requestId: BountyCommandId;
       definition: TaskId;
@@ -173,6 +178,17 @@ export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
   if (raw.kind === "create") {
     const draft = parseLegalAssignedDraft(raw.draft);
     return id && draft ? { kind: "create", id, draft } : null;
+  }
+  if (raw.kind === "create-bounty") {
+    const requestId = parseBountyCommandId(raw.requestId);
+    const draft = parseCreateBountyDraft(raw.draft);
+    return requestId &&
+      draft &&
+      Object.keys(raw).every((key) =>
+        ["kind", "requestId", "draft"].includes(key),
+      )
+      ? { kind: "create-bounty", requestId, draft }
+      : null;
   }
   if (raw.kind === "adjust-stars") {
     return id &&

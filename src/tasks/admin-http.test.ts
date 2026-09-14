@@ -198,6 +198,21 @@ describe("parent administration", () => {
     expect(
       (
         await tasks({
+          kind: "create-bounty",
+          requestId: crypto.randomUUID(),
+          draft: {
+            kind: "bounty",
+            type: "chore",
+            title: "No access",
+            stars: 0,
+            recurrence: { kind: "once" },
+          },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await tasks({
           kind: "edit-bounty",
           requestId: crypto.randomUUID(),
           definition: crypto.randomUUID(),
@@ -208,6 +223,110 @@ describe("parent administration", () => {
     ).toBe(401);
     expect((await handleAdminMembers(request("members"))).status).toBe(401);
     expect(loadDefinitions()).toHaveLength(0);
+  });
+
+  test("admin Bounty creation validates, materializes, and replays safely", async () => {
+    const requestId = crypto.randomUUID();
+    const command = {
+      kind: "create-bounty",
+      requestId,
+      draft: {
+        kind: "bounty",
+        type: "chore",
+        title: "Water plants",
+        stars: 0,
+        recurrence: { kind: "once" },
+      },
+    };
+
+    expect(
+      (
+        await tasks({
+          ...command,
+          requestId: crypto.randomUUID(),
+          draft: { ...command.draft, title: "", stars: -1 },
+        })
+      ).status,
+    ).toBe(400);
+
+    const created = await tasks(command);
+    expect(created.status).toBe(200);
+    expect((await created.json()).receipt).toMatchObject({
+      status: "accepted",
+      definition: { title: "Water plants", stars: 0 },
+    });
+    expect((await tasks(command)).status).toBe(200);
+    expect(loadBountyDefinitions(tasksDatabase())).toHaveLength(1);
+    expect(loadAvailableBounties(tasksDatabase(), today)).toEqual([
+      expect.objectContaining({ title: "Water plants", stars: 0 }),
+    ]);
+    expect(
+      (
+        await tasks({
+          ...command,
+          draft: { ...command.draft, title: "Different work" },
+        })
+      ).status,
+    ).toBe(409);
+  });
+
+  test("the v10 migration preserves prior admin receipts and their replay guards", async () => {
+    const bountyDraft = parseTaskCreateDraft({
+      kind: "bounty",
+      title: "Wash car",
+      stars: 4,
+      recurrence: { kind: "once" },
+    });
+    expect(bountyDraft?.kind).toBe("bounty");
+    if (!bountyDraft || bountyDraft.kind !== "bounty") return;
+    const definition = createBounty(tasksDatabase(), bountyDraft, today);
+    const edit = {
+      kind: "edit-bounty",
+      requestId: crypto.randomUUID(),
+      definition: definition.id,
+      revision: 0,
+      draft: { title: "Polish car", stars: 7 },
+    };
+    expect((await tasks(edit)).status).toBe(200);
+
+    const db = tasksDatabase();
+    db.exec(`BEGIN IMMEDIATE;
+      DROP TRIGGER bounty_admin_receipts_no_update;
+      DROP TRIGGER bounty_admin_receipts_no_delete;
+      CREATE TABLE bounty_admin_command_receipts_v9 (
+        request_id TEXT NOT NULL PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('edit-bounty', 'retire-bounty', 'replace-definition')),
+        payload TEXT NOT NULL,
+        response TEXT NOT NULL
+      );
+      INSERT INTO bounty_admin_command_receipts_v9 SELECT * FROM bounty_admin_command_receipts;
+      DROP TABLE bounty_admin_command_receipts;
+      ALTER TABLE bounty_admin_command_receipts_v9 RENAME TO bounty_admin_command_receipts;
+      CREATE TRIGGER bounty_admin_receipts_no_update
+        BEFORE UPDATE ON bounty_admin_command_receipts
+        BEGIN SELECT RAISE(ABORT, 'Bounty admin receipts are immutable'); END;
+      CREATE TRIGGER bounty_admin_receipts_no_delete
+        BEFORE DELETE ON bounty_admin_command_receipts
+        BEGIN SELECT RAISE(ABORT, 'Bounty admin receipts are immutable'); END;
+      PRAGMA user_version = 9;
+      COMMIT;
+    `);
+    closeTasksDatabase();
+
+    expect((await tasks(edit)).status).toBe(200);
+    expect(loadBountyDefinitions(tasksDatabase())).toHaveLength(1);
+    expect(() =>
+      tasksDatabase()
+        .prepare("UPDATE bounty_admin_command_receipts SET kind = kind")
+        .run(),
+    ).toThrow("Bounty admin receipts are immutable");
+    closeTasksDatabase();
+    expect((await tasks()).status).toBe(200);
+    expect(
+      Number(
+        tasksDatabase().prepare("PRAGMA user_version").get()?.user_version,
+      ),
+    ).toBe(10);
   });
   test("Bounty edits are revision-guarded, retry-safe, and change only future claims", async () => {
     const members = (await readHousehold()).members;
