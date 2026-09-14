@@ -158,7 +158,8 @@ _Avoid_: Household chore, up-for-grabs chore
 
 **Bounty Offering**:
 An available, unscheduled opportunity to claim a Bounty. A Once offering
-persists until claimed; a recurring offering is available within its calendar interval.
+persists until claimed; a recurring offering is available within its calendar
+interval.
 _Avoid_: Scheduled Occurrence, assigned chore
 
 **Routine**:
@@ -199,6 +200,13 @@ Occurrence for the day of the Claim in the Household Time Zone and fixing
 its Star reward to the advertised value at that moment.
 _Avoid_: Advisory assignment
 
+**Bounty Claim**:
+The durable accepted-work record created by a Claim. It keeps its identity,
+claimant, scheduled date, description, and Star reward through completion,
+Undo, Restore, definition edits, and definition retirement. Reclaiming a
+released Bounty Offering creates a new Bounty Claim.
+_Avoid_: Bounty Offering, assignment, synthetic claim
+
 **Release**:
 Giving up a Bounty Claim. Releasing work from an earlier recurring interval
 or a retired Bounty ends that commitment; otherwise its offering reopens.
@@ -210,16 +218,19 @@ A Skip never advances a Rotation and does not apply to Bounties.
 _Avoid_: dismiss, delete
 
 **Star**:
-The unit of reward for completing a Task, added to the completing member's
-Star Balance and counted toward Stars Earned. A Bounty's reward is fixed at
-Claim; other Tasks use their definition's value at completion.
+The unit of reward for completing a Task, initially added to the completing
+member's Star Balance and counted toward Stars Earned. A Bounty's reward is
+fixed at Claim; other Tasks use their definition's value at completion.
+Administrative corrections may reverse or reassign a completion's credit.
 _Avoid_: point, credit
 
 **Stars Earned**:
-The sum of Star rewards over completions that happened in a given
-Household Time Zone range, for the Household or for one member. Skips,
-claims, Grants, and Spends are not included; retired members and closed Task
-Windows are.
+The sum of Star rewards over effective completions that happened in a given
+Household Time Zone range, for the Household or for one member. An Undo
+removes a completion from the sum, Restore uses its original completion time,
+and reassignment attributes it to the current credited member. Skips, claims,
+Grants, and Spends are not included; retired members and closed Task Windows
+are.
 _Avoid_: Star Balance, Window (for the range)
 
 **Reward**:

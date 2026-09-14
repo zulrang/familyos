@@ -8,6 +8,10 @@ import type {
   BountyCompletionCorrectionCommand,
   TaskAdminRead,
 } from "./admin-types";
+import type {
+  LegacyBountyCompletionCarrier,
+  LegacyBountyCompletionCorrectionCommand,
+} from "./legacy-bounty-carrier-types";
 import {
   type BountyCompletion,
   type ClaimedBounty,
@@ -309,6 +313,182 @@ function BountyCorrectionForm({
   );
 }
 
+type CompletedLegacyCarrier = LegacyBountyCompletionCarrier & {
+  state: Extract<LegacyBountyCompletionCarrier["state"], { kind: "completed" }>;
+};
+
+type LegacyCarrierCorrectionAction = "undo" | "reassign";
+
+function isCompletedLegacyCarrier(
+  row: LegacyBountyCompletionCarrier,
+): row is CompletedLegacyCarrier {
+  return row.state.kind === "completed";
+}
+
+function legacyCarrierCorrectionCommand(input: {
+  action: LegacyCarrierCorrectionAction;
+  row: CompletedLegacyCarrier;
+  member: string;
+  reason: string;
+}): LegacyBountyCompletionCorrectionCommand {
+  const requestId = parseBountyCommandId(adminRequestId());
+  if (!requestId) throw new Error("Could not create Bounty request identity");
+  const fields = {
+    requestId,
+    carrier: input.row.id,
+    revision: input.row.revision,
+    completion: input.row.state.effectiveCompletion.id,
+    predecessor: input.row.state.correction,
+    reason: input.reason,
+  };
+  return input.action === "undo"
+    ? { kind: "undo-legacy-bounty-completion", ...fields }
+    : {
+        kind: "reassign-legacy-bounty-completion",
+        ...fields,
+        member: input.member,
+      };
+}
+
+function LegacyCarrierCorrectionForm({
+  row,
+  members,
+  onSaved,
+  onCancel,
+}: {
+  row: CompletedLegacyCarrier;
+  members: HouseholdMember[];
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [action, setAction] = useState<LegacyCarrierCorrectionAction>("undo");
+  const [member, setMember] = useState(row.state.creditedTo);
+  const [reason, setReason] = useState("");
+  const pending = useRef(false);
+  const [save, setSave] = useState<
+    | { status: "idle" }
+    | {
+        status: "sending";
+        command: LegacyBountyCompletionCorrectionCommand;
+      }
+    | {
+        status: "retry";
+        command: LegacyBountyCompletionCorrectionCommand;
+        error: string;
+      }
+  >({ status: "idle" });
+
+  async function send(command: LegacyBountyCompletionCorrectionCommand) {
+    if (pending.current) return;
+    pending.current = true;
+    setSave({ status: "sending", command });
+    try {
+      await adminRequest("tasks", command);
+      onSaved();
+    } catch (error) {
+      setSave({ status: "retry", command, error: (error as Error).message });
+    } finally {
+      pending.current = false;
+    }
+  }
+
+  async function submit(submission: FormEvent) {
+    submission.preventDefault();
+    if (pending.current) return;
+    if (
+      !window.confirm(
+        "Record this earlier Bounty correction? Star Balance changes and correction history will be saved together.",
+      )
+    ) {
+      return;
+    }
+    await send(legacyCarrierCorrectionCommand({ action, row, member, reason }));
+  }
+
+  return (
+    <form className={styles.form} onSubmit={submit}>
+      <label>
+        Correction
+        <select
+          value={action}
+          disabled={save.status !== "idle"}
+          onChange={(event) => {
+            if (
+              event.target.value === "undo" ||
+              event.target.value === "reassign"
+            )
+              setAction(event.target.value);
+          }}
+        >
+          <option value="undo">Undo completion</option>
+          <option value="reassign">Reassign credit</option>
+        </select>
+      </label>
+      {action === "reassign" ? (
+        <label>
+          Credit to
+          <select
+            value={member}
+            disabled={save.status !== "idle"}
+            onChange={(event) => setMember(event.target.value)}
+          >
+            {members.map((candidate) => (
+              <option value={candidate.id} key={candidate.id}>
+                {candidate.name}
+                {candidate.status === "retired" ? " (retired)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      <label>
+        Reason
+        <textarea
+          required
+          maxLength={1000}
+          value={reason}
+          disabled={save.status !== "idle"}
+          onChange={(event) => setReason(event.target.value)}
+          placeholder="What needs correcting?"
+        />
+      </label>
+      {save.status === "retry" ? (
+        <p role="alert" className={styles.error}>
+          {save.error}
+        </p>
+      ) : null}
+      <div className={styles.actions}>
+        {save.status === "retry" ? (
+          <>
+            <button type="button" onClick={() => void send(save.command)}>
+              Retry earlier Bounty correction
+            </button>
+            <button type="button" className={styles.quiet} onClick={onSaved}>
+              Cancel and refresh
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="submit" disabled={save.status === "sending"}>
+              {save.status === "sending"
+                ? "Saving…"
+                : "Record earlier Bounty correction"}
+            </button>
+            <button
+              type="button"
+              className={styles.quiet}
+              disabled={save.status === "sending"}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </>
+        )}
+      </div>
+    </form>
+  );
+}
+
 export function AdminCompletions({
   data,
   members,
@@ -361,13 +541,29 @@ export function AdminCompletions({
         .toLowerCase()
         .includes(query.toLowerCase());
     });
+  const carrierRows = data.legacyBountyCompletionCarriers.filter((row) => {
+    const memberNames = row.history.flatMap((correction) =>
+      [correction.fromMember, correction.toMember]
+        .filter((member): member is string => member !== null)
+        .map(name),
+    );
+    const effectiveMember =
+      row.state.kind === "completed"
+        ? name(row.state.creditedTo)
+        : "undone released";
+    return `${row.title} ${row.sourceWindow} ${effectiveMember} ${memberNames.join(
+      " ",
+    )}`
+      .toLowerCase()
+      .includes(query.toLowerCase());
+  });
   return (
     <div className={styles.cards}>
       <p className={styles.muted}>
         Correct who completed a task, undo a mistaken completion, or restore it.
         History is never deleted.
       </p>
-      {!visible.length && !bountyRows.length && (
+      {!visible.length && !bountyRows.length && !carrierRows.length && (
         <p className={styles.card}>No matching completions.</p>
       )}
       {visible.map(({ event, history, by }) => {
@@ -487,6 +683,72 @@ export function AdminCompletions({
                   </li>
                 ))}
                 {history.map((correction) => (
+                  <li key={correction.id}>
+                    {correction.kind === "undo"
+                      ? `Undone from ${name(correction.fromMember ?? "unknown")}`
+                      : correction.kind === "restore"
+                        ? `Restored to ${name(correction.toMember ?? "unknown")}`
+                        : `Reassigned from ${name(correction.fromMember ?? "unknown")} to ${name(correction.toMember ?? "unknown")}`}{" "}
+                    · {correction.creditedStars} Stars ·{" "}
+                    {new Date(correction.at).toLocaleString()}
+                    <br />
+                    {correction.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </article>
+        );
+      })}
+      {carrierRows.map((row) => {
+        const key = `legacy-bounty:${row.id}`;
+        const completed = isCompletedLegacyCarrier(row) ? row : null;
+        const completion =
+          row.state.kind === "completed"
+            ? row.state.effectiveCompletion
+            : row.state.undoneCompletion;
+        return (
+          <article className={styles.card} key={key}>
+            <h2>{row.title}</h2>
+            <p className={styles.muted}>
+              Earlier Bounty completion for {row.sourceWindow}
+              <br />
+              {completed
+                ? `Completed by ${name(completed.state.creditedTo)} · ${completion.creditedStars} Stars`
+                : "Completion undone · historical work released"}
+            </p>
+            {selected === key && completed ? (
+              <LegacyCarrierCorrectionForm
+                row={completed}
+                members={members}
+                onSaved={() => {
+                  setSelected(null);
+                  onSaved();
+                }}
+                onCancel={() => setSelected(null)}
+              />
+            ) : completed ? (
+              <button
+                type="button"
+                className={styles.quiet}
+                disabled={selected !== null}
+                onClick={() => setSelected(key)}
+              >
+                Correct earlier Bounty completion
+              </button>
+            ) : null}
+            <details className={styles.history}>
+              <summary>
+                Original record + {row.history.length} correction
+                {row.history.length === 1 ? "" : "s"}
+              </summary>
+              <ul>
+                <li>
+                  Completed by {name(completion.by)} for{" "}
+                  {completion.creditedStars} Stars ·{" "}
+                  {new Date(completion.at).toLocaleString()}
+                </li>
+                {row.history.map((correction) => (
                   <li key={correction.id}>
                     {correction.kind === "undo"
                       ? `Undone from ${name(correction.fromMember ?? "unknown")}`

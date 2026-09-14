@@ -13,12 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
 import { TaskCelebration } from "./TaskCelebration";
-import {
-  claimOccurrence,
-  markDone,
-  skipOccurrence,
-  TasksScreen,
-} from "./TasksScreen";
+import { markDone, skipOccurrence, TasksScreen } from "./TasksScreen";
 import type {
   AvailableBounty,
   BountyDefinition,
@@ -262,7 +257,7 @@ function installFetch(
       if (method === "POST" && url.endsWith("/api/tasks/events")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           events: {
-            kind: "claimed" | "completed" | "skipped";
+            kind: "completed" | "skipped";
             task: string;
             window: string;
             by?: string;
@@ -274,16 +269,9 @@ function installFetch(
           (row) => row.task === event?.task && row.window === event.window,
         );
         const already =
-          event?.kind === "claimed"
-            ? current?.state === "claimed"
-            : event?.kind === "skipped"
-              ? current?.state === "skipped"
-              : current?.state === "done";
-        if (event?.kind === "claimed" && current && !already) {
-          const next = claimOccurrence(store, current, event.by ?? "");
-          store.occurrences = next.occurrences;
-          store.progress = next.progress;
-        }
+          event?.kind === "skipped"
+            ? current?.state === "skipped"
+            : current?.state === "done";
         if (event?.kind === "completed" && current && !already) {
           const next = markDone(store, current, event.by);
           store.occurrences = next.occurrences;
@@ -1386,109 +1374,17 @@ describe("TasksScreen", () => {
     });
   });
 
-  test("the Household column appears only for an unclaimed open occurrence", async () => {
-    const user = userEvent.setup();
-    const store = emptyView();
-    const fetchMock = installFetch(store);
-    render(<TasksScreen />);
-
-    await screen.findByRole("button", { name: "Add task" });
-    expect(
-      screen.queryByRole("heading", { name: "Household" }),
-    ).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Add task" }));
-    await user.type(screen.getByPlaceholderText("Title"), "Open dishes");
-    await user.click(screen.getByRole("button", { name: "Weekly" }));
-    await user.click(screen.getByRole("button", { name: "Mon" }));
-    await user.click(screen.getByRole("button", { name: "Household" }));
-    const stars = screen.getByRole("textbox", { name: "Stars" });
-    await user.clear(stars);
-    await user.type(stars, "5");
-    await user.click(screen.getByRole("button", { name: "Add" }));
-
-    const household = await screen.findByRole("heading", {
-      name: "Household",
-    });
-    expect(household.closest("section")).toHaveTextContent("Open dishes");
-    expect(household.closest("section")).toHaveTextContent("0/1");
-    const createCall = fetchMock.mock.calls.find(
-      ([input, init]) =>
-        urlOf(input).endsWith("/api/tasks") &&
-        init?.method === "POST" &&
-        !urlOf(input).endsWith("/events"),
-    );
-    expect(JSON.parse(String(createCall?.[1]?.body ?? "{}"))).toMatchObject({
-      recurrence: { kind: "weekly", days: ["mon"] },
-      assignment: { kind: "open" },
-      stars: 5,
-    });
-  });
-
-  test("claiming moves an open occurrence and its count to the chosen member", async () => {
+  test("household work is available only through Bounties", async () => {
     const user = userEvent.setup();
     const store = emptyView();
     store.occurrences = [
       {
         state: "pending",
-        task: "open-claim" as Occurrence["task"],
+        task: "legacy-open" as Occurrence["task"],
         window: store.today,
-        title: "Open dishes",
+        title: "Legacy open work",
         type: "chore",
-        lineage: "lin-open-claim" as Occurrence["lineage"],
-        time: null,
-        assignee: null,
-      },
-    ];
-    const fetchMock = installFetch(store);
-    render(<TasksScreen />);
-
-    await user.click(
-      await screen.findByRole("button", { name: "Claim Open dishes" }),
-    );
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Cancel claiming Open dishes" }),
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Claim Open dishes" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Claim for Dad" }).closest("section"),
-    ).toHaveTextContent("Dad");
-    expect(
-      screen.queryByRole("button", { name: "Claim for Former" }),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Claim for Dad" }));
-
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("heading", { name: "Household" }),
-      ).not.toBeInTheDocument();
-    });
-    const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
-    expect(dad).toHaveTextContent("Open dishes");
-    expect(dad).toHaveTextContent("0/1");
-    expect(
-      screen.queryByRole("button", { name: "Claim for Dad" }),
-    ).not.toBeInTheDocument();
-    const claimRequest = fetchMock.mock.calls.find(([, init]) =>
-      String(init?.body).includes('"kind":"claimed"'),
-    );
-    expect(String(claimRequest?.[1]?.body)).toContain('"by":"dad"');
-  });
-
-  test("an unclaimed Household task offers task actions and Claim", async () => {
-    const user = userEvent.setup();
-    const store = emptyView();
-    store.occurrences = [
-      {
-        state: "pending",
-        task: "open-complete" as Occurrence["task"],
-        window: store.today,
-        title: "Feed cat",
-        type: "chore",
-        lineage: "lin-open-complete" as Occurrence["lineage"],
+        lineage: "legacy-open-lineage" as Occurrence["lineage"],
         time: null,
         assignee: null,
       },
@@ -1496,79 +1392,20 @@ describe("TasksScreen", () => {
     installFetch(store);
     render(<TasksScreen />);
 
-    const claim = await screen.findByRole("button", { name: "Claim Feed cat" });
-    expect(claim).toBeVisible();
-    const household = screen
-      .getByRole("heading", { name: "Household" })
-      .closest("section");
-    expect(household).not.toBeNull();
-    if (!household) throw new Error("Missing Household column");
-    expect(within(household).getAllByRole("button")).toEqual([
-      within(household).getByRole("button", {
-        name: "View tasks for Household",
-      }),
-      claim,
-    ]);
-    expect(within(household).queryByRole("checkbox")).not.toBeInTheDocument();
-    await user.click(claim);
-    await user.click(
-      screen.getByRole("button", { name: "Cancel claiming Feed cat" }),
-    );
     expect(
-      screen.queryByRole("button", { name: "Claim for Ellie" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Claim Feed cat" }),
+      await screen.findByRole("button", { name: "Bounties" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Claim Feed cat" }));
-    await user.click(screen.getByRole("button", { name: "Claim for Ellie" }));
     expect(
-      await screen.findByRole("checkbox", { name: "Feed cat" }),
-    ).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "View tasks for Ellie" }),
-    );
-    expect(screen.getByRole("button", { name: "Skip Feed cat" })).toBeVisible();
-  });
-
-  test("completing a claimed occurrence uses the claimant without a picker", async () => {
-    const user = userEvent.setup();
-    const store = emptyView();
-    store.occurrences = [
-      {
-        state: "claimed",
-        task: "claimed-complete" as Occurrence["task"],
-        window: store.today,
-        title: "Take bins out",
-        type: "chore",
-        lineage: "lin-claimed-complete" as Occurrence["lineage"],
-        time: null,
-        assignee: "dad",
-        by: "dad",
-      },
-    ];
-    store.progress[0] = { member: "dad", done: 0, total: 1 };
-    const fetchMock = installFetch(store);
-    render(<TasksScreen />);
-
-    await user.click(
-      await screen.findByRole("checkbox", { name: "Take bins out" }),
-    );
-
-    expect(
-      screen.queryByRole("dialog", { name: /Who/ }),
+      screen.queryByRole("heading", { name: "Household" }),
     ).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(
-        screen.getByRole("checkbox", { name: "Take bins out" }),
-      ).toBeChecked();
-    });
-    const dad = screen.getByRole("heading", { name: "Dad" }).closest("section");
-    expect(dad).toHaveTextContent("1/1");
-    const completionRequest = fetchMock.mock.calls.find(([, init]) =>
-      String(init?.body).includes('"kind":"completed"'),
-    );
-    expect(String(completionRequest?.[1]?.body)).toContain('"by":"dad"');
+    expect(screen.queryByText("Legacy open work")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+    expect(
+      screen.queryByRole("button", { name: "Household" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fixed" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rotation" })).toBeVisible();
   });
 
   test("completing a task tucks it below remaining work in the finished section", async () => {
@@ -1808,76 +1645,6 @@ describe("TasksScreen", () => {
       done: 1,
       total: 1,
     });
-  });
-
-  test("an explicit completer replaces a concurrent claimant in optimistic progress", () => {
-    const store = emptyView();
-    const staleOccurrence: Occurrence = {
-      state: "pending",
-      task: "open-race" as Occurrence["task"],
-      window: store.today,
-      title: "Feed cat",
-      type: "chore",
-      lineage: "lin-open-race" as Occurrence["lineage"],
-      time: null,
-      assignee: null,
-    };
-    store.occurrences = [
-      {
-        ...staleOccurrence,
-        state: "claimed",
-        assignee: "dad",
-        by: "dad",
-      },
-    ];
-    store.progress = [
-      { member: "dad", done: 0, total: 1 },
-      { member: "ellie", done: 0, total: 0 },
-    ];
-
-    const completed = markDone(store, staleOccurrence, "ellie");
-
-    expect(completed.occurrences[0]).toMatchObject({
-      state: "done",
-      assignee: "ellie",
-      by: "ellie",
-    });
-    expect(completed.progress).toEqual([
-      { member: "dad", done: 0, total: 0 },
-      { member: "ellie", done: 1, total: 1 },
-    ]);
-  });
-
-  test("skipping a claimed open occurrence unassigns it and drops the claimant's total", () => {
-    const store = emptyView();
-    const occurrence: Occurrence = {
-      state: "claimed",
-      task: "open-skip" as Occurrence["task"],
-      window: store.today,
-      title: "Walk dog",
-      type: "chore",
-      lineage: "lin-open-skip" as Occurrence["lineage"],
-      time: null,
-      assignee: "dad",
-      by: "dad",
-    };
-    store.occurrences = [occurrence];
-    store.progress = [
-      { member: "dad", done: 0, total: 1 },
-      { member: "ellie", done: 0, total: 0 },
-    ];
-
-    const skipped = skipOccurrence(store, occurrence, null);
-
-    expect(skipped.occurrences[0]).toMatchObject({
-      state: "skipped",
-      assignee: null,
-      reason: null,
-    });
-    expect(skipped.progress).toEqual([
-      { member: "dad", done: 0, total: 0 },
-      { member: "ellie", done: 0, total: 0 },
-    ]);
   });
 
   test("skipping a pending assigned occurrence keeps its assignee and total", () => {
@@ -2326,36 +2093,6 @@ describe("Family Board navigation", () => {
     expect(screen.getByRole("region", { name: "Dad tasks" })).toHaveTextContent(
       "1/4 done",
     );
-  });
-
-  test("a Household task can be claimed from focus and then completed by its claimant", async () => {
-    const user = userEvent.setup();
-    const store = boardView();
-    store.occurrences.push({
-      ...store.occurrences[0],
-      assignee: null,
-      task: "shared" as Occurrence["task"],
-      title: "Vacuum family room",
-    });
-    installFetch(store);
-    render(<TasksScreen />);
-    await user.click(
-      await screen.findByRole("button", { name: "View tasks for Household" }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Claim Vacuum family room" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Claim for Ellie" }));
-    expect(await screen.findByText("No tasks today")).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "View tasks for Ellie" }),
-    );
-    await user.click(
-      screen.getByRole("checkbox", { name: "Vacuum family room" }),
-    );
-    expect(
-      await screen.findByRole("dialog", { name: "All done!" }),
-    ).toHaveTextContent("Ellie");
   });
 });
 

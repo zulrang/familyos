@@ -409,7 +409,9 @@ describe("tasks sqlite store", () => {
     insertDefinition(def);
     const saved = saveDefinition({
       id: def.id,
-      draft: draftFrom(def, { assignment: { kind: "open" } }),
+      draft: draftFrom(def, {
+        assignment: { kind: "rotation", order: ["dad" as MemberId] },
+      }),
       today: "2026-08-25" as LocalDate,
     });
     const receipt = applyEvent({
@@ -490,7 +492,10 @@ describe("tasks sqlite store", () => {
       id: other.id,
       draft: draftFrom(other, {
         stars: 9,
-        assignment: { kind: "open" },
+        assignment: {
+          kind: "rotation",
+          order: ["ellie" as MemberId],
+        },
       }),
       today: "2026-08-25" as LocalDate,
     });

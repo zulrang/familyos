@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type ActiveMember,
   activeMembers,
-  type MemberSurface,
   memberSurface,
   onFillInk,
 } from "@/members/members";
@@ -96,8 +95,7 @@ type RecurrenceRequest =
 
 type DraftAssignment =
   | { kind: "fixed"; member: string }
-  | { kind: "rotation"; order: string[] }
-  | { kind: "open" };
+  | { kind: "rotation"; order: string[] };
 
 type Draft = DraftFields & {
   assignment: DraftAssignment;
@@ -171,7 +169,8 @@ function toDraftRecurrence(recurrence: Recurrence): DraftRecurrence {
   }
 }
 
-function sheetFromDefinition(definition: LegacyTaskDefinition): Draft {
+function sheetFromDefinition(definition: LegacyTaskDefinition): Draft | null {
+  if (definition.assignment.kind === "open") return null;
   return {
     task: definition.id,
     title: definition.title,
@@ -183,19 +182,10 @@ function sheetFromDefinition(definition: LegacyTaskDefinition): Draft {
   };
 }
 
-type MemberAction =
-  | { kind: "claim"; occurrence: Occurrence }
-  | { kind: "complete"; occurrence: Occurrence }
-  | { kind: "claim-bounty"; bounty: AvailableBounty };
+type MemberAction = { kind: "claim-bounty"; bounty: AvailableBounty };
 
 const SKIP_PRESETS = ["Away", "Sick", "Not needed"] as const;
-
-const HOUSEHOLD_SURFACE: MemberSurface = {
-  fill: "#dcebf6",
-  soft: "#eef4f8",
-  ink: "#425466",
-  muted: memberSurface("#dcebf6").muted,
-};
+const NEUTRAL_ACTION_SURFACE = { soft: "#eef4f8", ink: "#425466" };
 
 export function markDone(
   view: TasksViewRead,
@@ -237,35 +227,6 @@ export function markDone(
       }
       return row;
     }),
-  };
-}
-
-export function claimOccurrence(
-  view: TasksViewRead,
-  occ: Occurrence,
-  member: string,
-): TasksViewRead {
-  const current = view.occurrences.find(
-    (row) => row.task === occ.task && row.window === occ.window,
-  );
-  if (!current || current.state !== "pending" || current.assignee !== null) {
-    return view;
-  }
-  return {
-    ...view,
-    occurrences: view.occurrences.map((row) =>
-      row.task === occ.task && row.window === occ.window
-        ? {
-            ...row,
-            state: "claimed" as const,
-            by: member,
-            assignee: member,
-          }
-        : row,
-    ),
-    progress: view.progress.map((row) =>
-      row.member === member ? { ...row, total: row.total + 1 } : row,
-    ),
   };
 }
 
@@ -415,15 +376,13 @@ export function TasksScreen() {
   function openEditor(row: Occurrence) {
     const definition = tasks.definitions.find((item) => item.id === row.task);
     if (definition) {
-      setEditor({ kind: "assigned", draft: sheetFromDefinition(definition) });
+      const draft = sheetFromDefinition(definition);
+      if (draft) setEditor({ kind: "assigned", draft });
     }
   }
 
   async function complete(occ: Occurrence, member = occ.assignee) {
-    if (!member) {
-      setMemberAction({ kind: "complete", occurrence: occ });
-      return;
-    }
+    if (!member) return;
     setTasks((cur) => markDone(cur, occ, member));
     try {
       const res = await fetch("/api/tasks/events", {
@@ -463,38 +422,6 @@ export function TasksScreen() {
       );
     } catch {
       setError("Could not complete task.");
-      await load();
-    }
-  }
-
-  async function claim(occ: Occurrence, member?: string) {
-    if (!member) {
-      setMemberAction({ kind: "claim", occurrence: occ });
-      return;
-    }
-    setTasks((cur) => claimOccurrence(cur, occ, member));
-    try {
-      const res = await fetch("/api/tasks/events", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          events: [
-            {
-              kind: "claimed",
-              task: occ.task,
-              window: occ.window,
-              by: member,
-            },
-          ],
-        }),
-      });
-      if (await redirectIfPairingRequired(res)) return;
-      if (!res.ok) {
-        setError("Could not claim task.");
-      }
-      await load();
-    } catch {
-      setError("Could not claim task.");
       await load();
     }
   }
@@ -740,7 +667,6 @@ export function TasksScreen() {
           members={members}
           tasks={tasks}
           onComplete={(row) => complete(row).catch(() => {})}
-          onClaim={(row) => claim(row).catch(() => {})}
           onSkip={(row) => {
             setSkipNote("");
             setSkipping(row);
@@ -760,19 +686,6 @@ export function TasksScreen() {
                 recurrence: { kind: "once" },
               },
             })
-          }
-          claimSelection={
-            memberAction?.kind === "claim"
-              ? {
-                  occurrence: memberAction.occurrence,
-                  onCancel: () => setMemberAction(null),
-                  onPick: (member) => {
-                    const occurrence = memberAction.occurrence;
-                    setMemberAction(null);
-                    claim(occurrence, member).catch(() => {});
-                  },
-                }
-              : null
           }
         />
       ) : null}
@@ -818,21 +731,8 @@ export function TasksScreen() {
           onSave={saveBounty}
         />
       ) : null}
-      {memberAction?.kind === "complete" ? (
-        <MemberPicker
-          action={memberAction.kind}
-          members={members}
-          onClose={() => setMemberAction(null)}
-          onPick={(member) => {
-            const action = memberAction;
-            setMemberAction(null);
-            complete(action.occurrence, member.id).catch(() => {});
-          }}
-        />
-      ) : null}
       {memberAction?.kind === "claim-bounty" ? (
         <MemberPicker
-          action={memberAction.kind}
           members={members}
           onClose={() => setMemberAction(null)}
           onPick={(member) => {
@@ -1026,7 +926,6 @@ function CreateSheet({
   const closeFromBackdrop = useRef(false);
   const stars = Number(draft.stars);
   const assignmentReady =
-    draft.assignment.kind === "open" ||
     (draft.assignment.kind === "fixed" && draft.assignment.member.length > 0) ||
     (draft.assignment.kind === "rotation" && draft.assignment.order.length > 0);
   const canSave =
@@ -1110,11 +1009,7 @@ function CreateSheet({
                       member:
                         draft.assignment.kind === "fixed"
                           ? draft.assignment.member
-                          : draft.assignment.kind === "rotation"
-                            ? (draft.assignment.order[0] ??
-                              members[0]?.id ??
-                              "")
-                            : (members[0]?.id ?? ""),
+                          : (draft.assignment.order[0] ?? members[0]?.id ?? ""),
                     },
                   })
                 }
@@ -1134,11 +1029,7 @@ function CreateSheet({
                       order:
                         draft.assignment.kind === "rotation"
                           ? draft.assignment.order
-                          : draft.assignment.kind === "fixed"
-                            ? [draft.assignment.member]
-                            : members[0]
-                              ? [members[0].id]
-                              : [],
+                          : [draft.assignment.member],
                     },
                   })
                 }
@@ -1148,27 +1039,6 @@ function CreateSheet({
               </Button>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() =>
-                  onChange({ ...draft, assignment: { kind: "open" } })
-                }
-                style={{
-                  border: "none",
-                  borderRadius: "var(--radius-pill)",
-                  padding: "8px 14px",
-                  minHeight: "var(--hit-min)",
-                  background:
-                    draft.assignment.kind === "open"
-                      ? HOUSEHOLD_SURFACE.fill
-                      : HOUSEHOLD_SURFACE.soft,
-                  color: HOUSEHOLD_SURFACE.ink,
-                  font: "var(--type-card-meta)",
-                  cursor: "pointer",
-                }}
-              >
-                Household
-              </button>
               {members.map((member) => {
                 const surface = memberSurface(member.color);
                 const position =
@@ -1176,9 +1046,7 @@ function CreateSheet({
                     ? draft.assignment.member === member.id
                       ? 0
                       : -1
-                    : draft.assignment.kind === "rotation"
-                      ? draft.assignment.order.indexOf(member.id)
-                      : -1;
+                    : draft.assignment.order.indexOf(member.id);
                 const selected = position >= 0;
                 return (
                   <button
@@ -1355,22 +1223,14 @@ function CreateSheet({
 }
 
 function MemberPicker({
-  action,
   members,
   onClose,
   onPick,
 }: {
-  action: MemberAction["kind"];
   members: ActiveMember[];
   onClose: () => void;
   onPick: (member: ActiveMember) => void;
 }) {
-  const title =
-    action === "claim-bounty"
-      ? "Claim Bounty"
-      : action === "claim"
-        ? "Claim task"
-        : "Complete task";
   return (
     <div
       style={{
@@ -1416,7 +1276,7 @@ function MemberPicker({
             id="task-member-picker-title"
             style={{ font: "var(--type-section)", flex: 1 }}
           >
-            {title}
+            Claim Bounty
           </h2>
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
@@ -1530,8 +1390,8 @@ function SkipSheet({
                 borderRadius: "var(--radius-pill)",
                 padding: "8px 14px",
                 minHeight: "var(--hit-min)",
-                background: HOUSEHOLD_SURFACE.soft,
-                color: HOUSEHOLD_SURFACE.ink,
+                background: NEUTRAL_ACTION_SURFACE.soft,
+                color: NEUTRAL_ACTION_SURFACE.ink,
                 font: "var(--type-card-meta)",
                 cursor: "pointer",
               }}

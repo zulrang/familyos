@@ -27,8 +27,14 @@ import {
   replaceDefinition,
 } from "./bounty-store";
 import {
+  correctLegacyBountyCompletion,
+  LegacyBountyCarrierStoreError,
+  loadLegacyBountyCompletionCarriers,
+} from "./legacy-bounty-carrier-store";
+import {
   loadCompletionCorrections,
   loadEvents,
+  loadLegacyBountyArchiveEvents,
   loadStore,
   loadStoredStarBalances,
   tasksDatabase,
@@ -58,7 +64,9 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
       bountyClaims: loadBountyClaims(db),
       bountyCompletions: loadBountyCompletions(db),
       bountyCompletionCorrections: loadBountyCompletionCorrections(db),
+      legacyBountyCompletionCarriers: loadLegacyBountyCompletionCarriers(db),
       originalEvents: loadEvents(),
+      legacyBountyArchiveEvents: loadLegacyBountyArchiveEvents(),
       corrections: loadCompletionCorrections(),
       balances: loadStoredStarBalances(),
       today,
@@ -95,11 +103,6 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     !memberById(household.members, command.correction.by)
   )
     return adminJson({ error: "Member not found." }, 400);
-  if (
-    command.kind === "reassign-bounty-completion" &&
-    !memberById(household.members, command.member)
-  )
-    return adminJson({ error: "Member not found." }, 400);
   try {
     switch (command.kind) {
       case "create":
@@ -132,6 +135,15 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
             members: household.members,
           }),
         });
+      case "undo-legacy-bounty-completion":
+      case "reassign-legacy-bounty-completion":
+        return adminJson({
+          receipt: correctLegacyBountyCompletion({
+            db: tasksDatabase(),
+            command,
+            members: household.members,
+          }),
+        });
       case "replace-definition":
         return adminJson({
           receipt: replaceDefinition({
@@ -155,7 +167,8 @@ export async function handleAdminTasks(request: Request): Promise<Response> {
     if (
       error instanceof TaskAdminError ||
       error instanceof BountyAdminStoreError ||
-      error instanceof BountyCorrectionStoreError
+      error instanceof BountyCorrectionStoreError ||
+      error instanceof LegacyBountyCarrierStoreError
     )
       return adminJson({ error: error.message }, 409);
     throw error;

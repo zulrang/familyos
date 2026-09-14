@@ -7,12 +7,23 @@ import type { HouseholdMember } from "@/members/members";
 import { AdminCompletions } from "./AdminCompletions";
 import type { CompletionCorrection, TaskAdminRead } from "./admin-types";
 import {
+  type LegacyBountyCompletionCarrier,
+  parseLegacyBountyCarrierId,
+  parseLegacyBountyCarrierRevision,
+} from "./legacy-bounty-carrier-types";
+import {
   type Instant,
   type LegacyTaskDefinition,
   type LocalDate,
   parseBountyCommandReceipt,
   parseBountyCorrectionId,
   parseClaimRevision,
+  parseCompletionId,
+  parseInstant,
+  parseLocalDate,
+  parseStarAmount,
+  parseTaskId,
+  parseTaskTitle,
   type TaskEvent,
   type TaskId,
 } from "./types";
@@ -20,6 +31,7 @@ import {
 const members: HouseholdMember[] = [
   { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
   { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+  { id: "former", name: "Former", status: "retired" },
 ];
 
 function definition(id: string, title: string): LegacyTaskDefinition {
@@ -73,12 +85,94 @@ function read(
     bountyClaims: [],
     bountyCompletions: [],
     bountyCompletionCorrections: [],
+    legacyBountyCompletionCarriers: [],
     events,
     originalEvents: events,
+    legacyBountyArchiveEvents: [],
     corrections,
     adjustments: [],
     balances: [],
     today: "2026-09-09" as TaskAdminRead["today"],
+  };
+}
+
+function required<T>(value: T | null): T {
+  if (value === null) throw new Error("Invalid earlier Bounty UI fixture");
+  return value;
+}
+
+function earlierBountyCarrier(): LegacyBountyCompletionCarrier {
+  const carrier = required(parseLegacyBountyCarrierId("legacy-carrier:dishes"));
+  const completion = {
+    id: required(parseCompletionId("legacy-completion:dishes")),
+    carrier,
+    by: "dad",
+    at: required(parseInstant("2026-09-03T14:00:00Z")),
+    creditedStars: required(parseStarAmount(5)),
+    creditProvenance: "recorded" as const,
+  };
+  const correction = required(parseBountyCorrectionId("legacy-reassignment"));
+  return {
+    kind: "legacy-bounty-completion-carrier",
+    id: carrier,
+    sourceTask: required(parseTaskId("legacy-dishes")),
+    sourceWindow: required(parseLocalDate("2026-09-03")),
+    definition: required(parseTaskId("legacy-dishes")),
+    title: required(parseTaskTitle("Wash old dishes")),
+    revision: required(parseLegacyBountyCarrierRevision(1)),
+    history: [
+      {
+        id: correction,
+        carrier,
+        completion: completion.id,
+        predecessor: null,
+        kind: "reassign",
+        fromMember: "dad",
+        toMember: "ellie",
+        creditedStars: completion.creditedStars,
+        creditProvenance: completion.creditProvenance,
+        reason: "Ellie did this work",
+        at: required(parseInstant("2026-09-03T15:00:00Z")),
+      },
+    ],
+    state: {
+      kind: "completed",
+      effectiveCompletion: completion,
+      creditedTo: "ellie",
+      correction,
+    },
+  };
+}
+
+function releasedEarlierBountyCarrier(): LegacyBountyCompletionCarrier {
+  const completed = earlierBountyCarrier();
+  if (completed.state.kind !== "completed")
+    throw new Error("Invalid completed earlier Bounty fixture");
+  const correction = required(parseBountyCorrectionId("legacy-undo"));
+  return {
+    ...completed,
+    revision: required(parseLegacyBountyCarrierRevision(2)),
+    history: [
+      ...completed.history,
+      {
+        id: correction,
+        carrier: completed.id,
+        completion: completed.state.effectiveCompletion.id,
+        predecessor: completed.state.correction,
+        kind: "undo",
+        fromMember: completed.state.creditedTo,
+        toMember: null,
+        creditedStars: completed.state.effectiveCompletion.creditedStars,
+        creditProvenance: completed.state.effectiveCompletion.creditProvenance,
+        reason: "Completion did not happen",
+        at: required(parseInstant("2026-09-03T16:00:00Z")),
+      },
+    ],
+    state: {
+      kind: "released",
+      undoneCompletion: completed.state.effectiveCompletion,
+      correction,
+    },
   };
 }
 
@@ -346,5 +440,137 @@ test("only Restore is offered while the original Claim remains reopened", async 
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("option", { name: "Reassign credit" }),
+  ).not.toBeInTheDocument();
+});
+
+test("earlier Bounty corrections offer Undo and reassign once, never Restore", async () => {
+  const user = userEvent.setup();
+  let finishRequest: ((response: Response) => void) | undefined;
+  const request = new Promise<Response>((resolve) => {
+    finishRequest = resolve;
+  });
+  const fetch = vi.fn(
+    (_input: RequestInfo | URL, _init?: RequestInit) => request,
+  );
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("confirm", () => true);
+  const data = read([], []);
+  data.legacyBountyCompletionCarriers = [earlierBountyCarrier()];
+  const onSaved = vi.fn();
+  render(
+    <AdminCompletions
+      data={data}
+      members={members}
+      onSaved={onSaved}
+      query=""
+    />,
+  );
+
+  expect(
+    screen.getByRole("heading", { name: "Wash old dishes" }),
+  ).toBeVisible();
+  expect(screen.getByText(/Earlier Bounty completion/)).toBeVisible();
+  await user.click(
+    screen.getByRole("button", { name: "Correct earlier Bounty completion" }),
+  );
+  expect(screen.getByRole("option", { name: "Undo completion" })).toBeVisible();
+  expect(screen.getByRole("option", { name: "Reassign credit" })).toBeVisible();
+  expect(
+    screen.queryByRole("option", { name: "Restore completion" }),
+  ).not.toBeInTheDocument();
+  await user.type(screen.getByLabelText("Reason"), "Imported record was wrong");
+  const submit = screen.getByRole("button", {
+    name: "Record earlier Bounty correction",
+  });
+  await user.dblClick(submit);
+
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(submit).toBeDisabled();
+  expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toMatchObject({
+    kind: "undo-legacy-bounty-completion",
+    carrier: "legacy-carrier:dishes",
+    revision: 1,
+    completion: "legacy-completion:dishes",
+    predecessor: "legacy-reassignment",
+    reason: "Imported record was wrong",
+  });
+  finishRequest?.(Response.json({ receipt: { status: "accepted" } }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+});
+
+test("a lost response retries the exact earlier Bounty reassignment", async () => {
+  const user = userEvent.setup();
+  let calls = 0;
+  const fetch = vi.fn(
+    async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      calls += 1;
+      if (calls === 1) throw new Error("response lost");
+      return Response.json({ receipt: { status: "already-applied" } });
+    },
+  );
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("confirm", () => true);
+  const data = read([], []);
+  data.legacyBountyCompletionCarriers = [earlierBountyCarrier()];
+  const onSaved = vi.fn();
+  render(
+    <AdminCompletions
+      data={data}
+      members={members}
+      onSaved={onSaved}
+      query=""
+    />,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: "Correct earlier Bounty completion" }),
+  );
+  await user.selectOptions(screen.getByLabelText("Correction"), "reassign");
+  await user.selectOptions(screen.getByLabelText("Credit to"), "former");
+  await user.type(screen.getByLabelText("Reason"), "Former did this work");
+  await user.click(
+    screen.getByRole("button", { name: "Record earlier Bounty correction" }),
+  );
+  await screen.findByRole("alert");
+  const firstBody = fetch.mock.calls[0]?.[1]?.body;
+  expect(JSON.parse(String(firstBody))).toMatchObject({
+    kind: "reassign-legacy-bounty-completion",
+    carrier: "legacy-carrier:dishes",
+    revision: 1,
+    completion: "legacy-completion:dishes",
+    predecessor: "legacy-reassignment",
+    member: "former",
+    reason: "Former did this work",
+  });
+
+  await user.click(
+    screen.getByRole("button", { name: "Retry earlier Bounty correction" }),
+  );
+  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch.mock.calls[1]?.[1]?.body).toBe(firstBody);
+});
+
+test("an undone earlier completion keeps history without offering Restore", () => {
+  const data = read([], []);
+  data.legacyBountyCompletionCarriers = [releasedEarlierBountyCarrier()];
+  render(
+    <AdminCompletions
+      data={data}
+      members={members}
+      onSaved={() => {}}
+      query=""
+    />,
+  );
+
+  expect(screen.getByText(/historical work released/)).toBeVisible();
+  expect(
+    screen.getByRole("heading", { name: "Wash old dishes" }).closest("article"),
+  ).toHaveTextContent("Completion did not happen");
+  expect(
+    screen.queryByRole("button", { name: "Correct earlier Bounty completion" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("option", { name: "Restore completion" }),
   ).not.toBeInTheDocument();
 });

@@ -301,7 +301,7 @@ export function saveDefinition(input: {
   }
   if (!allowsAssignedDraft(current, input.draft)) {
     throw new InvalidTaskDefinitionError(
-      "New open Routines are not supported. Assign this Routine to a member or rotation.",
+      "Open assigned Tasks are no longer supported. Create a Bounty instead.",
     );
   }
   const plan = planDefinitionSave({
@@ -362,6 +362,23 @@ export function loadEvents(): TaskEvent[] {
     .all();
   return rows.map((row) => {
     if (!isRecord(row)) throw new Error("corrupt task event row");
+    return eventFromRow(row);
+  });
+}
+
+/** Raw events retained for legacy definitions that were converted to Bounties. */
+export function loadLegacyBountyArchiveEvents(): TaskEvent[] {
+  const rows = tasksDatabase()
+    .prepare(
+      `SELECT e.task, e.window, e.kind, e.by, e.at, e.reason FROM events e
+       WHERE EXISTS (
+         SELECT 1 FROM legacy_bounty_sources s WHERE s.source_task_id = e.task
+       )
+       ORDER BY e.rowid`,
+    )
+    .all();
+  return rows.map((row) => {
+    if (!isRecord(row)) throw new Error("corrupt archived task event row");
     return eventFromRow(row);
   });
 }

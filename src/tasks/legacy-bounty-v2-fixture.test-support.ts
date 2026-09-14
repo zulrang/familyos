@@ -197,6 +197,14 @@ const DEFINITIONS: readonly LegacyDefinitionSeed[] = [
     stars: 8,
   },
   {
+    id: "legacy-once-missing-member-claim",
+    title: "Move old bicycle",
+    type: "chore",
+    recurrence: { kind: "once", date: "2026-09-14" },
+    assignment: { kind: "open" },
+    stars: 2,
+  },
+  {
     id: "legacy-completed-missing-credit",
     title: "Old completion",
     type: "chore",
@@ -281,6 +289,7 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
     "legacy-once-skipped",
     "legacy-once-claimed-skipped",
     "legacy-once-retired-member-claim",
+    "legacy-once-missing-member-claim",
     "legacy-undone-without-claim",
   ],
   currentRecurringOfferings: [
@@ -317,6 +326,11 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
   ],
   releasedClaims: [
     {
+      source: "legacy-once-claimed-skipped",
+      window: "2026-09-12",
+      member: "dad",
+    },
+    {
       source: "legacy-recurring-retired-claim",
       window: "2026-09-13",
       member: "former",
@@ -325,6 +339,11 @@ export const LEGACY_BOUNTY_V2_EXPECTED = {
       source: "legacy-once-retired-member-claim",
       window: "2026-09-14",
       member: "former",
+    },
+    {
+      source: "legacy-once-missing-member-claim",
+      window: "2026-09-14",
+      member: "departed",
     },
   ],
   noNewOffering: [
@@ -548,6 +567,12 @@ export function createLegacyBountyV2Fixture(
       window: "2026-09-14",
       kind: "claimed",
       by: "former",
+    });
+    insertEvent(db, {
+      task: "legacy-once-missing-member-claim",
+      window: "2026-09-14",
+      kind: "claimed",
+      by: "departed",
     });
     insertEvent(db, {
       task: "legacy-once-completed",

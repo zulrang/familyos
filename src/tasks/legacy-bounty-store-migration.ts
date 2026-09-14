@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { HouseholdMember } from "@/members/members";
+import type { CompletionCorrection } from "./admin-types";
 import {
   type BountyRecurrence,
   currentBountyInterval,
@@ -19,30 +20,13 @@ import {
   parseLocalTime,
   parseRecurrence,
   parseStarAmount,
+  parseTaskEvent,
   parseTaskId,
   parseTaskType,
+  type TaskEvent,
 } from "./types";
 
 const MIGRATION = "legacy-open-work-to-bounties-v1";
-
-type LegacyEventRow = Readonly<{
-  task: string;
-  window: LocalDate;
-  kind: "claimed" | "completed" | "verified" | "skipped";
-  by: string | null;
-  at: string | null;
-  reason: string | null;
-}>;
-
-type LegacyCorrectionRow = Readonly<{
-  id: string;
-  task: string;
-  window: LocalDate;
-  by: string | null;
-  reason: string;
-  at: string;
-  previous: string | null;
-}>;
 
 function parseJson(raw: unknown): unknown {
   if (typeof raw !== "string") return null;
@@ -90,34 +74,23 @@ function legacyDefinition(row: Record<string, unknown>): LegacyTaskDefinition {
   };
 }
 
-function eventRows(db: DatabaseSync, task: string): LegacyEventRow[] {
+function eventRows(db: DatabaseSync, task: string): TaskEvent[] {
   return db
     .prepare(
       "SELECT task, window, kind, by, at, reason FROM events WHERE task = ? ORDER BY window, rowid",
     )
     .all(task)
     .map((row) => {
-      const window = parseLocalDate(row.window);
-      if (
-        !window ||
-        (row.kind !== "claimed" &&
-          row.kind !== "completed" &&
-          row.kind !== "verified" &&
-          row.kind !== "skipped") ||
-        (row.by !== null && typeof row.by !== "string") ||
-        (row.at !== null && typeof row.at !== "string") ||
-        (row.reason !== null && typeof row.reason !== "string")
-      ) {
-        throw new Error("Invalid legacy open Task event");
-      }
-      return {
-        task: String(row.task),
-        window,
+      const event = parseTaskEvent({
+        task: row.task,
+        window: row.window,
         kind: row.kind,
         by: row.by,
         at: row.at,
         reason: row.reason,
-      };
+      });
+      if (!event) throw new Error("Invalid legacy open Task event");
+      return event;
     });
 }
 
@@ -125,7 +98,7 @@ function correctionRows(
   db: DatabaseSync,
   task: string,
   window: LocalDate,
-): LegacyCorrectionRow[] {
+): CompletionCorrection[] {
   return db
     .prepare(
       `SELECT id, task, window, by, reason, at, previous
@@ -136,9 +109,11 @@ function correctionRows(
     .map((row) => {
       const date = parseLocalDate(row.window);
       const at = parseInstant(row.at);
+      const taskId = parseTaskId(row.task);
       if (
         typeof row.id !== "string" ||
         !row.id ||
+        !taskId ||
         !date ||
         (row.by !== null && (typeof row.by !== "string" || !row.by)) ||
         typeof row.reason !== "string" ||
@@ -150,7 +125,7 @@ function correctionRows(
       }
       return {
         id: row.id,
-        task: String(row.task),
+        task: taskId,
         window: date,
         by: row.by,
         reason: row.reason,
@@ -233,12 +208,10 @@ function insertImportedHistory(input: {
   definition: LegacyTaskDefinition;
   recurrence: BountyRecurrence;
   window: LocalDate;
-  claim: LegacyEventRow | undefined;
-  completion: LegacyEventRow;
+  claim: Extract<TaskEvent, { kind: "claimed" }> | undefined;
+  completion: Extract<TaskEvent, { kind: "completed" }>;
 }): void {
   const { db, definition, recurrence, window, claim, completion } = input;
-  if (!completion.by || !completion.at || !parseInstant(completion.at))
-    throw new Error("Invalid legacy completion");
   const offering = insertCompatibilityOffering(
     db,
     definition,
@@ -350,13 +323,14 @@ function insertImportedHistory(input: {
   }
 }
 
-function insertUnfinishedClaim(input: {
+function insertClaim(input: {
   db: DatabaseSync;
   definition: LegacyTaskDefinition;
   recurrence: BountyRecurrence;
-  claim: LegacyEventRow;
+  claim: Extract<TaskEvent, { kind: "claimed" }>;
+  state: "unfinished" | "released";
 }): void {
-  const { db, definition, recurrence, claim } = input;
+  const { db, definition, recurrence, claim, state } = input;
   if (!claim.by) throw new Error("Invalid legacy claimant");
   const offering = insertCompatibilityOffering(
     db,
@@ -373,7 +347,7 @@ function insertUnfinishedClaim(input: {
       (id, offering_id, definition_id, member, scheduled_on, title, stars,
        revision, state, effective_completion_id, restorable_completion_id,
        correction_id, acceptance_provenance, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'unfinished', NULL, NULL, NULL, 'legacy', NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'legacy', NULL)`,
   ).run(
     subject,
     offering,
@@ -382,6 +356,8 @@ function insertUnfinishedClaim(input: {
     claim.window,
     definition.title,
     definition.stars,
+    state === "released" ? 1 : 0,
+    state,
   );
 }
 
@@ -432,10 +408,12 @@ function importDefinition(
 
   for (const window of representedWindows) {
     const claim = events.find(
-      (event) => event.window === window && event.kind === "claimed",
+      (event): event is Extract<TaskEvent, { kind: "claimed" }> =>
+        event.window === window && event.kind === "claimed",
     );
     const completion = events.find(
-      (event) => event.window === window && event.kind === "completed",
+      (event): event is Extract<TaskEvent, { kind: "completed" }> =>
+        event.window === window && event.kind === "completed",
     );
     if (completion) {
       insertImportedHistory({
@@ -446,13 +424,18 @@ function importDefinition(
         claim,
         completion,
       });
-    } else if (
-      claim &&
-      !events.some(
-        (event) => event.window === window && event.kind === "skipped",
-      )
-    ) {
-      insertUnfinishedClaim({ db, definition, recurrence, claim });
+    } else if (claim) {
+      insertClaim({
+        db,
+        definition,
+        recurrence,
+        claim,
+        state: events.some(
+          (event) => event.window === window && event.kind === "skipped",
+        )
+          ? "released"
+          : "unfinished",
+      });
     }
   }
 }
@@ -494,14 +477,23 @@ export function migrateLegacyOpenWork(input: {
       .filter((definition) => definition.assignment.kind === "open");
     for (const definition of definitions)
       importDefinition(db, definition, today);
-    releaseBountiesForRetiredMembers(
-      db,
-      new Set(
-        members
-          .filter((member) => member.status === "retired")
-          .map((member) => member.id),
-      ),
+    const activeMembers = new Set(
+      members
+        .filter((member) => member.status === "active")
+        .map((member) => member.id),
     );
+    const inactiveImportedClaimants = new Set(
+      db
+        .prepare(
+          `SELECT DISTINCT member FROM bounty_claims
+           WHERE acceptance_provenance = 'legacy'
+             AND state IN ('unfinished', 'reopened')`,
+        )
+        .all()
+        .map((row) => String(row.member))
+        .filter((member) => !activeMembers.has(member)),
+    );
+    releaseBountiesForRetiredMembers(db, inactiveImportedClaimants);
     const after = JSON.stringify(
       db
         .prepare("SELECT member, balance FROM star_balances ORDER BY member")

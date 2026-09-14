@@ -7,8 +7,9 @@ slideshow, Rewards, Settings, and the fixed navigation rail. Meals, Recipes,
 and Sleep remain stubs.
 
 You run one FamilyOS server on a computer you control; wall panels connect over
-the local network. Parents can manage local Tasks, Members, Rewards, and star balances
-from the separate mobile interface at `/admin`.
+the local network. Parents can manage assigned Tasks, Bounties, Members,
+Rewards, completion corrections, and Star Balances from the separate mobile
+interface at `/admin`.
 
 ![FamilyOS calendar](docs/calendar.png)
 
@@ -41,7 +42,8 @@ and restart. Open `/admin` on home Wi-Fi; display pairing is not required.
 Safari's **Share → Add to Home Screen** provides standalone access. Sessions
 lock after 15 minutes of inactivity; the header's lock icon locks immediately.
 
-Manage Tasks, Members, Rewards, completion corrections, and star balances.
+Manage assigned Tasks, Bounties, Members, Rewards, completion corrections, and
+Star Balances.
 Create/edit forms and star adjustments open in 90%-height drawers with their own
 scrolling area and a circular down-chevron close button. The list stays visible
 underneath.
@@ -65,5 +67,7 @@ The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.
 - [docs/admin.md](docs/admin.md) — parent admin setup, workflows, and mobile screenshots
 - [docs/photos.md](docs/photos.md) — Google Photos setup and slideshow behavior
 - [docs/requirements.md](docs/requirements.md) — v1 scope
+- [docs/design/tasks-design-spec.md](docs/design/tasks-design-spec.md) — assigned Tasks and legacy compatibility
+- [docs/design/bounties-design-spec.md](docs/design/bounties-design-spec.md) — Bounty lifecycle and cutover contract
 - [docs/code-design-principles.md](docs/code-design-principles.md) — coding standards for humans and agents
 - [docs/adr/](docs/adr/) — architecture decision records

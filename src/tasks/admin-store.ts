@@ -13,10 +13,10 @@ import {
   taskTransaction,
 } from "./store";
 import {
+  type AssignedTaskDraft,
   type AssignmentPolicy,
   allowsAssignedDraft,
   assignmentEquals,
-  type CreateTaskDraft,
   createDefinition,
   type LegacyTaskDefinition,
   type LocalDate,
@@ -69,7 +69,7 @@ export function preserveRotationTurn(
   };
 }
 
-function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
+function saveTask(task: TaskId, draft: AssignedTaskDraft, today: LocalDate) {
   const previous = requireActiveTask(task);
   if (!allowsAssignedDraft(previous, draft)) {
     throw new TaskAdminError(
@@ -108,13 +108,13 @@ function saveTask(task: TaskId, draft: CreateTaskDraft, today: LocalDate) {
 
 export function editAdminTask(
   task: TaskId,
-  draft: CreateTaskDraft,
+  draft: AssignedTaskDraft,
   today: LocalDate,
 ) {
   return taskTransaction(() => saveTask(task, draft, today));
 }
 
-export function createAdminTask(id: string, draft: CreateTaskDraft) {
+export function createAdminTask(id: string, draft: AssignedTaskDraft) {
   return taskTransaction(() => {
     const existing = loadDefinitions().find((row) => row.id === id);
     if (existing) return existing;

@@ -27,11 +27,10 @@ import { occurrencesForColumn } from "./view";
 type BoardLocation =
   | { kind: "board" }
   | { kind: "member"; member: MemberId }
-  | { kind: "household" }
   | { kind: "bounties" };
 
 type TaskGroup = {
-  location: Extract<BoardLocation, { kind: "member" | "household" }>;
+  location: Extract<BoardLocation, { kind: "member" }>;
   key: string;
   name: string;
   palette: MemberTaskPalette;
@@ -41,15 +40,8 @@ type TaskGroup = {
   bounties: ClaimedBounty[];
 };
 
-type ClaimSelection = {
-  occurrence: Occurrence;
-  onPick: (member: MemberId) => void;
-  onCancel: () => void;
-};
-
 type TaskActions = {
   onComplete: (row: Occurrence) => void;
-  onClaim: (row: Occurrence) => void;
   onSkip: (row: Occurrence) => void;
   onEdit: (row: Occurrence) => void;
   onCompleteBounty: (row: ClaimedBounty) => void;
@@ -60,7 +52,6 @@ type TaskActions = {
   mutatingBountyOfferings: ReadonlySet<OfferingId>;
 };
 
-const HOUSEHOLD_PALETTE = memberTaskPalette("#85958c");
 const BOARD_PREVIEW_COUNT = 3;
 
 function paletteStyle(palette: MemberTaskPalette): CSSProperties {
@@ -112,10 +103,8 @@ function GroupAvatar({ group }: { group: TaskGroup }) {
 
 function GroupTasks({
   group,
-  claimSelection,
   onOpen,
   onComplete,
-  onClaim,
   onSkip,
   onEdit,
   onCompleteBounty,
@@ -123,7 +112,6 @@ function GroupTasks({
   mutatingBountyClaims,
 }: TaskActions & {
   group: TaskGroup;
-  claimSelection: ClaimSelection | null;
   onOpen?: () => void;
 }) {
   const preview = onOpen !== undefined;
@@ -151,17 +139,6 @@ function GroupTasks({
       time={row.time}
       status={statusFor(row)}
       onComplete={row.assignee !== null ? () => onComplete(row) : undefined}
-      onClaim={
-        row.assignee === null && row.state === "pending"
-          ? () => onClaim(row)
-          : undefined
-      }
-      onCancelClaim={
-        claimSelection?.occurrence.task === row.task &&
-        claimSelection.occurrence.window === row.window
-          ? claimSelection.onCancel
-          : undefined
-      }
       onSkip={
         !preview && (row.state === "pending" || row.state === "claimed")
           ? () => onSkip(row)
@@ -233,12 +210,10 @@ function GroupTasks({
 export function TasksBoard({
   members,
   tasks,
-  claimSelection,
   ...actions
 }: TaskActions & {
   members: ActiveMember[];
   tasks: TasksViewRead;
-  claimSelection: ClaimSelection | null;
 }) {
   const [location, setLocation] = useState<BoardLocation>({ kind: "board" });
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -265,30 +240,9 @@ export function TasksBoard({
       ),
     };
   });
-  const householdRows = occurrencesForColumn(
-    tasks.occurrences.filter(
-      (row) =>
-        row.assignee === null &&
-        (row.state === "pending" || row.state === "skipped"),
-    ),
-  );
-  if (householdRows.length > 0 || location.kind === "household") {
-    groups.push({
-      key: "household",
-      location: { kind: "household" },
-      name: "Household",
-      palette: HOUSEHOLD_PALETTE,
-      done: 0,
-      total: householdRows.length,
-      rows: householdRows,
-      bounties: [],
-    });
-  }
-  const selected = groups.find((group) =>
-    location.kind === "member"
-      ? group.location.kind === "member" &&
-        group.location.member === location.member
-      : location.kind === "household" && group.location.kind === "household",
+  const selected = groups.find(
+    (group) =>
+      location.kind === "member" && group.location.member === location.member,
   );
   const bountySelected = location.kind === "bounties";
 
@@ -327,22 +281,6 @@ export function TasksBoard({
     });
   }
 
-  const claimButton = (group: TaskGroup) =>
-    claimSelection && group.location.kind === "member" ? (
-      <button
-        type="button"
-        className={styles.claimFor}
-        onClick={() => {
-          if (group.location.kind === "member") {
-            claimSelection.onPick(group.location.member);
-          }
-        }}
-      >
-        <Icon name="user-plus" size={20} />
-        Claim for {group.name}
-      </button>
-    ) : null;
-
   return (
     <div className={styles.boardScreen}>
       {selected || bountySelected ? (
@@ -368,7 +306,6 @@ export function TasksBoard({
                   <GroupAvatar group={group} />
                   <span>{group.name}</span>
                 </button>
-                {claimButton(group)}
               </div>
             ))}
             <button
@@ -395,20 +332,6 @@ export function TasksBoard({
           </button>
         </div>
       )}
-      {claimSelection ? (
-        <div className={styles.claimPrompt}>
-          <output>
-            Claim {claimSelection.occurrence.title} for a household member
-          </output>
-          <button
-            type="button"
-            className={styles.back}
-            onClick={claimSelection.onCancel}
-          >
-            Cancel claim
-          </button>
-        </div>
-      ) : null}
       <div ref={scrollRef} className={styles.scroll}>
         {!selected && !bountySelected ? (
           <div className={styles.board}>
@@ -442,12 +365,10 @@ export function TasksBoard({
                       </span>
                     </button>
                   </h2>
-                  {claimButton(group)}
                 </header>
                 <GroupTasks
                   {...actions}
                   group={group}
-                  claimSelection={claimSelection}
                   onOpen={() => open(group)}
                 />
               </section>
@@ -463,11 +384,7 @@ export function TasksBoard({
               <header className={styles.focusHeader}>
                 <GroupAvatar group={selected} />
                 <div>
-                  <h2>
-                    {selected.location.kind === "household"
-                      ? "Household tasks"
-                      : `${selected.name}’s tasks`}
-                  </h2>
+                  <h2>{selected.name}’s tasks</h2>
                   <p>
                     {selected.rows.filter(
                       (row) =>
@@ -479,12 +396,7 @@ export function TasksBoard({
                   </p>
                 </div>
               </header>
-              <GroupTasks
-                key={selected.key}
-                {...actions}
-                group={selected}
-                claimSelection={claimSelection}
-              />
+              <GroupTasks key={selected.key} {...actions} group={selected} />
             </section>
             <aside className={styles.focusSummary}>
               <p>Today’s progress</p>
@@ -498,21 +410,6 @@ export function TasksBoard({
                   ? "All done for today"
                   : "One task at a time"}
               </h2>
-              {selected.location.kind !== "household" &&
-              householdRows.length > 0 ? (
-                <button
-                  type="button"
-                  className={styles.householdLink}
-                  onClick={() => {
-                    const household = groups.find(
-                      (group) => group.location.kind === "household",
-                    );
-                    if (household) open(household);
-                  }}
-                >
-                  Household tasks <Icon name="chevron-right" size={22} />
-                </button>
-              ) : null}
             </aside>
           </div>
         ) : null}

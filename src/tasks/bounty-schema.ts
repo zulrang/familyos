@@ -273,7 +273,9 @@ const SUBJECTS_AND_HISTORY_V9 = `
     correction_id TEXT,
     CHECK (
       (state = 'completed' AND effective_completion_id IS NOT NULL)
-      OR (state = 'released' AND effective_completion_id IS NULL)
+      OR (state = 'released'
+        AND effective_completion_id IS NULL
+        AND correction_id IS NOT NULL)
     ),
     FOREIGN KEY (id) REFERENCES bounty_work_subjects(id),
     FOREIGN KEY (offering_id) REFERENCES bounty_offerings_v9(id),

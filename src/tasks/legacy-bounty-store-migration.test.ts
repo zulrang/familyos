@@ -10,7 +10,6 @@ import {
   loadBountyClaims,
   loadBountyDefinitions,
   migrateBountyStore,
-  releaseBountiesForRetiredMembers,
   releaseBounty,
 } from "./bounty-store";
 import { migrateLegacyOpenWork } from "./legacy-bounty-store-migration";
@@ -209,14 +208,8 @@ test("retired legacy claimants use the normal release lifecycle", () => {
     migrateLegacyOpenWork({
       db,
       today: legacyFixtureToday(),
-      members: [],
+      members: LEGACY_BOUNTY_V2_EXPECTED.members,
     });
-    const retired = new Set(
-      LEGACY_BOUNTY_V2_EXPECTED.members
-        .filter((member) => member.status === "retired")
-        .map((member) => member.id),
-    );
-    releaseBountiesForRetiredMembers(db, retired);
 
     const released = loadBountyClaims(db).filter(
       (row) => row.state.kind === "released",

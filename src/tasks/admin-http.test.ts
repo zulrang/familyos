@@ -7,7 +7,7 @@ import { handleAdminMembers } from "@/members/admin-http";
 import { readHousehold, writeHousehold } from "@/settings/settings";
 import { handleAdminSession } from "@/shared/admin-auth";
 import { handleAdminTasks } from "./admin-http";
-import { correctAdminCompletion, createAdminTask } from "./admin-store";
+import { correctAdminCompletion } from "./admin-store";
 import { parseTaskAdminCommand, type TaskAdminRead } from "./admin-types";
 import {
   claimBounty,
@@ -19,6 +19,10 @@ import {
   releaseBounty,
   replaceDefinition,
 } from "./bounty-store";
+import {
+  createLegacyBountyV2Fixture,
+  LEGACY_BOUNTY_V2_EXPECTED,
+} from "./legacy-bounty-v2-fixture.test-support";
 import {
   applyEvent,
   closeTasksDatabase,
@@ -448,50 +452,22 @@ describe("parent administration", () => {
     ).toBe(400);
   });
 
-  test("legacy open Routines allow metadata edits without allowing a new schedule", async () => {
-    await snapshot();
-    const legacy = createAdminTask(crypto.randomUUID(), {
-      ...draft,
-      title: "Morning check",
-      type: "routine",
-      recurrence: { kind: "weekly", days: ["mon", "fri"] },
-      assignment: { kind: "open" },
-    });
-    const metadataEdit = {
-      kind: "edit",
-      task: legacy.id,
-      draft: {
-        ...draft,
-        title: "Morning checklist",
-        type: "routine",
-        recurrence: { kind: "weekly", days: ["fri", "mon"] },
-        assignment: { kind: "open" },
-        time: "08:00",
-        stars: 1,
-      },
-    };
-    expect((await tasks(metadataEdit)).status).toBe(200);
-    expect(loadDefinitions().find((row) => row.id === legacy.id)).toMatchObject(
-      {
-        title: "Morning checklist",
-        type: "routine",
-        assignment: { kind: "open" },
-        recurrence: { kind: "weekly", days: ["mon", "fri"] },
-        time: "08:00",
-        stars: 1,
-      },
-    );
-    expect(
-      (
-        await tasks({
-          ...metadataEdit,
-          draft: {
-            ...metadataEdit.draft,
-            recurrence: { kind: "weekly", days: ["tue"] },
-          },
-        })
-      ).status,
-    ).toBe(409);
+  test("administration rejects open assigned Chores and Routines", async () => {
+    for (const type of ["chore", "routine"] as const) {
+      expect(
+        (
+          await tasks({
+            kind: "create",
+            id: crypto.randomUUID(),
+            draft: {
+              ...draft,
+              type,
+              assignment: { kind: "open" },
+            },
+          })
+        ).status,
+      ).toBe(400);
+    }
   });
 
   test("an accepted conversion replays after its assigned member retires", async () => {
@@ -1222,7 +1198,7 @@ describe("parent administration", () => {
     const completed = loadBountyClaims(tasksDatabase()).find(
       (row) => row.claim.id === original.claim.id,
     );
-    const reassigned = await tasks({
+    const reassignCommand = {
       kind: "reassign-bounty-completion",
       requestId: crypto.randomUUID(),
       claim: original.claim.id,
@@ -1231,7 +1207,8 @@ describe("parent administration", () => {
       predecessor: null,
       member: "b",
       reason: "Bailey did the work",
-    });
+    } as const;
+    const reassigned = await tasks(reassignCommand);
     expect(reassigned.status).toBe(200);
     const reassignment = (await reassigned.json()).receipt;
     expect(balance("a")).toBe(0);
@@ -1240,6 +1217,16 @@ describe("parent administration", () => {
       revision: 2,
       state: { kind: "completed", creditedTo: "b" },
     });
+
+    const household = await readHousehold();
+    await writeHousehold({
+      ...household,
+      members: household.members.filter((member) => member.id !== "b"),
+      configVersion: household.configVersion + 1,
+    });
+    expect((await tasks(reassignCommand)).status).toBe(200);
+    expect(balance("a")).toBe(0);
+    expect(balance("b")).toBe(4);
 
     expect(
       (
@@ -1600,6 +1587,171 @@ describe("parent administration", () => {
       ).status,
     ).toBe(200);
     expect(balance("a")).toBe(3);
+  });
+
+  test("migrated carrier history is corrected through the admin boundary and replays", async () => {
+    closeTasksDatabase();
+    createLegacyBountyV2Fixture(path.join(dir, "tasks.sqlite")).close();
+    await writeHousehold({
+      familyName: "Legacy Family",
+      members: [...LEGACY_BOUNTY_V2_EXPECTED.members],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 2,
+    });
+    const migrated = await snapshot();
+    expect(migrated.legacyBountyArchiveEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skipped",
+          task: "legacy-once-skipped",
+          window: "2026-09-11",
+        }),
+        expect.objectContaining({
+          kind: "verified",
+          task: "legacy-once-completed",
+          window: "2026-09-09",
+        }),
+      ]),
+    );
+    const reopened = migrated.bountyClaims.find(
+      (row) => row.claim.offering.definition === "legacy-undone-recorded-claim",
+    );
+    if (!reopened || reopened.state.kind !== "reopened")
+      throw new Error("missing migrated reopened Claim");
+    const restore = await tasks({
+      kind: "restore-bounty-completion",
+      requestId: "restore-imported-recorded-claim",
+      claim: reopened.claim.id,
+      revision: reopened.revision,
+      completion: reopened.state.undoneCompletion.id,
+      predecessor: reopened.state.correction,
+      reason: "Legacy completion was correct",
+    });
+    expect(restore.status).toBe(200);
+    const restoredReceipt = (await restore.json()).receipt;
+    expect(balance("kid")).toBe(LEGACY_BOUNTY_V2_EXPECTED.balances.kid + 3);
+    const undo = await tasks({
+      kind: "undo-bounty-completion",
+      requestId: "undo-restored-imported-recorded-claim",
+      claim: reopened.claim.id,
+      revision: restoredReceipt.result.claim.revision,
+      completion: reopened.state.undoneCompletion.id,
+      predecessor: restoredReceipt.result.correction.id,
+      reason: "Legacy completion remains undone",
+    });
+    expect(undo.status).toBe(200);
+    expect(balance("kid")).toBe(LEGACY_BOUNTY_V2_EXPECTED.balances.kid);
+    const scheduleEdit = await tasks({
+      kind: "replace-definition",
+      requestId: "edit-imported-schedule-request-1",
+      source: {
+        kind: "bounty",
+        definition: "legacy-routine-open",
+        revision: 0,
+      },
+      replacement: {
+        kind: "bounty",
+        type: "chore",
+        title: "Check air filter monthly",
+        stars: 5,
+        recurrence: {
+          kind: "recurring",
+          startsOn: migrated.today,
+          cadence: { kind: "monthly", day: 14 },
+        },
+      },
+    });
+    expect(scheduleEdit.status).toBe(200);
+    expect((await scheduleEdit.json()).receipt.replacement).toMatchObject({
+      kind: "bounty",
+      lineage: "lineage:legacy-routine-open",
+    });
+    const conversion = await tasks({
+      kind: "replace-definition",
+      requestId: "convert-imported-once-request-1",
+      source: {
+        kind: "bounty",
+        definition: "legacy-once-open",
+        revision: 0,
+      },
+      replacement: {
+        kind: "assigned",
+        title: "Put away delivery",
+        type: "chore",
+        recurrence: { kind: "daily" },
+        assignment: { kind: "fixed", member: "dad" },
+        time: null,
+        stars: 2,
+      },
+    });
+    expect(conversion.status).toBe(200);
+    const converted = (await conversion.json()).receipt.replacement;
+    expect(converted).toMatchObject({
+      kind: "assigned",
+      lineage: "lineage:legacy-once-open",
+    });
+    expect((await snapshot()).definitions).toContainEqual(
+      expect.objectContaining({ id: converted.id, lineage: converted.lineage }),
+    );
+    const carrier = migrated.legacyBountyCompletionCarriers.find(
+      (row) => row.sourceTask === "legacy-restored-without-claim",
+    );
+    expect(carrier?.state).toMatchObject({
+      kind: "completed",
+      creditedTo: "kid",
+      correction: "correction-restore-carrier-to-kid",
+    });
+    if (!carrier || carrier.state.kind !== "completed")
+      throw new Error("missing migrated carrier");
+    const command = {
+      kind: "reassign-legacy-bounty-completion",
+      requestId: "reassign-imported-carrier-history",
+      carrier: carrier.id,
+      revision: carrier.revision,
+      completion: carrier.state.effectiveCompletion.id,
+      predecessor: carrier.state.correction,
+      member: "dad",
+      reason: "Dad completed this work",
+    } as const;
+    const accepted = await tasks(command);
+    expect(accepted.status).toBe(200);
+    const acceptedBody = await accepted.json();
+    const household = await readHousehold();
+    await writeHousehold({
+      ...household,
+      members: household.members.filter((member) => member.id !== "dad"),
+      configVersion: household.configVersion + 1,
+    });
+    const replay = await tasks(command);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({
+      receipt: {
+        ...acceptedBody.receipt,
+        status: "already-applied",
+      },
+    });
+    const refreshed = await snapshot();
+    expect(
+      refreshed.legacyBountyCompletionCarriers.find(
+        (row) => row.id === carrier.id,
+      )?.state,
+    ).toMatchObject({ kind: "completed", creditedTo: "dad" });
+    expect(
+      (
+        await tasks({
+          kind: "correct",
+          id: "1234567890abcdef1234567890abcdef",
+          task: "legacy-restored-without-claim",
+          window: "2026-09-03",
+          by: null,
+          reason: "stale legacy path",
+          previous: "correction-restore-carrier-to-kid",
+        })
+      ).status,
+    ).toBe(409);
   });
   test("new late completions on retired definitions still credit once", async () => {
     const definition = await create();

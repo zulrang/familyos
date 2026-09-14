@@ -6,6 +6,10 @@ import { afterAll, beforeAll, describe, test } from "vitest";
 import { parseTaskAdminCommand } from "./admin-types";
 import { correctBountyCompletion } from "./bounty-correction-store";
 import {
+  createLegacyBountyV2Fixture,
+  LEGACY_BOUNTY_V2_EXPECTED,
+} from "./legacy-bounty-v2-fixture.test-support";
+import {
   addLocalDays,
   type BountyDefinition,
   type EventReceipt,
@@ -300,10 +304,7 @@ describe("Tasks HTTP", () => {
     );
   });
 
-  test("a starred monthly open task projects through claim and completion", async () => {
-    const before = (await (
-      await handleGetTasks(req("http://familyos.test/api/tasks"))
-    ).json()) as TasksViewRead;
+  test("public creation rejects open assigned Chores", async () => {
     const created = await handleCreateTask(
       req("http://familyos.test/api/tasks", {
         method: "POST",
@@ -316,109 +317,7 @@ describe("Tasks HTTP", () => {
         }),
       }),
     );
-    assert.equal(created.status, 200);
-    const { definition } = (await created.json()) as {
-      definition: LegacyTaskDefinition;
-    };
-    assert.deepEqual(definition.recurrence, { kind: "monthly", day: 15 });
-    assert.deepEqual(definition.assignment, { kind: "open" });
-    assert.equal(definition.stars, 7);
-
-    const unclaimed = (await (
-      await handleGetTasks(req("http://familyos.test/api/tasks"))
-    ).json()) as TasksViewRead;
-    const open = unclaimed.occurrences.find(
-      (row) => row.task === definition.id,
-    );
-    assert.equal(open?.state, "pending");
-    assert.equal(open?.assignee, null);
-    assert.deepEqual(unclaimed.progress, before.progress);
-    assert.ok(open);
-
-    const firstClaim = await handlePostTaskEvents(
-      req("http://familyos.test/api/tasks/events", {
-        method: "POST",
-        body: JSON.stringify({
-          events: [
-            {
-              kind: "claimed",
-              task: definition.id,
-              window: open.window,
-              by: "dad",
-            },
-          ],
-        }),
-      }),
-    );
-    const firstReceipt = (await firstClaim.json()) as {
-      receipts: EventReceipt[];
-    };
-    assert.equal(firstReceipt.receipts[0]?.status, "inserted");
-
-    const secondClaim = await handlePostTaskEvents(
-      req("http://familyos.test/api/tasks/events", {
-        method: "POST",
-        body: JSON.stringify({
-          events: [
-            {
-              kind: "claimed",
-              task: definition.id,
-              window: open.window,
-              by: "ellie",
-            },
-          ],
-        }),
-      }),
-    );
-    const secondReceipt = (await secondClaim.json()) as {
-      receipts: EventReceipt[];
-    };
-    assert.equal(secondReceipt.receipts[0]?.status, "already-present");
-
-    const claimed = (await (
-      await handleGetTasks(req("http://familyos.test/api/tasks"))
-    ).json()) as TasksViewRead;
-    const claimedRow = claimed.occurrences.find(
-      (row) => row.task === definition.id,
-    );
-    assert.equal(claimedRow?.state, "claimed");
-    assert.equal(claimedRow?.assignee, "dad");
-    const dadBefore = before.progress.find((row) => row.member === "dad");
-    const dadClaimed = claimed.progress.find((row) => row.member === "dad");
-    assert.equal(dadClaimed?.total, (dadBefore?.total ?? 0) + 1);
-
-    await handlePostTaskEvents(
-      req("http://familyos.test/api/tasks/events", {
-        method: "POST",
-        body: JSON.stringify({
-          events: [
-            {
-              kind: "completed",
-              task: definition.id,
-              window: open.window,
-              by: "dad",
-              at: "2026-08-25T16:00:00Z",
-            },
-          ],
-        }),
-      }),
-    );
-    const completed = (await (
-      await handleGetTasks(req("http://familyos.test/api/tasks"))
-    ).json()) as TasksViewRead;
-    const completedRow = completed.occurrences.find(
-      (row) => row.task === definition.id,
-    );
-    assert.equal(completedRow?.state, "done");
-    if (completedRow?.state === "done") assert.equal(completedRow.by, "dad");
-    const dadCompleted = completed.progress.find((row) => row.member === "dad");
-    assert.equal(dadCompleted?.done, (dadBefore?.done ?? 0) + 1);
-    const balanceBefore =
-      before.starBalances.find((row) => row.member === "dad")?.balance ?? 0;
-    assert.deepEqual(
-      completed.starBalances.find((row) => row.member === "dad"),
-      { member: "dad", balance: balanceBefore + 7 },
-    );
+    assert.equal(created.status, 400);
   });
 
   test("completion increments progress; a duplicate stores one fact", async () => {
@@ -900,7 +799,7 @@ describe("Tasks HTTP", () => {
     assert.equal(missing.status, 400);
   });
 
-  test("public create/save reject new open Routines but preserve legacy metadata edits", async () => {
+  test("public create and save reject every open assigned Task", async () => {
     const createOpenRoutine = await handleCreateTask(
       req("http://familyos.test/api/tasks", {
         method: "POST",
@@ -941,7 +840,7 @@ describe("Tasks HTTP", () => {
           }),
         )
       ).status,
-      200,
+      400,
     );
     assert.equal(
       (
@@ -1240,7 +1139,7 @@ describe("Tasks HTTP", () => {
           title: "New dishes",
           type: replaced.definition.type,
           recurrence: replaced.definition.recurrence,
-          assignment: { kind: "open" },
+          assignment: { kind: "rotation", order: ["ellie", "dad"] },
           stars: 0,
         }),
       }),
@@ -2793,5 +2692,134 @@ describe("Tasks HTTP", () => {
         configVersion: 5,
       });
     }
+  });
+
+  test("a legacy household cuts over before its first public read or write", async () => {
+    closeTasksDatabase();
+    const databasePath = path.join(dataRoot, "tasks.sqlite");
+    await rm(databasePath, { force: true });
+    await rm(`${databasePath}-wal`, { force: true });
+    await rm(`${databasePath}-shm`, { force: true });
+    createLegacyBountyV2Fixture(databasePath).close();
+    await writeHousehold({
+      familyName: "Legacy Household",
+      members: [...LEGACY_BOUNTY_V2_EXPECTED.members],
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 6,
+    });
+    const now = new Date("2026-09-14T12:00:00-04:00");
+
+    const archivedWrite = await handlePostTaskEvents(
+      req("http://familyos.test/api/tasks/events", {
+        method: "POST",
+        body: JSON.stringify({
+          events: [
+            {
+              kind: "skipped",
+              task: "legacy-once-open",
+              window: "2026-09-14",
+              reason: "stale display",
+            },
+          ],
+        }),
+      }),
+    );
+    assert.equal(archivedWrite.status, 409);
+
+    const first = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    assert.deepEqual(
+      first.definitions.map((row) => row.id),
+      LEGACY_BOUNTY_V2_EXPECTED.preserveAssigned,
+    );
+    assert.equal(
+      first.bountyDefinitions.length,
+      LEGACY_BOUNTY_V2_EXPECTED.convertToBounty.length - 1,
+    );
+    const offering = first.availableBounties.find(
+      (row) => row.offering.definition === "legacy-once-open",
+    );
+    assert.ok(offering);
+
+    const importedCurrentClaim = first.bountyClaims.find(
+      (row) =>
+        row.claim.offering.definition === "legacy-recurring-current-claim" &&
+        row.state.kind === "unfinished",
+    );
+    assert.ok(importedCurrentClaim);
+    const releaseCommand = {
+      kind: "release-bounty",
+      requestId: "release-imported-current-claim-http",
+      claim: importedCurrentClaim.claim.id,
+      revision: importedCurrentClaim.revision,
+    } as const;
+    const released = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify(releaseCommand),
+      }),
+      now,
+    );
+    assert.equal(released.status, 200);
+    const releaseReplay = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify(releaseCommand),
+      }),
+      now,
+    );
+    assert.equal(releaseReplay.status, 200);
+    assert.equal(
+      (await releaseReplay.json()).receipt.status,
+      "already-applied",
+    );
+    const afterRelease = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    assert.ok(
+      afterRelease.availableBounties.some(
+        (row) => row.offering.definition === "legacy-recurring-current-claim",
+      ),
+    );
+
+    const claimed = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "claim-bounty",
+          requestId: crypto.randomUUID(),
+          offering: offering.offering,
+          member: "dad",
+          definitionRevision: offering.definitionRevision,
+        }),
+      }),
+      now,
+    );
+    assert.equal(claimed.status, 200);
+    const claim = (await claimed.json()).receipt.result.claim;
+    const completed = await handleBountyCommand(
+      req("http://familyos.test/api/tasks", {
+        method: "PATCH",
+        body: JSON.stringify({
+          kind: "complete-bounty",
+          requestId: crypto.randomUUID(),
+          claim: claim.id,
+          revision: 0,
+        }),
+      }),
+      now,
+    );
+    assert.equal(completed.status, 200);
+    const final = (await (
+      await handleGetTasks(req("http://familyos.test/api/tasks"), now)
+    ).json()) as TasksViewRead;
+    assert.equal(
+      final.starBalances.find((row) => row.member === "dad")?.balance,
+      LEGACY_BOUNTY_V2_EXPECTED.balances.dad + 2,
+    );
   });
 });

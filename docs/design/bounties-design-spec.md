@@ -1,7 +1,7 @@
 # Bounties
 
-Design confirmed by the user. This confirms the design only; implementation
-has not started and application code has not been changed during this interview.
+Design confirmed by the user. This is the current Bounty behavior and cutover
+contract.
 See [ADR 0008](../adr/0008-bounty-availability-and-claimed-work.md) for the
 lifecycle trade-off. This design revises open-task behavior in the existing
 [Tasks design](tasks-design-spec.md).
@@ -246,5 +246,23 @@ existing shared-display interaction model.
    Exercise UI behavior and run the repository's relevant test, contract,
    type, and lint checks.
 
-Update the existing Tasks spec's superseded open-assignment rules alongside
-implementation so the docs describe the shipped behavior consistently.
+The existing Tasks spec links its superseded open-assignment rules to this
+contract while retaining the original assigned-Task decision history.
+
+## Legacy calendar compatibility
+
+The legacy cutover normalizes weekly weekday lists to distinct Monday-through-
+Sunday order. Because old recurring definitions had no start date, their
+`startsOn` is the earliest canonical interval containing either the migration
+date (or the retirement date for retired definitions) or any represented
+historical work. This keeps the current interval available without postponing
+existing work.
+
+Every legacy `(TaskId, occurrence date)` reservation receives its own immutable
+compatibility offering identity, mapped to the canonical interval that contains
+it. Compatibility offerings are never available for a new Claim, but any live
+work on them reserves that logical interval. This preserves duplicate recorded
+commitments without generating missed-work backlog. Unknown acceptance times
+remain unknown. A completion without a recorded Claim uses a terminal legacy
+completion carrier; its actual credited amount and provenance remain distinct
+from the current definition reward.

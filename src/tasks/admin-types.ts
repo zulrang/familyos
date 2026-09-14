@@ -1,4 +1,10 @@
 import {
+  type LegacyBountyCompletionCarrier,
+  type LegacyBountyCompletionCorrectionCommand,
+  parseLegacyBountyCompletionCorrectionCommand,
+} from "./legacy-bounty-carrier-types";
+import {
+  type AssignedTaskDraft,
   type BountyCommandId,
   type BountyCompletion,
   type BountyCompletionCorrection,
@@ -6,7 +12,6 @@ import {
   type BountyDefinition,
   type ClaimedBounty,
   type CreateBountyDraft,
-  type CreateTaskDraft,
   type DefinitionRevision,
   type Instant,
   isRecord,
@@ -30,12 +35,8 @@ import {
   type TaskId,
 } from "./types";
 
-export type AssignedChoreDraft = Omit<
-  CreateTaskDraft,
-  "type" | "assignment"
-> & {
+export type AssignedChoreDraft = Omit<AssignedTaskDraft, "type"> & {
   type: "chore";
-  assignment: Exclude<CreateTaskDraft["assignment"], { kind: "open" }>;
 };
 
 export type DefinitionReplacementCommand =
@@ -64,8 +65,10 @@ export type TaskAdminRead = {
   bountyClaims: ClaimedBounty[];
   bountyCompletions: BountyCompletion[];
   bountyCompletionCorrections: BountyCompletionCorrection[];
+  legacyBountyCompletionCarriers: LegacyBountyCompletionCarrier[];
   events: TaskEvent[];
   originalEvents: TaskEvent[];
+  legacyBountyArchiveEvents: TaskEvent[];
   corrections: CompletionCorrection[];
   adjustments: StarAdjustment[];
   balances: StarBalance[];
@@ -133,11 +136,12 @@ export type CompletionCorrection = {
 };
 
 export type TaskAdminCommand =
-  | { kind: "create"; id: string; draft: CreateTaskDraft }
-  | { kind: "edit"; task: TaskId; draft: CreateTaskDraft }
+  | { kind: "create"; id: string; draft: AssignedTaskDraft }
+  | { kind: "edit"; task: TaskId; draft: AssignedTaskDraft }
   | { kind: "retire"; task: TaskId }
   | BountyAdminCommand
   | BountyCompletionCorrectionCommand
+  | LegacyBountyCompletionCorrectionCommand
   | DefinitionReplacementCommand
   | { kind: "correct"; correction: Omit<CompletionCorrection, "at"> }
   | {
@@ -148,15 +152,20 @@ export type TaskAdminCommand =
       reason: string;
     };
 
-function parseLegalAssignedDraft(raw: unknown): CreateTaskDraft | null {
+function parseLegalAssignedDraft(raw: unknown): AssignedTaskDraft | null {
   const draft = parseCreateTaskDraft(raw);
-  return draft?.type === "routine" && draft.assignment.kind === "open"
-    ? null
-    : draft;
+  if (!draft || draft.assignment.kind === "open") return null;
+  return { ...draft, assignment: draft.assignment };
 }
 
 export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
   if (!isRecord(raw)) return null;
+  if (
+    raw.kind === "undo-legacy-bounty-completion" ||
+    raw.kind === "reassign-legacy-bounty-completion"
+  ) {
+    return parseLegacyBountyCompletionCorrectionCommand(raw);
+  }
   const id =
     typeof raw.id === "string" && /^[a-f0-9-]{32,36}$/.test(raw.id)
       ? raw.id
@@ -328,10 +337,7 @@ export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
         replacement,
       };
     }
-    if (
-      replacement.type !== "chore" ||
-      replacement.assignment.kind === "open"
-    ) {
+    if (replacement.type !== "chore") {
       return null;
     }
     return {
@@ -353,7 +359,7 @@ export function parseTaskAdminCommand(raw: unknown): TaskAdminCommand | null {
   if (!task) return null;
   if (raw.kind === "retire") return { kind: "retire", task };
   if (raw.kind === "edit") {
-    const draft = parseCreateTaskDraft(raw.draft);
+    const draft = parseLegalAssignedDraft(raw.draft);
     return draft ? { kind: "edit", task, draft } : null;
   }
   const window = parseLocalDate(raw.window);

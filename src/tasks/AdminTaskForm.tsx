@@ -12,6 +12,7 @@ import {
   parseBountyRecurrenceDraft,
 } from "./BountyRecurrenceEditor";
 import {
+  type AssignedTaskDraft,
   type LegacyTaskDefinition,
   type LocalDate,
   parseBountyCommandId,
@@ -76,9 +77,13 @@ export function AdminTaskForm({
   const [days, setDays] = useState<Weekday[]>(
     task?.recurrence.kind === "weekly" ? task.recurrence.days : ["mon"],
   );
-  const [assignment, setAssignment] = useState(task?.assignment.kind ?? "open");
+  const [assignment, setAssignment] = useState<"fixed" | "rotation">(
+    task?.assignment.kind === "rotation" ? "rotation" : "fixed",
+  );
   const [member, setMember] = useState(
-    task?.assignment.kind === "fixed" ? task.assignment.member : "",
+    task?.assignment.kind === "fixed"
+      ? task.assignment.member
+      : (activeMembers(members)[0]?.id ?? ""),
   );
   const [order, setOrder] = useState<string[]>(
     task?.assignment.kind === "rotation" ? task.assignment.order : [],
@@ -149,11 +154,9 @@ export function AdminTaskForm({
       assignment:
         assignment === "fixed"
           ? { kind: assignment, member }
-          : assignment === "rotation"
-            ? { kind: assignment, order }
-            : { kind: assignment },
+          : { kind: assignment, order },
     });
-    if (!draft) {
+    if (!draft || draft.assignment.kind === "open") {
       setSave({
         status: "idle",
         error:
@@ -161,9 +164,13 @@ export function AdminTaskForm({
       });
       return;
     }
+    const assignedDraft: AssignedTaskDraft = {
+      ...draft,
+      assignment: draft.assignment,
+    };
     command.current ??= task
-      ? { kind: "edit", task: task.id, draft }
-      : { kind: "create", id, draft };
+      ? { kind: "edit", task: task.id, draft: assignedDraft }
+      : { kind: "create", id, draft: assignedDraft };
     saving.current = true;
     setSave({ status: "saving" });
     try {
@@ -226,14 +233,11 @@ export function AdminTaskForm({
                   Type
                   <select
                     value={type}
-                    onChange={(event) => {
-                      const next =
-                        event.target.value === "routine" ? "routine" : "chore";
-                      setType(next);
-                      if (next === "routine" && assignment === "open") {
-                        setAssignment("fixed");
-                      }
-                    }}
+                    onChange={(event) =>
+                      setType(
+                        event.target.value === "routine" ? "routine" : "chore",
+                      )
+                    }
                   >
                     <option value="chore">Chore</option>
                     <option value="routine">Routine</option>
@@ -311,14 +315,13 @@ export function AdminTaskForm({
                 Assignment
                 <select
                   value={assignment}
-                  onChange={(event) =>
-                    setAssignment(event.target.value as typeof assignment)
-                  }
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (next === "fixed" || next === "rotation") {
+                      setAssignment(next);
+                    }
+                  }}
                 >
-                  {type === "chore" ||
-                  (assignment === "open" && task?.type === "routine") ? (
-                    <option value="open">Open to anyone</option>
-                  ) : null}
                   <option value="fixed">One member</option>
                   <option value="rotation">Take turns</option>
                 </select>

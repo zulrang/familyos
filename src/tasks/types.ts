@@ -198,7 +198,7 @@ export type CreateBountyDraft = Readonly<{
 }>;
 
 export type TaskCreateDraft =
-  | ({ kind: "assigned" } & CreateTaskDraft)
+  | ({ kind: "assigned" } & AssignedTaskDraft)
   | CreateBountyDraft;
 
 export type BountyCommand =
@@ -337,7 +337,11 @@ export type CreateTaskDraft = {
   stars: number;
 };
 
-export type SaveTaskDraft = CreateTaskDraft & { id: TaskId };
+export type AssignedTaskDraft = Omit<CreateTaskDraft, "assignment"> & {
+  assignment: Exclude<AssignmentPolicy, { kind: "open" }>;
+};
+
+export type SaveTaskDraft = AssignedTaskDraft & { id: TaskId };
 
 export type DefinitionSavePlan =
   | {
@@ -644,13 +648,14 @@ export function parseTaskCreateDraft(raw: unknown): TaskCreateDraft | null {
   if (isRecord(raw) && raw.kind === "bounty")
     return parseCreateBountyDraft(raw);
   const assigned = parseCreateTaskDraft(raw);
-  if (
-    !assigned ||
-    (assigned.type === "routine" && assigned.assignment.kind === "open")
-  ) {
+  if (!assigned || assigned.assignment.kind === "open") {
     return null;
   }
-  return { kind: "assigned", ...assigned };
+  return {
+    kind: "assigned",
+    ...assigned,
+    assignment: assigned.assignment,
+  };
 }
 
 function hasOnlyKnownKeys(
@@ -989,15 +994,10 @@ export function recurrenceEquals(left: Recurrence, right: Recurrence): boolean {
 }
 
 export function allowsAssignedDraft(
-  current: LegacyTaskDefinition | null,
+  _current: LegacyTaskDefinition | null,
   draft: CreateTaskDraft,
 ): boolean {
-  if (draft.type !== "routine" || draft.assignment.kind !== "open") return true;
-  return (
-    current?.type === "routine" &&
-    current.assignment.kind === "open" &&
-    recurrenceEquals(current.recurrence, draft.recurrence)
-  );
+  return draft.assignment.kind !== "open";
 }
 
 export function assignmentEquals(
@@ -1106,5 +1106,7 @@ export function parseSaveTaskDraft(raw: unknown): SaveTaskDraft | null {
   const draft = parseCreateTaskDraft(
     Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "id")),
   );
-  return draft ? { id, ...draft } : null;
+  return draft && draft.assignment.kind !== "open"
+    ? { id, ...draft, assignment: draft.assignment }
+    : null;
 }
