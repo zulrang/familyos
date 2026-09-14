@@ -46,8 +46,7 @@
   border-radius: 24px;
   background: var(--surface-panel);
 }
-.bountyHeader,
-.manageBounties {
+.bountyHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -57,18 +56,12 @@
 .bountyHeader {
   background: transparent;
 }
-.bountyHeader h2,
-.manageBounties h2 {
+.bountyHeader h2 {
   font: var(--type-section);
 }
-.bountyHeader p:not(.bountyEyebrow),
-.manageBounties p {
+.bountyHeader p:not(.bountyEyebrow) {
   margin-top: 5px;
   font: var(--type-card-meta);
-}
-.manageBounties {
-  border-top: 1px solid var(--surface-sunken);
-  background: var(--surface-sunken);
 }
 .bountyHeader .bountyEyebrow {
   margin: 0 0 8px;

@@ -30,6 +30,22 @@ export default function AdminHome() {
           </div>
         </Link>
         <Link
+          href="/admin/bounties"
+          className={`${styles.card} ${styles.cardLink}`}
+        >
+          <span
+            aria-hidden="true"
+            className={styles.tile}
+            style={{ background: "#f6ebcf" }}
+          >
+            <Icon name="star" size={28} />
+          </span>
+          <div>
+            <h2>Bounties</h2>
+            <p>Create work anyone can claim and set its Star reward.</p>
+          </div>
+        </Link>
+        <Link
           href="/admin/members"
           className={`${styles.card} ${styles.cardLink}`}
         >
