@@ -46,7 +46,8 @@ through its separate macOS update job (`kick-update`), so it survives the server
 restart. It pulls `main`, installs dependencies, rebuilds, and restarts FamilyOS.
 The checkout must be clean. “Update started” confirms launch, not completion;
 refresh after a few minutes. Update logs are `~/Library/Logs/familyos-update.log`
-and `~/Library/Logs/familyos-update.err.log`.
+and `~/Library/Logs/familyos-update.err.log`. Wall **Settings** intentionally has
+the same **Update** button, which starts the same job.
 
 **Tasks:** create, edit, and retire; manage once/daily/weekly/monthly schedules,
 fixed/rotation assignments, type, optional time, and star value. Title,

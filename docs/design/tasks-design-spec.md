@@ -454,7 +454,9 @@ Components: `TasksBoard`, `TaskRow`, the standard FAB.
 - **Create/edit.** FAB opens the Task editor: title, type (Chore/Routine),
   recurrence, assignment, optional time, and star value (default 0). Saving
   an existing Task runs the Section 4.3 flow. Type has no visual effect in v1
-  (D14), and the star value is captured but rendered nowhere (D19).
+  (D14), and the star value is captured but rendered nowhere (D19). This wall
+  editor is intentional alongside parent admin Task editing; Bounty creation
+  remains admin-only.
 - **No points pill, no tabs, no expired rows, no star display.**
 
 ---

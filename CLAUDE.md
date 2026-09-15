@@ -34,6 +34,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Event Participants are stable Household Member IDs in Google private event properties only; Member Color is presentation.
 - Calendar is a rolling Five-Day View with five-day paging and contrasted weekends. `docs/calendar.png` is an older seven-day capture.
 - Unimplemented rail items (Meals, Recipes) stay stubs until in scope. Sleep is a rail action that starts the idle slideshow (`docs/photos.md`), not a screen. Tasks follows `docs/design/tasks-design-spec.md` with Bounties per `docs/design/bounties-design-spec.md`; Rewards follows `docs/rewards.md`; parent admin follows `docs/admin.md`; Photos follows `docs/photos.md`.
+- Intentional on the wall: the Tasks `Add task` FAB (assigned Task create/edit) and the Settings `Update` button (restarts the server). Bounty creation stays admin-only.
 - Reimplement UI in `src/` from the design skill; the kit uses `window.DS` / CDN icons and will not run as Next modules.
 - Kiosk typing is the Chromium extension in `kiosk/osk/`, not a React overlay and not Onboard.
 - When changing, authoring, or reviewing code, follow `docs/code-design-principles.md`.
