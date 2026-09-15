@@ -143,10 +143,14 @@ design skill forbids. Where delight and restraint conflict, restraint wins.
 
 | Component | Owns | Must not own |
 |-----------|------|----------------|
-| App shell (`src/app` layout + rail) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
+| Wall shell (`src/app/(display)/layout.tsx` + `src/shared/NavRail.tsx`) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
 | Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
 | Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
-| Tasks (`src/tasks/`) | Task Definitions, Task events, star values, stored Star Balances (keyed by MemberId), the pure Occurrence projection, the Tasks screen and Task editor | Google Tasks rows, Rewards Grant/Spend UX, verification workflow, member roster |
+| Tasks (`src/tasks/`) | Task Definitions, Task events, Bounties and Bounty Claims, star values, stored Star Balances and Star Adjustments (keyed by MemberId), the pure Occurrence projection, the Tasks screen, and the admin Tasks/Bounties/Stars pages | Google Tasks rows, Grant/Spend UX on the wall, verification workflow, member roster |
+| Rewards (`src/rewards/`) | Reward catalog, Reward Goals, Reward Spends, the wall Rewards screen and admin catalog; receives the Task database from its routes | Importing `tasks`, a second Star Balance store, fulfillment tracking |
+| Members (`src/members/`) | Household Member roster rules and admin Members page | Task reconciliation after retirement (owned by `tasks`, wired in the admin members route), provider identity |
+| Displays (`src/displays/`) | Pairing UI and HTTP, Trusted Display records | Display session checks (in `src/shared/`), household data |
+| Parent admin (`src/admin/`, `src/app/admin/`) | Mobile shell, PIN session gate, section navigation | Wall pairing, feature rules (pages compose slice components) |
 | Photos (`src/photos/`) | Google Photos Picker session, shared Photo Selection, proxied media, and per-Display slideshow UI | Arbitrary album browsing, live album subscription, Google base URLs in the browser |
 | Settings (`src/settings/`) | Provider Connection, source selection, members, Trusted Displays, Household Time Zone, Display Configuration (Display size, Idle Dim) | Event rendering, unimplemented product surfaces |
 | Stub screens | Placeholder for unimplemented rail ids (Meals, Recipes) | Real features, mock data presented as product |
@@ -226,7 +230,9 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
   reject-and-reload rule for concurrent Settings edits.
 - No offline write queue: Google remains the event/list write authority, and
   Displays submit Task events directly to the server. The idempotent
-  `(task, window, kind)` event key makes plain HTTP retries safe.
+  `(task, window, kind)` event key makes plain HTTP retries safe for assigned
+  Tasks; Bounty commands carry claim revisions and retry identities
+  (`docs/design/bounties-design-spec.md`).
 - Task data is server-authoritative (ADR 0006): Tasks stay writable whenever
   the server is up, independent of Google availability.
 
@@ -256,7 +262,8 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 ## 8. Future Direction
 
-- Tasks is designed and ready to build: `docs/design/tasks-design-spec.md` (member columns per the design-skill kit, minus TimeOfDayTabs and the points pill). Keep shell/calendar/lists code from depending on the remaining feature modules.
+- Meals and Recipes are the remaining rail stubs. Keep shell/calendar/lists code from depending on other feature modules.
+- Rewards owed and delivery tracking are deferred to issue #82.
 - The parent admin is a separate mobile surface; the wall layout remains kiosk-oriented. Other companion surfaces are deferred.
 
 ## Rewards
@@ -269,7 +276,8 @@ and deferred fulfillment details are in [rewards.md](rewards.md).
 ## Parent admin
 
 `/admin` has a separate mobile shell and PIN session gate, without display
-pairing. App routes compose the Tasks, Members, Stars, and Rewards slices.
+pairing. App routes compose Tasks, Bounties, Members, Stars, and Rewards pages
+from the `tasks`, `members`, and `rewards` slices.
 `src/shared/AdminEditorScreen.tsx` supplies the shared modal drawer: 90% viewport
 height, independent scrolling, a round down-chevron close control, coordinated
 drawer/backdrop animation, and reduced-motion support. Feature pages keep their

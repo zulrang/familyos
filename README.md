@@ -13,9 +13,9 @@ interface at `/admin`.
 
 ![FamilyOS calendar](docs/calendar.png)
 
-`docs/calendar.png` is a 1920×1080 capture of the current seven-day
-implementation (`pnpm dev`, then screenshot `/`). The v1 target is the
-less-cramped Five-Day View defined in `docs/requirements.md`.
+`docs/calendar.png` is an older 1920×1080 capture from the seven-day calendar.
+The current calendar is the rolling Five-Day View defined in
+`docs/requirements.md`.
 
 ## Quick start
 

@@ -5,7 +5,7 @@ description: Drive FamilyOS's Next.js wall UI in a browser to prove pairing, cal
 
 # Verify FamilyOS
 
-FamilyOS is a locally hosted kitchen-wall UI. One Server Installation, one Household, several paired Displays. Google Calendar and Google Tasks are the sources of truth once signed in. Pairing, Settings household fields, the five-day calendar chrome, Lists chrome, Tasks, Rewards, the Photos sign-in prompt, and rail stubs work without Google.
+FamilyOS is a locally hosted kitchen-wall UI. One Server Installation, one Household, several paired Displays. Google Calendar and Google Tasks back Calendar and Lists once signed in; Tasks and Rewards are server-local. Pairing, Settings household fields, the five-day calendar chrome, Lists chrome, Tasks, Rewards, the Photos sign-in prompt, and rail stubs work without Google.
 
 This skill is the recipe for proving that UI the way a person uses it. Read `features/README.md` before driving. Use the matching feature file. The map lists every entry point. Driving one convenient path does not cover the others.
 
@@ -64,7 +64,7 @@ Stable handles in this repo:
 - Calendar: heading is the Family name (default `Family`), buttons `Schedule`, `Filter`, `Today`, `Previous five days`, `Next five days`. Unconfigured banner is either `Add Google credentials in .env.local, then sign in under Settings.` or `Sign in with Google under Settings to load the family calendar.`
 - Settings: heading `Settings`, button `Save` (becomes `Saved` briefly), `Update` (do not press; it kicks the host server updater), `Generate pairing code`, native `<dialog>` titled `Pair Display`, `Family name`, `Add member`, `This Display`
 - Lists: date heading, same Google banners as calendar with Lists wording
-- Tasks: date heading, `Family Board` heading, button `Bounties` (then `Family Board` to return), `Available Bounties`, `Add Bounty`, `Manage Bounties`
+- Tasks: date heading, `Family Board` heading, button `Bounties` (then `Family Board` to return), `Available Bounties`, `Claim <title>` per offering, FAB `Add task`
 - Rewards: heading `Rewards`, tagline `Small efforts. Happy moments.`, empty state `Add a household member in parent admin to use Rewards.`
 - Photos: heading `Photos`, unconfigured `Sign in to Google Photos`
 - Stubs (Meals, Recipes, and `/sleep` by URL): heading matches the rail label, body `Not yet implemented`

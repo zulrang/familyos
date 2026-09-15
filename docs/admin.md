@@ -49,12 +49,18 @@ refresh after a few minutes. Update logs are `~/Library/Logs/familyos-update.log
 and `~/Library/Logs/familyos-update.err.log`.
 
 **Tasks:** create, edit, and retire; manage once/daily/weekly/monthly schedules,
-fixed/open/rotation assignments, type, optional time, and star value. Title,
+fixed/rotation assignments, type, optional time, and star value. Title,
 type, time, and stars edit in place. Schedule or assignment changes atomically
 retire the old definition and create one with the same lineage. Rotations
 preserve the next surviving person's turn. Retired definitions remain visible
 under “Include retired tasks and old versions.” Editing a replaced definition
 requires refreshing; a stale phone cannot revive an old version.
+
+**Bounties:** create, edit, and retire Chores any Active Member can claim; set
+the Star reward and a Once or recurring schedule. Bounty creation and
+management exist only in admin; the wall shows available Bounties without an
+admin link. Lifecycle rules are in the
+[Bounties design](design/bounties-design-spec.md).
 
 **Members:** create and edit names/colors, or retire. IDs remain stable and
 retirement preserves history. The existing six-active-member and unique-color
@@ -89,8 +95,8 @@ Calendar, Google lists, photos, and system settings are not part of this admin r
 
 ## Mobile workflow
 
-The home screen links to Tasks, Members, Stars, and Rewards. Section navigation
-stays available on list pages. Create/edit actions for Tasks, Members, and
+The home screen links to Tasks, Bounties, Members, Stars, and Rewards. Section
+navigation stays available on list pages. Create/edit actions for Tasks, Members, and
 Rewards open a rounded drawer covering 90% of the viewport. In Stars, select a
 member and choose **Adjust balance** to open the same drawer for Grant/Spend.
 

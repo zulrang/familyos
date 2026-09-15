@@ -20,6 +20,15 @@ The storage-ownership decision is recorded in
 > any Active Member is a Bounty; assigned Tasks use fixed or rotation
 > assignment. The Window rules below continue to govern assigned Tasks.
 
+> **Rewards and admin amendments.** Rewards ([`docs/rewards.md`](../rewards.md))
+> and the parent admin ([`docs/admin.md`](../admin.md)) have since shipped.
+> Star Balances render on the Rewards screen; Grants, Spends, and Reward Spends
+> write Star Adjustments; Task and Member editing is also available in admin,
+> which uses its PIN session instead of a Display credential. Statements below
+> that say nothing star-shaped renders or that Star Adjustments have no writers
+> record the v1 Tasks cut, not current behavior. The Tasks wall itself still
+> has no Grant/Spend UI and no star display on assigned Tasks.
+
 ---
 
 ## 1. Overview and Scope

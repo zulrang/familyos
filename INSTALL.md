@@ -2,9 +2,9 @@
 
 FamilyOS is a **locally hosted kitchen-wall command center**, not a cloud
 service. One server represents one household and serves one or more displays.
-v1 uses a rolling five-day view of one selected Google Calendar and explicitly
-selected Google Tasks lists. Other nav items (Tasks, and the rest) are stubs
-until those screens exist.
+v1 uses a rolling five-day view of one selected Google Calendar, explicitly
+selected Google Tasks lists, a Google Photos slideshow, and FamilyOS-owned
+Tasks and Rewards. Meals and Recipes are stubs until those screens exist.
 
 You can run it in a desktop browser while you set it up. The wall unit is optional.
 
@@ -64,6 +64,8 @@ cp .env.example .env.local
 ```
 
 `.env.local` is gitignored. `.env.example` stays in the repo with empty placeholders.
+Set `FAMILYOS_ADMIN_PIN` to six digits there to enable the parent admin at
+`/admin`; leave it empty to disable admin. See [docs/admin.md](docs/admin.md).
 
 Login requests `calendar.events`, `calendar.calendarlist.readonly`, `tasks`, and
 `photospicker.mediaitems.readonly`. Tokens are stored on the machine running

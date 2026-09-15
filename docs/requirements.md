@@ -55,6 +55,21 @@ slideshow rather than opening a screen.
   routines; it does not expose Google Tasks rows. Its requirements are in
   `docs/design/tasks-design-spec.md`.
 
+### Tasks
+
+- Tasks is FamilyOS-owned household work stored on the Server Installation; it
+  does not use Google. Assigned Tasks follow
+  `docs/design/tasks-design-spec.md`; Bounties follow
+  `docs/design/bounties-design-spec.md`.
+- Parents create and manage Tasks and Bounties in the parent admin
+  (`docs/admin.md`).
+
+### Rewards
+
+- Rewards supports a parent-managed household catalog, one unreserved goal per
+  active member, and atomic Spends retaining the original reward name and cost.
+  See [Rewards](rewards.md); rewards owed and fulfillment are deferred to #82.
+
 ### Photos
 
 - Photos uses the Household Provider Connection and the Google Photos Picker
@@ -100,7 +115,3 @@ slideshow rather than opening a screen.
   unreachable.
 - Stale Calendar and List Item writes are rejected and reloaded rather than
   silently overwriting a newer provider version.
-
-Rewards supports a parent-managed household catalog, one unreserved goal per
-active member, and atomic Spends retaining the original reward name and cost.
-See [Rewards](rewards.md); rewards owed and fulfillment are deferred to #82.
