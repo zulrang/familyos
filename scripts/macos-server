@@ -182,10 +182,23 @@ write_autodeploy_plist() {
   write_job "$1" "$AUTODEPLOY_LABEL" auto-deploy "$UPDATE_LOG_OUT" "$UPDATE_LOG_ERR" "<false/>" "$AUTODEPLOY_INTERVAL"
 }
 
+# Where the server agent actually lives: gui/ after a console install, user/
+# after an SSH one. Deploy jobs always run in user/, so never assume the
+# caller's own domain.
+server_target() {
+  local uid target
+  uid=$(id -u)
+  for target in "gui/${uid}/${LABEL}" "user/${uid}/${LABEL}"; do
+    if launchctl print "$target" >/dev/null 2>&1; then
+      printf '%s' "$target"
+      return 0
+    fi
+  done
+  return 1
+}
+
 agent_loaded() {
-  local domain
-  domain=$(launchd_domain)
-  launchctl print "${domain}/${LABEL}" >/dev/null 2>&1
+  server_target >/dev/null
 }
 
 stop_agent() {
@@ -348,9 +361,11 @@ fetch_main() {
 }
 
 # Keep the control checkout (this script, the plists' WorkingDirectory) on the
-# deployed main so the poller runs the deploy tooling of the release it ships.
+# verified release so the poller runs the deploy tooling of what it ships.
 advance_control_checkout() {
+  local sha=$1
   cd "$ROOT"
+  git merge-base --is-ancestor "$sha" refs/remotes/origin/main 2>/dev/null || return 0
   if [[ "$(git branch --show-current)" != main ]]; then
     log "Control checkout is not on main; leaving it alone."
     return 0
@@ -359,7 +374,7 @@ advance_control_checkout() {
     log "Control checkout is dirty; leaving it alone."
     return 0
   fi
-  git merge --ff-only --quiet refs/remotes/origin/main || log "Control checkout could not fast-forward; leaving it alone."
+  git merge --ff-only --quiet "$sha" || log "Control checkout could not fast-forward; leaving it alone."
 }
 
 # Link the checkout's env files into a release so secrets stay in one place.
@@ -416,10 +431,13 @@ restart_into_current() {
     log "LaunchAgent not installed; not restarting. Run: $0 install"
     return 0
   fi
-  if agent_loaded; then
-    launchctl kickstart -k "$(launchd_domain)/${LABEL}"
+  local target
+  if target=$(server_target); then
+    launchctl kickstart -k "$target"
+  elif port_listening; then
+    log "Port 3000 is in use but ${LABEL} is not loaded; not restarting."
+    return 1
   else
-    assert_port_free
     start_agent
   fi
   port_comes_up && wait_for_ready
@@ -461,6 +479,9 @@ deploy_sha() {
   activate_release "$sha"
   if restart_into_current; then
     record "deploy ${sha} ok"
+    # Only now: a release that never got ready must not replace the script
+    # that the automatic rollback below relies on.
+    advance_control_checkout "$sha"
     prune_releases
     return 0
   fi
@@ -534,8 +555,9 @@ cmd_restart() {
   require_darwin
   require_not_root
   [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
-  if agent_loaded; then
-    launchctl kickstart -k "$(launchd_domain)/${LABEL}"
+  local target
+  if target=$(server_target); then
+    launchctl kickstart -k "$target"
   else
     assert_port_free
     start_agent
@@ -580,7 +602,6 @@ cmd_deploy() {
     echo "Already live: ${sha}"
     return 0
   fi
-  advance_control_checkout
   deploy_sha "$sha" "${1:-manual}"
   [[ -f "$AUTODEPLOY_PLIST" ]] && autodeploy_loaded || install_autodeploy
 }
@@ -597,7 +618,6 @@ cmd_auto_deploy() {
   # After a failed deploy or a rollback, wait for a new commit on main rather
   # than retrying the same one every interval.
   [[ "$(cat "$LAST_ATTEMPT" 2>/dev/null || true)" == "$sha" ]] && exit 0
-  advance_control_checkout
   deploy_sha "$sha" "auto"
 }
 
