@@ -54,8 +54,10 @@ fixed/rotation assignments, type, optional time, and star value. Title,
 type, time, and stars edit in place. Schedule or assignment changes atomically
 retire the old definition and create one with the same lineage. Rotations
 preserve the next surviving person's turn. Retired definitions remain visible
-under “Include retired tasks and old versions.” Editing a replaced definition
-requires refreshing; a stale phone cannot revive an old version.
+under “Include retired tasks and old versions.” Past one-time definitions also
+require “Include past one-time tasks”; task-list filters combine. Editing a
+replaced definition requires refreshing; a stale phone cannot revive an old
+version.
 
 **Bounties:** create, edit, and retire Chores any Active Member can claim; set
 the Star reward and a Once or recurring schedule. Bounty creation and
