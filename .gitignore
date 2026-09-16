@@ -48,6 +48,9 @@ service-account*.json
 # device-local kiosk settings and tokens
 /data/
 
+# deployed releases (git worktrees managed by scripts/macos-server)
+/releases/
+
 # this machine's kiosk runbook (app host, DDC bus, applied workarounds)
 docs/*.local.md
 

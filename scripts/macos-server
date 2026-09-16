@@ -1,12 +1,31 @@
 #!/usr/bin/env bash
-# Household Mac: KeepAlive production on :3000, and one-shot pull/rebuild/restart.
+# Household Mac: KeepAlive production on :3000 and deploy origin/main
+# continuously. Every deploy is a git worktree under releases/<sha> with its own
+# node_modules and .next; `current` and `previous` symlinks pick the live one,
+# so a build never touches the running server and rollback is a symlink swap.
 # ponytail: nvm.sh at start (this Mac's node lives there); bake PATH into the
 # plist if we ever run as a LaunchDaemon without a user profile.
 # ponytail: user/ domain from SSH (gui/ returns 125 without Aqua). Background is
 # the parent of every login type; LaunchDaemon if we ever need no-login boot.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# A release's copy of this script (invoked by the running server through
+# process.cwd()) must operate on the checkout that owns releases/, not on itself.
+SELF_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+if [[ "$(basename "$(dirname "$SELF_ROOT")")" == releases &&
+  -f "$(dirname "$(dirname "$SELF_ROOT")")/scripts/macos-server" ]]; then
+  ROOT="$(dirname "$(dirname "$SELF_ROOT")")"
+else
+  ROOT="$SELF_ROOT"
+fi
+RELEASES="$ROOT/releases"
+CURRENT="$RELEASES/current"
+PREVIOUS="$RELEASES/previous"
+LAST_ATTEMPT="$RELEASES/last-attempt"
+HISTORY="$RELEASES/history.log"
+LOCK="$RELEASES/.lock"
+KEEP_RELEASES=3
+READY_URL="http://127.0.0.1:3000/api/ready"
 LABEL="com.familyos.server"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_OUT="$HOME/Library/Logs/familyos-server.log"
@@ -15,28 +34,44 @@ UPDATE_LABEL="com.familyos.update"
 UPDATE_PLIST="$HOME/Library/LaunchAgents/${UPDATE_LABEL}.plist"
 UPDATE_LOG_OUT="$HOME/Library/Logs/familyos-update.log"
 UPDATE_LOG_ERR="$HOME/Library/Logs/familyos-update.err.log"
+AUTODEPLOY_LABEL="com.familyos.autodeploy"
+AUTODEPLOY_PLIST="$HOME/Library/LaunchAgents/${AUTODEPLOY_LABEL}.plist"
+AUTODEPLOY_INTERVAL=120
 
 usage() {
   cat <<'EOF'
 Usage: scripts/macos-server <command>
 
-  install     Write a LaunchAgent and start production on :3000 (survives login)
-  uninstall   Stop and remove the LaunchAgent
-  update      Checkout main, pull, rebuild, restart
-  check-update Fetch remote main; print whether it has commits missing from local main
-  kick-update Submit update as a user-domain one-shot (survives stop of :3000)
-  restart     Restart the running agent (no git / build)
-  run         Start pnpm start (used by launchd; not a daily command)
-  --check     Self-test (plist XML, nvm/node/pnpm)
+  install        Write the LaunchAgents, release the checked-out commit if
+                 nothing is deployed yet, and start production on :3000
+  uninstall      Stop and remove the LaunchAgents (releases/ is kept)
+  deploy [ref]   Fetch, build origin/main (or ref) as a new release, switch,
+                 restart, verify; roll back automatically if it never gets ready
+  update         Same as deploy (kept for the Update buttons)
+  auto-deploy    deploy only when origin/main moved since the last attempt
+                 (run by com.familyos.autodeploy every 2 minutes)
+  rollback [sha] Switch to the previous release (or a kept release) and restart
+  status         Show current, previous, kept releases, and recent history
+  check-update   Fetch origin/main; print whether it has commits not deployed
+  kick-update    Submit deploy as a user-domain one-shot (survives the restart)
+  build-release <sha>  Build a release worktree without switching to it
+  prune          Delete kept releases beyond the newest 3 (never current/previous)
+  restart        Restart the running agent (no git / build)
+  run            Start pnpm start in the current release (used by launchd)
+  --check        Self-test (plist XML, nvm/node/pnpm)
 
 Logs: ~/Library/Logs/familyos-server.log
-      ~/Library/Logs/familyos-update.log
+      ~/Library/Logs/familyos-update.log   (deploys, auto-deploys, rollbacks)
 EOF
 }
 
 die() {
   printf '%s\n' "$*" >&2
   exit 1
+}
+
+log() {
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
 }
 
 require_darwin() {
@@ -81,34 +116,42 @@ xml_escape() {
   printf '%s' "$s"
 }
 
-write_plist() {
-  local dest=$1
-  local root_xml log_out_xml log_err_xml script_xml
+# write_job <dest> <label> <command> <log-out> <log-err> <keepalive-xml> [interval]
+write_job() {
+  local dest=$1 label=$2 command=$3 log_out=$4 log_err=$5 keepalive=$6 interval=${7:-}
+  local root_xml log_out_xml log_err_xml script_xml run_at_load interval_xml=""
   root_xml=$(xml_escape "$ROOT")
-  log_out_xml=$(xml_escape "$LOG_OUT")
-  log_err_xml=$(xml_escape "$LOG_ERR")
+  log_out_xml=$(xml_escape "$log_out")
+  log_err_xml=$(xml_escape "$log_err")
   script_xml=$(xml_escape "$ROOT/scripts/macos-server")
-  mkdir -p "$(dirname "$dest")" "$(dirname "$LOG_OUT")"
+  run_at_load="<false/>"
+  [[ "$keepalive" == "<true/>" || -n "$interval" ]] && run_at_load="<true/>"
+  if [[ -n "$interval" ]]; then
+    interval_xml="  <key>StartInterval</key>
+  <integer>${interval}</integer>
+"
+  fi
+  mkdir -p "$(dirname "$dest")" "$(dirname "$log_out")"
   cat >"$dest" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LABEL}</string>
+  <string>${label}</string>
   <key>WorkingDirectory</key>
   <string>${root_xml}</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
     <string>${script_xml}</string>
-    <string>run</string>
+    <string>${command}</string>
   </array>
   <key>RunAtLoad</key>
-  <true/>
+  ${run_at_load}
   <key>KeepAlive</key>
-  <true/>
-  <key>ThrottleInterval</key>
+  ${keepalive}
+${interval_xml}  <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>ProcessType</key>
   <string>Background</string>
@@ -127,54 +170,35 @@ write_plist() {
 EOF
 }
 
+write_plist() {
+  write_job "$1" "$LABEL" run "$LOG_OUT" "$LOG_ERR" "<true/>"
+}
+
 write_update_plist() {
-  local dest=$1
-  local root_xml log_out_xml log_err_xml script_xml
-  root_xml=$(xml_escape "$ROOT")
-  log_out_xml=$(xml_escape "$UPDATE_LOG_OUT")
-  log_err_xml=$(xml_escape "$UPDATE_LOG_ERR")
-  script_xml=$(xml_escape "$ROOT/scripts/macos-server")
-  mkdir -p "$(dirname "$dest")" "$(dirname "$UPDATE_LOG_OUT")"
-  cat >"$dest" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${UPDATE_LABEL}</string>
-  <key>WorkingDirectory</key>
-  <string>${root_xml}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/bin/bash</string>
-    <string>${script_xml}</string>
-    <string>update</string>
-  </array>
-  <key>RunAtLoad</key>
-  <false/>
-  <key>KeepAlive</key>
-  <false/>
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>LimitLoadToSessionType</key>
-  <array>
-    <string>Aqua</string>
-    <string>Background</string>
-    <string>StandardIO</string>
-  </array>
-  <key>StandardOutPath</key>
-  <string>${log_out_xml}</string>
-  <key>StandardErrorPath</key>
-  <string>${log_err_xml}</string>
-</dict>
-</plist>
-EOF
+  write_job "$1" "$UPDATE_LABEL" update "$UPDATE_LOG_OUT" "$UPDATE_LOG_ERR" "<false/>"
+}
+
+write_autodeploy_plist() {
+  write_job "$1" "$AUTODEPLOY_LABEL" auto-deploy "$UPDATE_LOG_OUT" "$UPDATE_LOG_ERR" "<false/>" "$AUTODEPLOY_INTERVAL"
+}
+
+# Where the server agent actually lives: gui/ after a console install, user/
+# after an SSH one. Deploy jobs always run in user/, so never assume the
+# caller's own domain.
+server_target() {
+  local uid target
+  uid=$(id -u)
+  for target in "gui/${uid}/${LABEL}" "user/${uid}/${LABEL}"; do
+    if launchctl print "$target" >/dev/null 2>&1; then
+      printf '%s' "$target"
+      return 0
+    fi
+  done
+  return 1
 }
 
 agent_loaded() {
-  local domain
-  domain=$(launchd_domain)
-  launchctl print "${domain}/${LABEL}" >/dev/null 2>&1
+  server_target >/dev/null
 }
 
 stop_agent() {
@@ -212,6 +236,38 @@ start_agent() {
   launchctl enable "${domain}/${LABEL}" 2>/dev/null || true
 }
 
+# Always user/ — a one-shot or interval job must not be a child of the
+# KeepAlive server job it restarts. gui/ needs Aqua.
+bootstrap_user_job() {
+  local plist=$1 label=$2 uid domain target i st
+  uid=$(id -u)
+  domain="user/${uid}"
+  target="${domain}/${label}"
+  launchctl bootout "$target" 2>/dev/null || true
+  for i in $(seq 1 20); do
+    launchctl print "$target" >/dev/null 2>&1 || break
+    sleep 0.25
+  done
+  if ! launchctl bootstrap "$domain" "$plist"; then
+    st=$?
+    # 5 = already loaded (bootout lost the race)
+    if [[ $st -ne 5 ]]; then
+      die "Could not bootstrap ${label} into ${domain} (exit ${st})."
+    fi
+  fi
+  launchctl enable "$target" 2>/dev/null || true
+}
+
+autodeploy_loaded() {
+  launchctl print "user/$(id -u)/${AUTODEPLOY_LABEL}" >/dev/null 2>&1
+}
+
+install_autodeploy() {
+  write_autodeploy_plist "$AUTODEPLOY_PLIST"
+  plutil -lint "$AUTODEPLOY_PLIST" >/dev/null
+  bootstrap_user_job "$AUTODEPLOY_PLIST" "$AUTODEPLOY_LABEL"
+}
+
 port_listening() {
   lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1
 }
@@ -221,7 +277,7 @@ assert_port_free() {
   die "Port 3000 is already in use. Stop that process, then retry."
 }
 
-wait_for_port() {
+port_comes_up() {
   local i
   for i in $(seq 1 30); do
     if port_listening; then
@@ -230,13 +286,231 @@ wait_for_port() {
     fi
     sleep 1
   done
+  return 1
+}
+
+wait_for_port() {
+  port_comes_up && return 0
   stop_agent || true
   die "Timed out waiting for :3000. See ${LOG_ERR}"
 }
 
-cmd_run() {
+# The server answers /api/ready with its build id once it can serve requests.
+# Match the current release's id: right after kickstart the old process may
+# still be answering on :3000.
+wait_for_ready() {
+  local i build_id
+  build_id=$(cat "$CURRENT/.next/BUILD_ID")
+  for i in $(seq 1 60); do
+    if curl -fsS --max-time 5 "$READY_URL" 2>/dev/null | grep -q "\"buildId\":\"${build_id}\""; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# --- releases ---------------------------------------------------------------
+
+current_sha() {
+  [[ -L "$CURRENT" ]] || return 1
+  basename "$(readlink "$CURRENT")"
+}
+
+previous_sha() {
+  [[ -L "$PREVIOUS" ]] || return 1
+  basename "$(readlink "$PREVIOUS")"
+}
+
+# What the poller compares origin/main against: the live release, or local
+# main on a checkout that has never deployed a release.
+deployed_sha() {
+  current_sha 2>/dev/null ||
+    git -C "$ROOT" rev-parse --verify --quiet refs/heads/main ||
+    git -C "$ROOT" rev-parse HEAD
+}
+
+record() {
+  mkdir -p "$RELEASES"
+  log "$*" >>"$HISTORY"
+  log "$*"
+}
+
+# One deploy at a time: the poller and a manual deploy must not build together.
+acquire_lock() {
+  local holder
+  mkdir -p "$RELEASES"
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    holder=$(cat "$LOCK/pid" 2>/dev/null || true)
+    if [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null; then
+      die "Another deploy is running (pid ${holder})."
+    fi
+    rm -rf "$LOCK"
+    mkdir "$LOCK" || die "Could not take the deploy lock at ${LOCK}."
+  fi
+  printf '%s' "$$" >"$LOCK/pid"
+  trap 'rm -rf "$LOCK"' EXIT
+}
+
+fetch_main() {
+  cd "$ROOT"
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git checkout: ${ROOT}"
+  # Refresh the remote-tracking ref explicitly, even with a custom fetch refspec.
+  # Do not switch branches or touch the working tree while fetching.
+  GIT_TERMINAL_PROMPT=0 git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+}
+
+# Keep the control checkout (this script, the plists' WorkingDirectory) on the
+# verified release so the poller runs the deploy tooling of what it ships.
+advance_control_checkout() {
+  local sha=$1
+  cd "$ROOT"
+  git merge-base --is-ancestor "$sha" refs/remotes/origin/main 2>/dev/null || return 0
+  if [[ "$(git branch --show-current)" != main ]]; then
+    log "Control checkout is not on main; leaving it alone."
+    return 0
+  fi
+  if [[ -n "$(git status --porcelain)" ]]; then
+    log "Control checkout is dirty; leaving it alone."
+    return 0
+  fi
+  git merge --ff-only --quiet "$sha" || log "Control checkout could not fast-forward; leaving it alone."
+}
+
+# Link the checkout's env files into a release so secrets stay in one place.
+link_env_files() {
+  local release=$1 name
+  for name in .env .env.local .env.production.local; do
+    if [[ -f "$ROOT/$name" && ! -e "$release/$name" ]]; then
+      ln -s "$ROOT/$name" "$release/$name"
+    fi
+  done
+}
+
+build_release() {
+  local sha=$1 release
+  release="$RELEASES/$sha"
   load_node
   cd "$ROOT"
+  git rev-parse --verify --quiet "${sha}^{commit}" >/dev/null || die "Unknown commit: ${sha}"
+  mkdir -p "$RELEASES"
+  if [[ -e "$release" ]]; then
+    if [[ -f "$release/.next/BUILD_ID" ]]; then
+      log "Release ${sha} is already built."
+      return 0
+    fi
+    log "Removing incomplete release ${sha}."
+    git worktree remove --force "$release" 2>/dev/null || rm -rf "$release"
+  fi
+  git worktree prune
+  log "Building release ${sha}."
+  git worktree add --detach --quiet "$release" "$sha"
+  link_env_files "$release"
+  (
+    cd "$release"
+    pnpm install --frozen-lockfile --prefer-offline
+    pnpm build
+  )
+  [[ -f "$release/.next/BUILD_ID" ]] || die "Build of ${sha} produced no .next/BUILD_ID."
+}
+
+# Point current (and previous) at a built release; no restart.
+activate_release() {
+  local sha=$1 old
+  [[ -f "$RELEASES/$sha/.next/BUILD_ID" ]] || die "Release ${sha} is not built."
+  old=$(current_sha 2>/dev/null || true)
+  if [[ -n "$old" && "$old" != "$sha" ]]; then
+    ln -sfn "$RELEASES/$old" "$PREVIOUS"
+  fi
+  ln -sfn "$RELEASES/$sha" "$CURRENT"
+}
+
+# Restart into the current release and wait until it serves /api/ready.
+restart_into_current() {
+  if [[ ! -f "$PLIST" ]]; then
+    log "LaunchAgent not installed; not restarting. Run: $0 install"
+    return 0
+  fi
+  local target
+  if target=$(server_target); then
+    launchctl kickstart -k "$target"
+  elif port_listening; then
+    log "Port 3000 is in use but ${LABEL} is not loaded; not restarting."
+    return 1
+  else
+    start_agent
+  fi
+  port_comes_up && wait_for_ready
+}
+
+prune_releases() {
+  local keep=" " sha dir limit
+  [[ -d "$RELEASES" ]] || return 0
+  limit=$KEEP_RELEASES
+  for sha in "$(current_sha 2>/dev/null || true)" "$(previous_sha 2>/dev/null || true)"; do
+    [[ -n "$sha" && "$keep" != *" $sha "* ]] || continue
+    keep+="$sha "
+    limit=$((limit - 1))
+  done
+  # Newest first by directory mtime (set when the worktree was added).
+  while IFS= read -r dir; do
+    sha=$(basename "$dir")
+    [[ "$keep" == *" $sha "* ]] && continue
+    if [[ $limit -gt 0 ]]; then
+      limit=$((limit - 1))
+      continue
+    fi
+    log "Pruning release ${sha}."
+    git -C "$ROOT" worktree remove --force "$dir" 2>/dev/null || rm -rf "$dir"
+  done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d -name '[0-9a-f]*' -exec stat -f '%m %N' {} + 2>/dev/null | sort -rn | cut -d' ' -f2-)
+  git -C "$ROOT" worktree prune
+}
+
+# deploy_sha <sha> <reason>: build, switch, restart, verify, or roll back.
+deploy_sha() {
+  local sha=$1 reason=$2 old
+  old=$(current_sha 2>/dev/null || true)
+  printf '%s' "$sha" >"$LAST_ATTEMPT"
+  record "deploy ${sha} started (${reason})"
+  if ! (build_release "$sha"); then
+    record "deploy ${sha} failed: build"
+    die "Build failed for ${sha}; ${old:-nothing} stays live."
+  fi
+  activate_release "$sha"
+  if restart_into_current; then
+    record "deploy ${sha} ok"
+    # Only now: a release that never got ready must not replace the script
+    # that the automatic rollback below relies on.
+    advance_control_checkout "$sha"
+    prune_releases
+    return 0
+  fi
+  record "deploy ${sha} failed: not ready"
+  if [[ -n "$old" && -f "$RELEASES/$old/.next/BUILD_ID" ]]; then
+    log "Rolling back to ${old}."
+    activate_release "$old"
+    if restart_into_current; then
+      record "rollback ${old} ok (automatic)"
+    else
+      record "rollback ${old} failed: not ready"
+    fi
+  fi
+  die "Release ${sha} never became ready. See ${LOG_ERR}"
+}
+
+# --- commands ---------------------------------------------------------------
+
+cmd_run() {
+  load_node
+  export FAMILYOS_DATA_DIR="${FAMILYOS_DATA_DIR:-$ROOT/data}"
+  if [[ -L "$CURRENT" ]]; then
+    cd "$CURRENT/"
+  elif [[ -f "$ROOT/.next/BUILD_ID" ]]; then
+    # A checkout from before releases/: serve its own build until the first deploy.
+    cd "$ROOT"
+  else
+    die "Nothing deployed. Run: $0 install"
+  fi
   exec pnpm start
 }
 
@@ -245,35 +519,45 @@ cmd_install() {
   require_not_root
   load_node
   agent_loaded || assert_port_free
-  # next dev also creates .next/; BUILD_ID is from next build
-  if [[ ! -f "$ROOT/.next/BUILD_ID" ]]; then
-    echo "No production build yet; running pnpm build"
-    (cd "$ROOT" && pnpm build)
+  cd "$ROOT"
+  if [[ ! -L "$CURRENT" ]]; then
+    local sha
+    sha=$(git rev-parse HEAD)
+    echo "Nothing deployed yet; releasing the checked-out commit ${sha}."
+    build_release "$sha"
+    activate_release "$sha"
+    printf '%s' "$sha" >"$LAST_ATTEMPT"
+    record "deploy ${sha} ok (install)"
   fi
   write_plist "$PLIST"
   plutil -lint "$PLIST" >/dev/null
   start_agent
   wait_for_port
+  install_autodeploy
+  echo "Auto-deploy checks origin/main every ${AUTODEPLOY_INTERVAL}s (${AUTODEPLOY_LABEL})."
 }
 
 cmd_uninstall() {
   require_darwin
   require_not_root
   stop_agent || true
-  local uid
+  local uid label
   uid=$(id -u)
-  launchctl bootout "user/${uid}/${UPDATE_LABEL}" 2>/dev/null || true
-  launchctl bootout "gui/${uid}/${UPDATE_LABEL}" 2>/dev/null || true
-  rm -f "$PLIST" "$UPDATE_PLIST"
-  echo "Removed ${LABEL}"
+  for label in "$UPDATE_LABEL" "$AUTODEPLOY_LABEL"; do
+    launchctl bootout "user/${uid}/${label}" 2>/dev/null || true
+    launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+  done
+  rm -f "$PLIST" "$UPDATE_PLIST" "$AUTODEPLOY_PLIST"
+  echo "Removed ${LABEL}, ${UPDATE_LABEL}, ${AUTODEPLOY_LABEL}"
 }
 
 cmd_restart() {
   require_darwin
   require_not_root
   [[ -f "$PLIST" ]] || die "LaunchAgent not installed. Run: $0 install"
-  if agent_loaded; then
-    launchctl kickstart -k "$(launchd_domain)/${LABEL}"
+  local target
+  if target=$(server_target); then
+    launchctl kickstart -k "$target"
   else
     assert_port_free
     start_agent
@@ -286,36 +570,17 @@ cmd_kick_update() {
   require_not_root
   write_update_plist "$UPDATE_PLIST"
   plutil -lint "$UPDATE_PLIST" >/dev/null
-  # Always user/ — not a child of com.familyos.server. update calls stop_agent;
-  # a child of that KeepAlive job would die with it. gui/ needs Aqua.
-  local uid domain target i st
-  uid=$(id -u)
-  domain="user/${uid}"
-  target="${domain}/${UPDATE_LABEL}"
-  launchctl bootout "$target" 2>/dev/null || true
-  for i in $(seq 1 20); do
-    launchctl print "$target" >/dev/null 2>&1 || break
-    sleep 0.25
-  done
-  if ! launchctl bootstrap "$domain" "$UPDATE_PLIST"; then
-    st=$?
-    # 5 = already loaded (bootout lost the race)
-    if [[ $st -ne 5 ]]; then
-      die "Could not bootstrap ${UPDATE_LABEL} into ${domain} (exit ${st})."
-    fi
-  fi
-  launchctl enable "$target" 2>/dev/null || true
+  bootstrap_user_job "$UPDATE_PLIST" "$UPDATE_LABEL"
+  local target
+  target="user/$(id -u)/${UPDATE_LABEL}"
   launchctl kickstart -k "$target" || die "Could not kickstart ${target}"
   echo "Update job started (${target}). Logs: ${UPDATE_LOG_OUT}"
 }
 
 cmd_check_update() {
-  cd "$ROOT"
-  # Refresh the remote-tracking ref explicitly, even with a custom fetch refspec.
-  # Do not switch branches or touch the working tree while checking.
-  GIT_TERMINAL_PROMPT=0 git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
+  fetch_main
   local incoming
-  incoming=$(git rev-list --count refs/heads/main..refs/remotes/origin/main)
+  incoming=$(git rev-list --count "$(deployed_sha)..refs/remotes/origin/main")
   if [[ "$incoming" -gt 0 ]]; then
     echo '{"available":true}'
   else
@@ -323,31 +588,82 @@ cmd_check_update() {
   fi
 }
 
-cmd_update() {
+# deploy [ref]: a manual deploy always builds and switches, even to a commit
+# the poller already tried.
+cmd_deploy() {
   require_darwin
   require_not_root
   load_node
-  cd "$ROOT"
-
-  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git checkout: ${ROOT}"
-  if [[ -n "$(git status --porcelain)" ]]; then
-    die "Working tree is dirty. Commit or stash, then retry update."
+  acquire_lock
+  fetch_main
+  local sha
+  sha=$(git rev-parse --verify "${1:-refs/remotes/origin/main}^{commit}")
+  if [[ "$(current_sha 2>/dev/null || true)" == "$sha" ]]; then
+    echo "Already live: ${sha}"
+    return 0
   fi
+  deploy_sha "$sha" "${1:-manual}"
+  [[ -f "$AUTODEPLOY_PLIST" ]] && autodeploy_loaded || install_autodeploy
+}
 
-  git fetch origin main
-  git checkout main
-  git pull --ff-only origin main
+cmd_auto_deploy() {
+  require_darwin
+  require_not_root
+  load_node
+  acquire_lock
+  fetch_main
+  local sha
+  sha=$(git rev-parse refs/remotes/origin/main)
+  [[ "$(current_sha 2>/dev/null || true)" == "$sha" ]] && exit 0
+  # After a failed deploy or a rollback, wait for a new commit on main rather
+  # than retrying the same one every interval.
+  [[ "$(cat "$LAST_ATTEMPT" 2>/dev/null || true)" == "$sha" ]] && exit 0
+  deploy_sha "$sha" "auto"
+}
 
-  # next build must not race next start writing the same .next
-  stop_agent || true
-  assert_port_free
-  pnpm install --frozen-lockfile
-  pnpm build
-  if [[ -f "$PLIST" ]]; then
-    start_agent
-    wait_for_port
+cmd_rollback() {
+  require_darwin
+  require_not_root
+  acquire_lock
+  local sha from
+  from=$(current_sha 2>/dev/null || die "Nothing deployed.")
+  sha=${1:-$(previous_sha 2>/dev/null || die "No previous release to roll back to.")}
+  sha=$(git -C "$ROOT" rev-parse --verify "${sha}^{commit}" 2>/dev/null || die "Unknown commit: ${sha}")
+  [[ -f "$RELEASES/$sha/.next/BUILD_ID" ]] || die "Release ${sha} is not kept. Run: $0 deploy ${sha}"
+  [[ "$sha" != "$from" ]] || die "Release ${sha} is already live."
+  record "rollback ${sha} started (from ${from})"
+  activate_release "$sha"
+  if restart_into_current; then
+    record "rollback ${sha} ok"
+    echo "Live: ${sha}. Auto-deploy waits for a new commit on main."
   else
-    echo "Built. Install the LaunchAgent with: $0 install"
+    record "rollback ${sha} failed: not ready"
+    die "Release ${sha} never became ready. See ${LOG_ERR}"
+  fi
+}
+
+cmd_status() {
+  local cur prev dir sha marks
+  cur=$(current_sha 2>/dev/null || true)
+  prev=$(previous_sha 2>/dev/null || true)
+  echo "current:  ${cur:-none}"
+  echo "previous: ${prev:-none}"
+  echo "last attempt: $(cat "$LAST_ATTEMPT" 2>/dev/null || echo none)"
+  echo "releases:"
+  if [[ -d "$RELEASES" ]]; then
+    for dir in "$RELEASES"/[0-9a-f]*/; do
+      [[ -d "$dir" ]] || continue
+      sha=$(basename "$dir")
+      marks=""
+      [[ "$sha" == "$cur" ]] && marks+=" (current)"
+      [[ "$sha" == "$prev" ]] && marks+=" (previous)"
+      [[ -f "$dir/.next/BUILD_ID" ]] || marks+=" (unbuilt)"
+      echo "  ${sha}${marks}  $(git -C "$ROOT" log -1 --format='%cs %s' "$sha" 2>/dev/null || true)"
+    done
+  fi
+  if [[ -f "$HISTORY" ]]; then
+    echo "history:"
+    tail -n 10 "$HISTORY" | sed 's/^/  /'
   fi
 }
 
@@ -361,7 +677,7 @@ cmd_check() {
   write_plist "$tmp"
   plutil -lint "$tmp" >/dev/null
   grep -q "<string>${LABEL}</string>" "$tmp"
-  grep -q "<key>KeepAlive</key>" "$tmp"
+  grep -A1 "<key>KeepAlive</key>" "$tmp" | grep -q "<true/>"
   grep -q "<string>run</string>" "$tmp"
   grep -q "<string>Background</string>" "$tmp"
   rm -f "$tmp"
@@ -372,22 +688,38 @@ cmd_check() {
   grep -q "<string>update</string>" "$tmp"
   grep -A1 "<key>KeepAlive</key>" "$tmp" | grep -q "<false/>"
   rm -f "$tmp"
+  tmp=$(mktemp -t familyos-autodeploy-plist)
+  write_autodeploy_plist "$tmp"
+  plutil -lint "$tmp" >/dev/null
+  grep -q "<string>${AUTODEPLOY_LABEL}</string>" "$tmp"
+  grep -q "<string>auto-deploy</string>" "$tmp"
+  grep -A1 "<key>StartInterval</key>" "$tmp" | grep -q "<integer>${AUTODEPLOY_INTERVAL}</integer>"
+  grep -A1 "<key>KeepAlive</key>" "$tmp" | grep -q "<false/>"
+  rm -f "$tmp"
   [[ "$(xml_escape 'a&b<c>')" == 'a&amp;b&lt;c&gt;' ]]
   domain=$(launchd_domain)
   [[ "$domain" == gui/* || "$domain" == user/* ]]
   if [[ -n "${NVM_BIN:-}" ]]; then
     [[ "$(command -v node)" == "$NVM_BIN/node" ]]
   fi
-  echo "macos-server --check: ok (${domain})"
+  echo "macos-server --check: ok (${domain}; root ${ROOT})"
 }
 
 case "${1:-}" in
   run) cmd_run ;;
   install) cmd_install ;;
   uninstall) cmd_uninstall ;;
-  update) cmd_update ;;
+  deploy | update) cmd_deploy "${2:-}" ;;
+  auto-deploy) cmd_auto_deploy ;;
+  rollback) cmd_rollback "${2:-}" ;;
+  status | releases) cmd_status ;;
   check-update) cmd_check_update ;;
   kick-update) cmd_kick_update ;;
+  build-release)
+    [[ -n "${2:-}" ]] || die "Usage: $0 build-release <sha>"
+    build_release "$(git -C "$ROOT" rev-parse --verify "${2}^{commit}")"
+    ;;
+  prune) prune_releases ;;
   restart) cmd_restart ;;
   --check) cmd_check ;;
   -h | --help | help | "")
