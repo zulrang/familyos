@@ -29,12 +29,12 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 ## Non-Obvious Rules
 - One Server Installation = one Household and multiple paired Displays. Not phone-first or multi-tenant. Fixed 74px rail; light-only (no create-next-app dark mode or Geist).
 - The primary device is a wall touchscreen kiosk used by all ages, including children. Every interaction should be easy, pleasant, delightful — Guiding Principles in `docs/SSD.md`.
-- Production (`pnpm start`) is port 3000; development (`pnpm dev`) is 3001 so both can run. On the household Mac, a LaunchAgent (`scripts/macos-server`) KeepAlives `:3000`; refresh with `./scripts/macos-server update`.
+- Production (`pnpm start`) is port 3000; development (`pnpm dev`) is 3001 so both can run. On the household Mac, a LaunchAgent (`scripts/macos-server`) KeepAlives `:3000` and a second one auto-deploys every new `main` commit as a release under `releases/` (ADR 0009); `./scripts/macos-server rollback` returns to the previous release. Merging to `main` is deploying.
 - Google Calendar (one selected) backs Calendar and Google Tasks (explicitly selected tasklists) backs Lists — no local event/list database. Tasks, Bounties, Star Balances, and Rewards are FamilyOS-owned in `node:sqlite` (ADR 0006), never Google Tasks.
 - Event Participants are stable Household Member IDs in Google private event properties only; Member Color is presentation.
 - Calendar is a rolling Five-Day View with five-day paging and contrasted weekends. `docs/calendar.png` is an older seven-day capture.
 - Unimplemented rail items (Meals, Recipes) stay stubs until in scope. Sleep is a rail action that starts the idle slideshow (`docs/photos.md`), not a screen. Tasks follows `docs/design/tasks-design-spec.md` with Bounties per `docs/design/bounties-design-spec.md`; Rewards follows `docs/rewards.md`; parent admin follows `docs/admin.md`; Photos follows `docs/photos.md`.
-- Intentional on the wall: the Tasks `Add task` FAB (assigned Task create/edit) and the Settings `Update` button (restarts the server). Bounty creation stays admin-only.
+- Intentional on the wall: the Tasks `Add task` FAB (assigned Task create/edit) and the Settings `Update` button (deploys `origin/main` now instead of waiting for auto-deploy). Bounty creation stays admin-only.
 - Reimplement UI in `src/` from the design skill; the kit uses `window.DS` / CDN icons and will not run as Next modules.
 - Kiosk typing is the Chromium extension in `kiosk/osk/`, not a React overlay and not Onboard.
 - When changing, authoring, or reviewing code, follow `docs/code-design-principles.md`.

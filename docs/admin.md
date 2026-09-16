@@ -35,19 +35,24 @@ layout, pairing, scaling, and dimming.
 
 ## Editing local data
 
-The admin home page checks for updates when opened. The **Update** card appears
-only when remote `main` has commits missing from local `main`.
-`./scripts/macos-server check-update` fetches `origin/main` and compares commit
-history without switching branches or changing working files. A failed check
-offers a retry instead of showing an Update button.
+New commits on `main` deploy themselves within about two minutes
+(`docs/kiosk.md`, “Continuous deployment”), so the admin **Update** card is
+rarely needed. The home page checks when opened and shows the card only when
+`origin/main` has commits the live release lacks: usually the short window
+before auto-deploy runs, or after a deploy failed or was rolled back, which
+auto-deploy does not retry. `./scripts/macos-server check-update` fetches
+`origin/main` and compares history without changing the checkout. A failed
+check offers a retry instead of showing an Update button.
 
-The **Update** button starts `./scripts/macos-server update`
-through its separate macOS update job (`kick-update`), so it survives the server
-restart. It pulls `main`, installs dependencies, rebuilds, and restarts FamilyOS.
-The checkout must be clean. “Update started” confirms launch, not completion;
-refresh after a few minutes. Update logs are `~/Library/Logs/familyos-update.log`
-and `~/Library/Logs/familyos-update.err.log`. Wall **Settings** intentionally has
-the same **Update** button, which starts the same job.
+The **Update** button starts `./scripts/macos-server deploy` through its
+separate macOS update job (`kick-update`), so it survives the server restart.
+It builds `origin/main` as a new release beside the running one, switches,
+restarts FamilyOS, and rolls back automatically if the new release never
+becomes ready. “Update started” confirms launch, not completion; refresh after
+a few minutes. Logs are `~/Library/Logs/familyos-update.log` and
+`~/Library/Logs/familyos-update.err.log`. Wall **Settings** intentionally has
+the same **Update** button, which starts the same job. Rolling back is a
+household Mac command: `./scripts/macos-server rollback`.
 
 **Tasks:** create, edit, and retire; manage once/daily/weekly/monthly schedules,
 fixed/rotation assignments, type, optional time, and star value. Title,

@@ -48,8 +48,42 @@ pnpm build && pnpm start
 
 `pnpm start` binds `0.0.0.0:3000` so the Pi can reach it. `pnpm dev` is `:3001`
 and is not the kiosk origin. Reload Chromium after the switch. On the household
-Mac, `./scripts/macos-server install` keeps production up across logins;
-`./scripts/macos-server update` pulls `main`, rebuilds, and restarts.
+Mac, `./scripts/macos-server install` keeps production up across logins and
+turns on continuous deployment (below).
+
+## Continuous deployment
+
+The household Mac deploys itself; nothing pushes to it (ADR 0009). A LaunchAgent
+(`com.familyos.autodeploy`) runs `./scripts/macos-server auto-deploy` every two
+minutes: it fetches `origin/main` and, when the head commit differs from the
+live release and from the last attempted commit, deploys it.
+
+Each deploy is a separate release: a git worktree under `releases/<sha>` with
+its own `node_modules` and `.next`, built while the previous release keeps
+serving. `.env.local` is symlinked from the checkout and `data/` stays in the
+checkout (`FAMILYOS_DATA_DIR`), so releases share secrets and household data.
+Once built, `releases/current` is repointed, the server restarts (a second or
+two of downtime), and the deploy waits for `/api/ready`. If the new release
+never answers, `current` goes back to the previous release automatically and
+the server restarts again. A failed or rolled-back commit is not retried;
+auto-deploy waits for the next commit on `main`.
+
+```bash
+./scripts/macos-server status            # current, previous, kept releases, history
+./scripts/macos-server rollback          # switch to the previous release and restart
+./scripts/macos-server rollback <sha>    # any kept release (the newest three)
+./scripts/macos-server deploy [ref]      # deploy now, even a commit auto-deploy skipped
+```
+
+Deploy logs are `~/Library/Logs/familyos-update.log` and `.err.log`. The
+checkout at the plist's `WorkingDirectory` is the control checkout: it owns
+`releases/` and the script the agents run, and it fast-forwards to `main` on
+each deploy when it is clean and on `main`. The wall and admin **Update**
+buttons run `deploy` immediately instead of waiting for the next poll.
+
+Upgrading a Mac that predates `releases/`: pull `main` (or press **Update**
+once), then run `./scripts/macos-server install`. It releases the checked-out
+commit, restarts into it, and installs the auto-deploy agent.
 
 Pi Chromium also ships `--force-renderer-accessibility` (screen-reader tree on every tap). `/etc/chromium.d/familyos-perf` strips that and raises raster threads. Repo copy: `kiosk/chromium.d/familyos-perf`.
 
