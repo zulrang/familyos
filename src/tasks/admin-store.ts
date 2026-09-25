@@ -2,6 +2,7 @@ import type { HouseholdMember } from "@/members/members";
 import type { CompletionCorrection } from "./admin-types";
 import { releaseBountiesForRetiredMembers } from "./bounty-store";
 import { migrateLegacyOpenWork } from "./legacy-bounty-store-migration";
+import type { AgentTaskWrite } from "./mcp-schema";
 import {
   insertDefinition,
   loadCompletionCorrections,
@@ -284,5 +285,43 @@ export function correctAdminCompletion(correction: CompletionCorrection) {
       correction.at,
       correction.previous,
     );
+  });
+}
+
+/** The receipt and definition edit commit together, including retire-and-replace edits. */
+export function writeAgentTask(
+  command: AgentTaskWrite,
+  today: LocalDate,
+): unknown {
+  const db = tasksDatabase();
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_task_writes (
+    request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, result TEXT NOT NULL
+  )`);
+  return taskTransaction(() => {
+    const payload = JSON.stringify(command);
+    const previous = db
+      .prepare(
+        "SELECT payload, result FROM agent_task_writes WHERE request_id = ?",
+      )
+      .get(command.requestId);
+    if (previous) {
+      if (previous.payload !== payload)
+        throw new TaskAdminError(
+          "This request ID was already used for a different task change.",
+        );
+      return JSON.parse(String(previous.result));
+    }
+    const definition =
+      command.kind === "edit"
+        ? saveTask(command.task, command.draft, today)
+        : createDefinition(command.draft);
+    if (command.kind === "create") insertDefinition(definition);
+    const result = { definition };
+    db.prepare("INSERT INTO agent_task_writes VALUES (?, ?, ?)").run(
+      command.requestId,
+      payload,
+      JSON.stringify(result),
+    );
+    return result;
   });
 }

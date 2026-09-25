@@ -16,10 +16,12 @@
     "macos:update": "bash scripts/macos-server update"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "next": "16.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "uqr": "^0.1.3"
+    "uqr": "^0.1.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.2",
