@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AppHeader } from "@/shared/AppHeader";
@@ -13,16 +14,71 @@ type ScreenState =
   | { state: "loaded"; status: PhotosStatus }
   | { state: "error"; message: string };
 
+type SleepFeedback = {
+  message: string;
+  href: "/photos" | "/settings";
+  action: "Open Photos" | "Open Settings";
+};
+
+function sleepFeedback(
+  screen: ScreenState,
+  photoFailed: boolean,
+): SleepFeedback {
+  if (screen.state === "loading")
+    return {
+      message:
+        "Checking photos. The slideshow will start if photos are available.",
+      href: "/photos",
+      action: "Open Photos",
+    };
+  if (screen.state === "error")
+    return {
+      message: "Photos are unavailable right now. Open Photos to try again.",
+      href: "/photos",
+      action: "Open Photos",
+    };
+  switch (screen.status.state) {
+    case "unconfigured":
+      return {
+        message: "Connect Google in Settings to use Sleep photos.",
+        href: "/settings",
+        action: "Open Settings",
+      };
+    case "selecting":
+      return {
+        message: "Finish choosing photos in Photos to use Sleep.",
+        href: "/photos",
+        action: "Open Photos",
+      };
+    case "ready":
+      return {
+        message: photoFailed
+          ? "A photo could not load. Open Photos to check your selection."
+          : "No photos are available yet. Open Photos to check your selection.",
+        href: "/photos",
+        action: "Open Photos",
+      };
+    case "disconnected":
+      return {
+        message: "Choose photos in Photos to use Sleep.",
+        href: "/photos",
+        action: "Open Photos",
+      };
+  }
+}
+
 type ViewMode =
   | { state: "slideshow" }
   | { state: "settings" }
   | { state: "fullscreen"; controlsVisible: boolean };
 
+export type IdleActivation = "active" | "automatic" | "manual";
+
 type PhotosPresentation =
   | { mode?: "screen" }
   | {
       mode: "idle";
-      idle: boolean;
+      activation: IdleActivation;
       onDismiss: () => void;
       children: ReactNode;
     };
@@ -149,12 +205,20 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
         : null;
   const count = ready?.photos.length ?? 0;
   const photo = ready?.photos[index % Math.max(1, count)];
-  const playing = props.mode !== "idle" || props.idle;
+  const playing = props.mode !== "idle" || props.activation !== "active";
   const showingIdle =
-    props.mode === "idle" && props.idle && !!photo && failedSrc !== photo.src;
+    props.mode === "idle" &&
+    props.activation !== "active" &&
+    !!photo &&
+    failedSrc !== photo.src;
+  const showingFeedback =
+    props.mode === "idle" && props.activation === "manual" && !showingIdle;
+  const showingOverlay = showingIdle || showingFeedback;
+
+  const feedback = sleepFeedback(screen, !!photo && failedSrc === photo.src);
 
   useEffect(() => {
-    if (!showingIdle) return;
+    if (!showingOverlay) return;
     const dialog = idleDialog.current;
     if (!dialog) return;
     if (typeof dialog.showModal === "function") dialog.showModal();
@@ -162,7 +226,16 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
     return () => {
       if (typeof dialog.close === "function" && dialog.open) dialog.close();
     };
-  }, [showingIdle]);
+  }, [showingOverlay]);
+
+  useEffect(() => {
+    if (!showingOverlay) return;
+    idleDialog.current
+      ?.querySelector<HTMLElement>(
+        showingIdle ? "[data-idle-slideshow]" : "[data-sleep-action]",
+      )
+      ?.focus();
+  }, [showingOverlay, showingIdle]);
 
   useEffect(() => {
     if (!ready || count < 2) return;
@@ -172,14 +245,20 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
   }, [ready, index, count]);
 
   useEffect(() => {
-    if (!playing || paused || viewMode.state === "settings" || count < 2)
+    if (
+      !playing ||
+      showingFeedback ||
+      paused ||
+      viewMode.state === "settings" ||
+      count < 2
+    )
       return;
     const timer = setInterval(
       () => setIndex((value) => (value + 1) % count),
       15_000,
     );
     return () => clearInterval(timer);
-  }, [playing, paused, viewMode.state, count]);
+  }, [playing, showingFeedback, paused, viewMode.state, count]);
 
   useEffect(() => {
     if (viewMode.state !== "fullscreen") return;
@@ -215,37 +294,59 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
   if (props.mode === "idle") {
     return (
       <>
-        <div className={styles.idleContent} inert={showingIdle}>
+        <div className={styles.idleContent} inert={showingOverlay}>
           {props.children}
         </div>
-        {showingIdle &&
-          photo &&
+        {showingOverlay &&
           createPortal(
             <dialog
               ref={idleDialog}
-              className={styles.idleDialog}
-              aria-label="Idle photo slideshow"
+              data-idle-dialog=""
+              className={showingIdle ? styles.idleDialog : styles.sleepDialog}
+              aria-label={
+                showingIdle ? "Idle photo slideshow" : "Sleep unavailable"
+              }
               onCancel={(event) => {
                 event.preventDefault();
                 props.onDismiss();
               }}
             >
-              <button
-                type="button"
-                data-idle-slideshow=""
-                className={styles.idleSlideshow}
-                aria-label="Return to previous screen"
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={props.onDismiss}
-              >
-                {/* biome-ignore lint/performance/noImgElement: private authenticated photo stream */}
-                <img
-                  src={photo.src}
-                  alt={ready?.sourceName}
-                  className={styles.photo}
-                  onError={() => setFailedSrc(photo.src)}
-                />
-              </button>
+              {showingIdle && photo ? (
+                <button
+                  type="button"
+                  data-idle-slideshow=""
+                  className={styles.idleSlideshow}
+                  aria-label="Return to previous screen"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={props.onDismiss}
+                >
+                  {/* biome-ignore lint/performance/noImgElement: private authenticated photo stream */}
+                  <img
+                    src={photo.src}
+                    alt={ready?.sourceName}
+                    className={styles.photo}
+                    onError={() => setFailedSrc(photo.src)}
+                  />
+                </button>
+              ) : (
+                <div className={styles.sleepFeedback}>
+                  <h2>Sleep is unavailable</h2>
+                  <p>{feedback.message}</p>
+                  <div className={styles.actions}>
+                    <Link
+                      data-sleep-action=""
+                      href={feedback.href}
+                      onClick={props.onDismiss}
+                      className={styles.sleepAction}
+                    >
+                      {feedback.action}
+                    </Link>
+                    <Button onClick={props.onDismiss}>
+                      Return to previous screen
+                    </Button>
+                  </div>
+                </div>
+              )}
             </dialog>,
             document.body,
           )}

@@ -34,6 +34,51 @@
   cursor: pointer;
 }
 
+.sleepDialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  margin: 0;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  color: var(--text-body);
+  box-shadow: var(--shadow-raise);
+}
+
+.sleepDialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.sleepFeedback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px;
+  text-align: center;
+}
+
+.sleepFeedback h2 {
+  font: var(--type-section);
+}
+
+.sleepAction {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: var(--radius-pill);
+  background: var(--brand-blue);
+  color: var(--text-on-fill);
+  font: var(--type-card-meta);
+  text-decoration: none;
+}
+
 .empty {
   display: flex;
   flex: 1;
