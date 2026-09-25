@@ -52,6 +52,12 @@ See the [admin guide and mobile screenshots](docs/admin.md) for workflows, acces
 rules, and storage behavior, or the [remote mobile preview runbook](docs/agents/mobile-preview.md)
 to preview changes from another computer.
 
+## Agent access
+
+Agents can manage assigned Tasks and confirm Reward Spends through `/api/mcp`.
+Set a separate `FAMILYOS_MCP_TOKEN` to enable access; see the
+[MCP setup and tool guide](docs/mcp.md).
+
 ## Touchscreen
 
 The main UI is laid out for a **1080p landscape** capacitive panel, read from across a kitchen. Mouse/trackpad in a desktop browser is fine for development. The parent admin interface is designed for iPhones.

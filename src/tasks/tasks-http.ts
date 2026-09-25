@@ -60,11 +60,15 @@ export async function handleGetTasks(
 ): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
+  return Response.json(await readTasksView(now));
+}
+
+export async function readTasksView(now = new Date()): Promise<TasksViewRead> {
   const household = await readHousehold();
   const today = parseLocalDate(
     msToZonedDate(now.getTime(), household.timeZone),
   );
-  if (!today) return jsonError("invalid household date", 500);
+  if (!today) throw new Error("Invalid household date");
   reconcileRetiredMembers(household.members, today);
   const { definitions: storedDefinitions, events } = loadStore();
   const db = tasksDatabase();
@@ -119,7 +123,7 @@ export async function handleGetTasks(
     today,
     generatedAt: now.toISOString() as TasksViewRead["generatedAt"],
   };
-  return Response.json(body);
+  return body;
 }
 
 function assignedMembers(assignment: AssignmentPolicy): string[] {
