@@ -314,7 +314,10 @@ test("Escape dismisses Sleep feedback without changing the current screen", asyn
 });
 
 test("manual Sleep explains a failed photo without exposing the current screen", async () => {
-  await setup();
+  await setup({
+    ...ready,
+    photos: [...ready.photos, { id: "3", src: "/photo3" }],
+  });
   fireEvent.click(screen.getByRole("button", { name: "Sleep" }));
   fireEvent.error(screen.getByRole("img", { name: "Family" }));
   expect(
@@ -327,6 +330,28 @@ test("manual Sleep explains a failed photo without exposing the current screen",
   expect(
     screen.getByRole("dialog", { name: "Sleep unavailable" }),
   ).toBeVisible();
+  await act(() => vi.advanceTimersByTimeAsync(15_000));
+  expect(
+    screen.getByRole("dialog", { name: "Sleep unavailable" }),
+  ).toHaveTextContent(/photo could not load/i);
+  await act(() => vi.advanceTimersByTimeAsync(15_000));
+  expect(
+    screen.getByRole("dialog", { name: "Sleep unavailable" }),
+  ).toHaveTextContent(/photo could not load/i);
+  expect(document.activeElement).toBe(action);
+});
+
+test("automatic idle tries the next photo after one image fails", async () => {
+  await setup();
+  await act(() => vi.advanceTimersByTimeAsync(30_000));
+  fireEvent.error(screen.getByRole("img", { name: "Family" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await act(() => vi.advanceTimersByTimeAsync(15_000));
+  expect(overlay()).toBeVisible();
+  expect(screen.getByRole("img", { name: "Family" })).toHaveAttribute(
+    "src",
+    "/photo2",
+  );
 });
 
 test("automatic idle without photos leaves the visible screen's keyboard usable", async () => {

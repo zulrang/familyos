@@ -245,14 +245,20 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
   }, [ready, index, count]);
 
   useEffect(() => {
-    if (!playing || paused || viewMode.state === "settings" || count < 2)
+    if (
+      !playing ||
+      showingFeedback ||
+      paused ||
+      viewMode.state === "settings" ||
+      count < 2
+    )
       return;
     const timer = setInterval(
       () => setIndex((value) => (value + 1) % count),
       15_000,
     );
     return () => clearInterval(timer);
-  }, [playing, paused, viewMode.state, count]);
+  }, [playing, showingFeedback, paused, viewMode.state, count]);
 
   useEffect(() => {
     if (viewMode.state !== "fullscreen") return;
