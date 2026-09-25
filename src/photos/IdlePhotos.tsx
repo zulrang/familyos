@@ -7,7 +7,7 @@ import {
   type IdleDimAfterMs,
 } from "@/shared/idle-dim";
 import { SleepContext } from "@/shared/SleepContext";
-import { PhotosScreen } from "./PhotosScreen";
+import { type IdleActivation, PhotosScreen } from "./PhotosScreen";
 
 export function IdlePhotos({
   idleDimAfterMs,
@@ -16,7 +16,7 @@ export function IdlePhotos({
   idleDimAfterMs: IdleDimAfterMs;
   children: ReactNode;
 }) {
-  const [state, setState] = useState<"active" | "idle">("active");
+  const [state, setState] = useState<IdleActivation>("active");
   const [afterMs, setAfterMs] = useState(idleDimAfterMs);
 
   useEffect(() => setAfterMs(idleDimAfterMs), [idleDimAfterMs]);
@@ -25,20 +25,36 @@ export function IdlePhotos({
     let timer: ReturnType<typeof setTimeout>;
     function restart() {
       clearTimeout(timer);
-      timer = setTimeout(() => setState("idle"), afterMs);
+      timer = setTimeout(() => setState("automatic"), afterMs);
     }
     function activity(event: Event) {
       // Keep the overlay through pointer-up so the wake-up tap cannot click
       // a control on the screen underneath. Its click handler dismisses it.
-      if (state === "idle") {
-        if (event.type === "keydown") {
+      if (state !== "active") {
+        if (
+          state === "automatic" &&
+          !document.querySelector("[data-idle-dialog]")
+        ) {
+          setState("active");
+          return;
+        }
+        const insideDialog =
+          event.target instanceof Element &&
+          !!event.target.closest("[data-idle-dialog]");
+        const slideshowTarget =
+          event.target instanceof Element &&
+          !!event.target.closest("[data-idle-slideshow]");
+        if (
+          event.type === "keydown" &&
+          (!insideDialog ||
+            state === "automatic" ||
+            slideshowTarget ||
+            (event instanceof KeyboardEvent && event.key === "Escape"))
+        ) {
           event.preventDefault();
           event.stopImmediatePropagation();
           setState("active");
-        } else if (
-          !(event.target instanceof Element) ||
-          !event.target.closest("[data-idle-slideshow]")
-        ) {
+        } else if (!insideDialog) {
           setState("active");
         }
         return;
@@ -53,7 +69,7 @@ export function IdlePhotos({
     const events = ["pointerdown", "pointermove", "keydown", "wheel", "click"];
     for (const event of events) window.addEventListener(event, activity, true);
     window.addEventListener(IDLE_DIM_CHANGED, configurationChanged);
-    restart();
+    if (state === "active") restart();
     return () => {
       clearTimeout(timer);
       for (const event of events)
@@ -65,10 +81,10 @@ export function IdlePhotos({
   return (
     <PhotosScreen
       mode="idle"
-      idle={state === "idle"}
+      activation={state}
       onDismiss={() => setState("active")}
     >
-      <SleepContext value={() => setState("idle")}>{children}</SleepContext>
+      <SleepContext value={() => setState("manual")}>{children}</SleepContext>
     </PhotosScreen>
   );
 }

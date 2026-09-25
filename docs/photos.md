@@ -54,7 +54,10 @@ redirects must use an authorized HTTPS domain.
   available, the current screen stays visible. Hardware backlight dimming
   continues independently on the kiosk.
 - **Sleep** in the navigation rail starts this idle slideshow immediately.
-  Waking returns to the same screen with its in-progress state preserved.
+  Waking returns to the same screen with its in-progress state preserved. If
+  photos are unavailable, Sleep explains what to do next and offers a link to
+  Photos or Settings; dismissing the message preserves the current screen.
+  Automatic idle remains quiet when there are no photos.
 
 The Photo Selection is shared server state. Slideshow position, pause state,
 and full-screen state are local UI state on each Display.
