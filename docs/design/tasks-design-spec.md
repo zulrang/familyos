@@ -431,8 +431,9 @@ Components: `TasksBoard`, `TaskRow`, the standard FAB.
   current Household Time Zone day: all-day events first, then timed events in
   start-time order. Events with that member's stable participant ID and
   Household Events (no participant IDs) appear; other members' events do not.
-  This read-only agenda uses the selected Google Calendar, including its saved
-  read-only cache when live Calendar is unavailable. Missing configuration,
+  This read-only agenda uses the selected Google Calendar. A previously saved
+  read for that exact day can remain visible when live Calendar is unavailable;
+  otherwise the panel shows a recoverable error. Missing configuration,
   loading, empty, and read errors have explicit states. An overnight event
   shows both endpoint dates. The agenda updates at the household date rollover.
 - **Member palettes.** Preserve each saved Member Color as the accent and
