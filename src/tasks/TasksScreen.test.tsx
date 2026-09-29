@@ -351,6 +351,40 @@ function submittedRecurrence(
 }
 
 describe("TasksScreen", () => {
+  test("shows the selected member's calendar below today's progress in personal focus", async () => {
+    installFetch(emptyView());
+    const user = userEvent.setup();
+    render(
+      <TasksScreen
+        MemberDay={({ memberId }) => (
+          <section aria-label="Today’s calendar">
+            Calendar for {memberId}
+          </section>
+        )}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    expect(screen.getByText("Calendar for dad")).toBeVisible();
+    expect(
+      screen
+        .getByText("Today’s progress")
+        .compareDocumentPosition(screen.getByText("Calendar for dad")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    await user.click(
+      screen.getByRole("button", { name: "View tasks for Ellie" }),
+    );
+    expect(screen.getByText("Calendar for ellie")).toBeVisible();
+    expect(screen.queryByText("Calendar for dad")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Family Board" }));
+    expect(
+      screen.queryByRole("region", { name: "Today’s calendar" }),
+    ).not.toBeInTheDocument();
+  });
   test("Bounties focus advertises, claims, and completes zero-Star work without shared creation", async () => {
     const user = userEvent.setup();
     const initial = emptyView();

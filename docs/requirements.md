@@ -61,6 +61,9 @@ slideshow rather than opening a screen.
   does not use Google. Assigned Tasks follow
   `docs/design/tasks-design-spec.md`; Bounties follow
   `docs/design/bounties-design-spec.md`.
+- A member's Tasks focus shows a read-only view of that member's current-day
+  Calendar events and Household Events below task progress. Calendar remains
+  the event source of truth.
 - Parents create and manage Tasks and Bounties in the parent admin
   (`docs/admin.md`).
 

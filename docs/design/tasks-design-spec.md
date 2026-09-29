@@ -426,7 +426,15 @@ Components: `TasksBoard`, `TaskRow`, the standard FAB.
 - **Personal focus.** Tapping a member's name header (including its progress
   area) or the more-tasks link opens that member's full list. Task content
   and completion controls never navigate. A member picker switches between
-  people, and Family Board returns to the prior board scroll position.
+  people, and Family Board returns to the prior board scroll position. Below
+  Today's progress, the member's calendar shows every event overlapping the
+  current Household Time Zone day: all-day events first, then timed events in
+  start-time order. Events with that member's stable participant ID and
+  Household Events (no participant IDs) appear; other members' events do not.
+  This read-only agenda uses the selected Google Calendar, including its saved
+  read-only cache when live Calendar is unavailable. Missing configuration,
+  loading, empty, and read errors have explicit states. An overnight event
+  shows both endpoint dates. The agenda updates at the household date rollover.
 - **Member palettes.** Preserve each saved Member Color as the accent and
   avatar fill. Derive light card/header surfaces, contrasting text, and
   stronger control colors from it. Text on these surfaces and white text on
