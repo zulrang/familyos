@@ -491,7 +491,7 @@
   border-radius: 24px;
   color: var(--task-ink);
 }
-.focusSummary > p {
+.progressSummary > p {
   font: var(--fw-bold) 18px / 1.3 var(--font-sans);
 }
 .bigProgress {

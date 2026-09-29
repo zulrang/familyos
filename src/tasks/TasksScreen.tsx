@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type ComponentType,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   type ActiveMember,
   activeMembers,
@@ -17,7 +23,7 @@ import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
 import { TaskCelebration } from "./TaskCelebration";
 import styles from "./TaskEditor.module.css";
-import { TasksBoard } from "./TasksBoard";
+import { type MemberDayProps, TasksBoard } from "./TasksBoard";
 import {
   type AvailableBounty,
   type ClaimedBounty,
@@ -249,7 +255,11 @@ export function skipOccurrence(
   };
 }
 
-export function TasksScreen() {
+export function TasksScreen({
+  MemberDay,
+}: {
+  MemberDay?: ComponentType<MemberDayProps>;
+}) {
   const [now, setNow] = useState(() => new Date());
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [tasks, setTasks] = useState<TasksViewRead>(emptyView);
@@ -616,6 +626,16 @@ export function TasksScreen() {
         <TasksBoard
           members={members}
           tasks={tasks}
+          memberDay={
+            MemberDay
+              ? {
+                  Component: MemberDay,
+                  day: now,
+                  timeZone: settings.timeZone,
+                  calendarId: settings.calendarId,
+                }
+              : undefined
+          }
           onComplete={(row) => complete(row).catch(() => {})}
           onSkip={(row) => {
             setSkipNote("");

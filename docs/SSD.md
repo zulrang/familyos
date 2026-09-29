@@ -67,6 +67,12 @@ design skill forbids. Where delight and restraint conflict, restraint wins.
   server-side last-known cache supports stale read-only display, but never
   accepts offline writes or becomes a second source of truth.
 
+The Tasks member focus composes a Calendar-owned, read-only day agenda. It
+fetches the same selected-calendar endpoint over exact Household Time Zone
+midnight bounds and filters by stable participant IDs while retaining
+Household Events. The app route composes Calendar and Tasks so feature slices
+remain independent; the agenda never stores or changes events in Tasks.
+
 **Decision: Stable IDs are the only Event Participant identity**
 - Choice: FamilyOS stores stable Household Member IDs in Google event private
   properties. Zero IDs means Household Event. Event colors are presentation

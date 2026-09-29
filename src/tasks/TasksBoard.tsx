@@ -1,6 +1,11 @@
 "use client";
 
-import { type CSSProperties, useRef, useState } from "react";
+import {
+  type ComponentType,
+  type CSSProperties,
+  useRef,
+  useState,
+} from "react";
 import {
   type ActiveMember,
   type MemberId,
@@ -8,6 +13,7 @@ import {
   memberTaskPalette,
   onFillInk,
 } from "@/members/members";
+import { msToZonedDate } from "@/shared/time";
 import { Avatar } from "@/shared/ui/Avatar";
 import { Icon } from "@/shared/ui/Icon";
 import { TaskRow, type TaskRowStatus } from "./TaskRow";
@@ -48,6 +54,20 @@ type TaskActions = {
   onClaimBounty: (row: AvailableBounty) => void;
   mutatingBountyClaims: ReadonlySet<ClaimId>;
   mutatingBountyOfferings: ReadonlySet<OfferingId>;
+};
+
+export type MemberDayProps = {
+  memberId: MemberId;
+  day: Date;
+  timeZone: string;
+  calendarId: string | null;
+};
+
+type MemberDayIntegration = {
+  Component: ComponentType<MemberDayProps>;
+  day: Date;
+  timeZone: string;
+  calendarId: string | null;
 };
 
 const BOARD_PREVIEW_COUNT = 3;
@@ -214,10 +234,12 @@ function GroupTasks({
 export function TasksBoard({
   members,
   tasks,
+  memberDay,
   ...actions
 }: TaskActions & {
   members: ActiveMember[];
   tasks: TasksViewRead;
+  memberDay?: MemberDayIntegration;
 }) {
   const [location, setLocation] = useState<BoardLocation>({ kind: "board" });
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -403,17 +425,28 @@ export function TasksBoard({
               <GroupTasks key={selected.key} {...actions} group={selected} />
             </section>
             <aside className={styles.focusSummary}>
-              <p>Today’s progress</p>
-              <div className={styles.bigProgress}>
-                {selected.done}
-                <span>/{selected.total}</span>
+              <div className={styles.progressSummary}>
+                <p>Today’s progress</p>
+                <div className={styles.bigProgress}>
+                  {selected.done}
+                  <span>/{selected.total}</span>
+                </div>
+                <Progress group={selected} />
+                <h2>
+                  {selected.total > 0 && selected.done === selected.total
+                    ? "All done for today"
+                    : "One task at a time"}
+                </h2>
               </div>
-              <Progress group={selected} />
-              <h2>
-                {selected.total > 0 && selected.done === selected.total
-                  ? "All done for today"
-                  : "One task at a time"}
-              </h2>
+              {memberDay ? (
+                <memberDay.Component
+                  key={`${msToZonedDate(memberDay.day.getTime(), memberDay.timeZone)}:${memberDay.timeZone}:${memberDay.calendarId}`}
+                  memberId={selected.location.member}
+                  day={memberDay.day}
+                  timeZone={memberDay.timeZone}
+                  calendarId={memberDay.calendarId}
+                />
+              ) : null}
             </aside>
           </div>
         ) : null}

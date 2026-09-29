@@ -1,0 +1,55 @@
+.agenda {
+  border-top: 1px solid var(--task-accent);
+  margin-top: 30px;
+  padding-top: 24px;
+}
+.agenda h3 {
+  color: var(--task-ink);
+  font: var(--fw-semibold) 26px / 1.2 var(--font-display);
+}
+.message {
+  display: block;
+  margin-top: 16px;
+  color: var(--task-ink);
+  font: var(--fw-semibold) 16px / 1.4 var(--font-sans);
+}
+.message button {
+  display: block;
+  min-height: 48px;
+  margin-top: 12px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--task-control);
+  color: var(--task-on-control);
+  font: var(--fw-bold) 16px / 1.2 var(--font-sans);
+  cursor: pointer;
+}
+.events {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.event {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--task-panel);
+  color: var(--task-ink);
+}
+.eventTime {
+  font: var(--fw-bold) 14px / 1.3 var(--font-sans);
+}
+.eventTitle {
+  font: var(--fw-semibold) 19px / 1.25 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.household {
+  font: var(--fw-semibold) 13px / 1.3 var(--font-sans);
+}
