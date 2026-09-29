@@ -67,7 +67,11 @@ export function MemberDayAgenda({
       } catch (error) {
         if (!current.signal.aborted) {
           console.error("member day calendar:", error);
-          setState({ kind: "error" });
+          setState((previous) =>
+            previous.kind === "ready"
+              ? { kind: "ready", read: { ...previous.read, stale: true } }
+              : { kind: "error" },
+          );
         }
       }
     }

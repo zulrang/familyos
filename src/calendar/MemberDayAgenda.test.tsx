@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,8 +17,63 @@ const base = { day, timeZone: "America/New_York", calendarId: "family" };
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+test("keeps the last successful day visible when refresh fails, then replaces it after the next poll", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const first: CalendarRead = {
+    stale: false,
+    events: [
+      {
+        id: "practice",
+        title: "Swim practice",
+        allDay: false,
+        startMs: Date.parse("2026-09-29T13:00:00Z"),
+        endMs: Date.parse("2026-09-29T14:00:00Z"),
+        participantIds: ["dad"],
+        expectedVersion: "1",
+      },
+    ],
+  };
+  const refreshed: CalendarRead = {
+    stale: false,
+    events: [
+      {
+        id: "lesson",
+        title: "Music lesson",
+        allDay: false,
+        startMs: Date.parse("2026-09-29T15:00:00Z"),
+        endMs: Date.parse("2026-09-29T16:00:00Z"),
+        participantIds: ["dad"],
+        expectedVersion: "2",
+      },
+    ],
+  };
+  let remote: CalendarRead | null = first;
+  vi.stubGlobal("fetch", async () => {
+    return remote ? Response.json(remote) : new Response(null, { status: 503 });
+  });
+
+  render(<MemberDayAgenda {...base} memberId="dad" />);
+  expect(await screen.findByText("Swim practice")).toBeTruthy();
+  remote = null;
+  await act(async () => {
+    vi.advanceTimersByTime(60_000);
+  });
+  expect(screen.getByText("Swim practice")).toBeTruthy();
+  expect(screen.getByText("Showing saved calendar events.")).toBeTruthy();
+
+  remote = refreshed;
+  await act(async () => {
+    vi.advanceTimersByTime(60_000);
+  });
+  expect(await screen.findByText("Music lesson")).toBeTruthy();
+  expect(screen.queryByText("Swim practice")).toBeNull();
+  expect(screen.queryByText("Showing saved calendar events.")).toBeNull();
 });
 
 test("shows the selected member and household events, then the next household day", async () => {
@@ -129,6 +185,7 @@ test("shows saved data, an empty day, and a recoverable read error", async () =>
   view.rerender(
     <MemberDayAgenda
       {...base}
+      key="2026-09-30"
       memberId="dad"
       day={new Date("2026-09-30T16:00:00Z")}
     />,
