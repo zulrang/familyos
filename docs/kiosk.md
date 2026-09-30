@@ -204,3 +204,64 @@ ssh pi@fullpageos.local 'fuser -k /run/user/$(id -u)/familyos-idle-dim.lock 2>/d
 - matchbox without cursor
 - unclutter-xfixes
 - `run_onepageos` → `start_chromium_browser` (kiosk Chromium + touch-events)
+
+## Local diagnostics
+
+`familyos-observe` is a separate systemd service, independent of Chromium and
+`familyos-inspect`. Every 30 seconds it records the Pi's view of the configured kiosk URL's
+`/api/ready`, browser CDP `Browser.getVersion`, and a constant page
+`Runtime.evaluate`. It retains safe build/Chromium versions, Chromium process
+PID/role/RSS/CPU ticks/threads/state/wait-channel, pending request count/age, and
+allowlisted network failures, slow requests (at least 2 seconds), HTTP errors,
+and JavaScript exception class. It does not read browser cookies or record raw
+URLs, queries, headers, bodies, console messages, page content, or provider IDs.
+It has no recovery action.
+
+To install or update on the Pi, copy the three files to a private staging
+directory and run the installer there. This does not edit `start_gui` or any
+other kiosk service:
+
+```bash
+ssh -4 pi@fullpageos.local 'mkdir -m 700 -p /home/pi/familyos-observe-stage'
+scp -4 kiosk/observe.py kiosk/familyos-observe.service kiosk/install-observe pi@fullpageos.local:/home/pi/familyos-observe-stage/
+ssh -4 pi@fullpageos.local 'sudo /home/pi/familyos-observe-stage/install-observe'
+ssh -4 pi@fullpageos.local 'systemctl status familyos-observe.service --no-pager'
+```
+
+The private rotating logs are `/var/lib/familyos-observe/observe.jsonl`
+(current) and `.1` through `.3` (older), at most about 8 MiB total. The
+directory is `0700`, files are `0600`, and only `pi` and root can read them.
+The systemd unit creates and retains the state directory through service and
+browser restarts. Read recent records or copy all rotations for diagnosis:
+
+```bash
+ssh -4 pi@fullpageos.local 'sudo -u pi /usr/local/lib/familyos/observe.py --read 30'
+ssh -4 pi@fullpageos.local 'umask 077; mkdir -p /home/pi/familyos-observe-export; tar -C /var/lib/familyos-observe -czf /home/pi/familyos-observe-export/diagnostics.tgz .'
+umask 077; scp -4 pi@fullpageos.local:/home/pi/familyos-observe-export/diagnostics.tgz .
+```
+
+Each `sample` retains the three separate probe states. `renderer_unresponsive`
+means browser and server answered but the page probe timed out; it does not prove
+a kernel deadlock. `browser_unreachable` means the browser CDP probe failed;
+`server_unreachable` means the Pi could not reach readiness, while
+`server_unhealthy` means readiness returned `ready:false` or an HTTP error;
+`page_unavailable`
+means no matching kiosk page or a page transport/error response. A `timeout`
+state differs from `unavailable` (disconnect, rejected endpoint, or malformed
+response). Multiple failures can coexist, so inspect `server`, `browser`, and
+`renderer` rather than relying only on the verdict. `events_dropped` indicates
+more than 60 diagnostic events in a minute; request tracking is capped at 128.
+
+For a safe fault-injection check, run `--once` against an auxiliary local CDP
+server or test fixture with `--cdp-base`, `--server-url`, `--page-origin`, and a
+temporary `--log-dir`. `python3 -m unittest kiosk/test_observe.py` uses a local
+fake CDP server to exercise renderer timeout, disconnect, recovery, privacy,
+and rotation without touching the wall browser.
+
+Rollback stops and disables this service only:
+
+```bash
+ssh -4 pi@fullpageos.local 'sudo systemctl disable --now familyos-observe.service'
+```
+
+The log directory remains available for diagnosis until deliberately removed.
