@@ -99,6 +99,64 @@ test("empty selections do not enable slideshow controls", async () => {
   expect(screen.getByText(/No photos available yet/)).toBeVisible();
 });
 
+test.each([
+  "idle",
+  "screen",
+] as const)("a stalled %s poll times out and retries with fresh photos", async (mode) => {
+  vi.useFakeTimers();
+  const original: PhotosStatus = {
+    state: "ready",
+    sourceName: "Family",
+    pickerUrl: "https://photos.google.com/picker",
+    photos: [{ id: "one", src: "/photo-old" }],
+    pollAfterMs: 5000,
+  };
+  const refreshed: PhotosStatus = {
+    ...original,
+    photos: [{ id: "one", src: "/photo-new" }],
+    pollAfterMs: 5000,
+  };
+  let polls = 0;
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.stubGlobal("fetch", (_url: string, init: RequestInit) => {
+    if (init.method === "GET") return Promise.resolve(Response.json(original));
+    polls += 1;
+    if (polls === 1)
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(new Error("aborted")),
+        );
+      });
+    return Promise.resolve(Response.json(refreshed));
+  });
+  render(
+    mode === "idle" ? (
+      <PhotosScreen mode="idle" activation="automatic" onDismiss={() => {}}>
+        {null}
+      </PhotosScreen>
+    ) : (
+      <PhotosScreen />
+    ),
+  );
+  await act(() => vi.advanceTimersByTimeAsync(0));
+  expect(screen.getByRole("img", { name: "Family" })).toHaveAttribute(
+    "src",
+    "/photo-old",
+  );
+  await act(() => vi.advanceTimersByTimeAsync(35_000));
+  expect(warning).toHaveBeenCalledWith("[photos]", {
+    at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    event: "request_timed_out",
+    action: "poll",
+  });
+  await act(() => vi.advanceTimersByTimeAsync(60_000));
+  expect(screen.getByRole("img", { name: "Family" })).toHaveAttribute(
+    "src",
+    "/photo-new",
+  );
+  warning.mockRestore();
+});
+
 test("opens the slideshow full screen and exits with Escape", async () => {
   respond({
     state: "ready",

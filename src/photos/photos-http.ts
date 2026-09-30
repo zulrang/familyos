@@ -1,3 +1,4 @@
+import { AuthError } from "@/shared/auth-error";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { publicOrigin } from "@/shared/google-env";
 import { PhotosError } from "./google-photos";
@@ -5,6 +6,7 @@ import {
   connectPhotos,
   disconnectPhotos,
   getPhotosStatus,
+  logPhotosRequestFailure,
   pollPhotos,
   readPhoto,
 } from "./photos-service";
@@ -30,7 +32,12 @@ const MESSAGES: Record<string, string> = {
 };
 
 function failure(error: unknown) {
-  const code = error instanceof PhotosError ? error.code : "unavailable";
+  const code =
+    error instanceof AuthError
+      ? "invalid_grant"
+      : error instanceof PhotosError
+        ? error.code
+        : "unavailable";
   return Response.json(
     {
       error:
@@ -38,11 +45,13 @@ function failure(error: unknown) {
     },
     {
       status:
-        error instanceof PhotosError &&
-        error.status >= 400 &&
-        error.status < 500
-          ? error.status
-          : 502,
+        error instanceof AuthError
+          ? 401
+          : error instanceof PhotosError &&
+              error.status >= 400 &&
+              error.status < 500
+            ? error.status
+            : 502,
       headers: { "Cache-Control": "no-store" },
     },
   );
@@ -56,11 +65,14 @@ export async function handlePhotos(request: Request) {
     if (origin && origin !== publicOrigin(request))
       return Response.json({ error: "Invalid origin" }, { status: 403 });
   }
+  let operation: "status" | "connect" | "poll" | "disconnect" = "status";
   try {
     let result: unknown;
     if (request.method === "GET") result = await getPhotosStatus();
-    else if (request.method === "DELETE") result = await disconnectPhotos();
-    else if (request.method === "POST") {
+    else if (request.method === "DELETE") {
+      operation = "disconnect";
+      result = await disconnectPhotos();
+    } else if (request.method === "POST") {
       const raw: unknown = await request.json().catch(() => null);
       if (
         !raw ||
@@ -72,6 +84,7 @@ export async function handlePhotos(request: Request) {
           { error: "Invalid photo action" },
           { status: 400 },
         );
+      operation = raw.action;
       result =
         raw.action === "connect" ? await connectPhotos() : await pollPhotos();
     } else return new Response(null, { status: 405 });
@@ -79,6 +92,7 @@ export async function handlePhotos(request: Request) {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
+    logPhotosRequestFailure(operation, error);
     return failure(error);
   }
 }

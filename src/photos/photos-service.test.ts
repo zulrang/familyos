@@ -33,8 +33,10 @@ describe("Photos Picker connection", () => {
     expect((await readProvider()).tokens?.access_token).toBe("access");
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.useRealTimers();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -153,5 +155,145 @@ describe("Photos Picker connection", () => {
       "https://lh3.googleusercontent.com/one=w1920-h1080",
       expect.anything(),
     );
+  });
+
+  test("failed media refresh records a safe cause and retries after one minute", async () => {
+    const now = Date.now();
+    await writePhotosConnection({
+      state: "ready",
+      sessionId: "private-session",
+      pickerUrl: "https://photos.google.com/private-picker",
+      nextPollAt: now - 1,
+      expiresAt: now + 600_000,
+      nextMediaPollAt: now - 1,
+      mediaExpiresAt: now - 1,
+      photos: [
+        { id: "private-photo", baseUrl: "https://private-photo.example" },
+      ],
+    });
+    const logs = vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError(
+        "network failed at https://private-photo.example?token=secret",
+        {
+          cause: Object.assign(new Error("private cause"), {
+            code: "ECONNRESET",
+          }),
+        },
+      );
+    });
+
+    await expect(pollPhotos()).rejects.toThrow("google_transport");
+    const connection = await readPhotosConnection();
+    expect(connection.state).toBe("ready");
+    if (connection.state !== "ready") return;
+    expect(connection.nextMediaPollAt).toBeGreaterThanOrEqual(now + 59_000);
+    expect(connection.nextMediaPollAt).toBeLessThanOrEqual(now + 61_000);
+    expect(connection.photos).toHaveLength(1);
+    const diagnostics = JSON.stringify(logs.mock.calls);
+    expect(diagnostics).toContain("media_refresh_started");
+    expect(diagnostics).toContain("media_refresh_failed");
+    expect(diagnostics).toContain('"transportCode":"ECONNRESET"');
+    expect(diagnostics).not.toContain("private-photo");
+    expect(diagnostics).not.toContain("secret");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(connection.nextMediaPollAt);
+    vi.stubGlobal("fetch", async () =>
+      Response.json({
+        mediaItems: [
+          {
+            id: "new-photo",
+            mediaFile: {
+              mimeType: "image/jpeg",
+              baseUrl: "https://new-photo.example",
+            },
+          },
+        ],
+      }),
+    );
+    expect(await pollPhotos()).toMatchObject({
+      state: "ready",
+      photos: [{ id: "new-photo" }],
+    });
+  });
+
+  test("expired reads emit bounded diagnostics without stored photo details", async () => {
+    const now = Date.now();
+    await writePhotosConnection({
+      state: "ready",
+      sessionId: "private-session",
+      pickerUrl: "https://photos.google.com/private-picker",
+      nextPollAt: now - 1000,
+      expiresAt: now + 600_000,
+      nextMediaPollAt: now - 1000,
+      mediaExpiresAt: now - 1000,
+      photos: [
+        { id: "private-photo", baseUrl: "https://private-photo.example" },
+      ],
+    });
+    const logs = vi.spyOn(console, "info").mockImplementation(() => {});
+    expect(await getPhotosStatus()).toMatchObject({
+      state: "ready",
+      photos: [],
+    });
+    expect(await getPhotosStatus()).toMatchObject({
+      state: "ready",
+      photos: [],
+    });
+    await expect(readPhoto("private-photo")).rejects.toThrow(
+      "photo_unavailable",
+    );
+    await expect(readPhoto("private-photo")).rejects.toThrow(
+      "photo_unavailable",
+    );
+    const diagnostics = JSON.stringify(logs.mock.calls);
+    expect(
+      logs.mock.calls.filter(([, record]) => record.event === "expired_status"),
+    ).toHaveLength(1);
+    expect(
+      logs.mock.calls.filter(([, record]) => record.event === "expired_image"),
+    ).toHaveLength(1);
+    expect(diagnostics).toContain("lastPollReceivedAt");
+    expect(diagnostics).not.toContain("private-photo");
+    expect(diagnostics).not.toContain("private-picker");
+  });
+
+  test("image fetch logs a safe upstream HTTP status", async () => {
+    const now = Date.now();
+    await writePhotosConnection({
+      state: "ready",
+      sessionId: "private-session",
+      pickerUrl: "https://photos.google.com/private-picker",
+      nextPollAt: now + 600_000,
+      expiresAt: now + 600_000,
+      nextMediaPollAt: now + 600_000,
+      mediaExpiresAt: now + 600_000,
+      photos: [
+        { id: "private-photo", baseUrl: "https://private-photo.example" },
+      ],
+    });
+    const logs = vi.spyOn(console, "info").mockImplementation(() => {});
+    let bodyCancelled = false;
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              bodyCancelled = true;
+            },
+          }),
+          { status: 429 },
+        ),
+    );
+    await expect(readPhoto("private-photo")).rejects.toThrow(
+      "photo_unavailable",
+    );
+    expect(bodyCancelled).toBe(true);
+    const diagnostics = JSON.stringify(logs.mock.calls);
+    expect(diagnostics).toContain('"failure":"provider_http"');
+    expect(diagnostics).toContain('"status":429');
+    expect(diagnostics).not.toContain("secret body");
+    expect(diagnostics).not.toContain("private-photo");
   });
 });

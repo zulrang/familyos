@@ -1,11 +1,45 @@
-import { gfetch, throwIfGoogleFailed } from "@/shared/google";
+import { AuthError } from "@/shared/auth-error";
+import { gfetch } from "@/shared/google";
 
 const API = "https://photospicker.googleapis.com/v1";
+
+export type PhotosTransportCode =
+  | "timeout"
+  | "ECONNRESET"
+  | "ENOTFOUND"
+  | "ETIMEDOUT"
+  | "UND_ERR_CONNECT_TIMEOUT"
+  | "UND_ERR_HEADERS_TIMEOUT"
+  | "UND_ERR_BODY_TIMEOUT"
+  | "unknown";
+
+function transportCode(error: unknown): PhotosTransportCode {
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  )
+    return "timeout";
+  const cause = error instanceof Error && error.cause ? error.cause : error;
+  const code =
+    cause && typeof cause === "object" && "code" in cause ? cause.code : null;
+  switch (code) {
+    case "ECONNRESET":
+    case "ENOTFOUND":
+    case "ETIMEDOUT":
+    case "UND_ERR_CONNECT_TIMEOUT":
+    case "UND_ERR_HEADERS_TIMEOUT":
+    case "UND_ERR_BODY_TIMEOUT":
+      return code;
+    default:
+      return "unknown";
+  }
+}
 
 export class PhotosError extends Error {
   constructor(
     public code: string,
     public status = 502,
+    public transport: PhotosTransportCode | null = null,
   ) {
     super(code);
   }
@@ -19,10 +53,8 @@ async function pickerFetch(
   try {
     response = await gfetch(`${API}/${path}`, init);
   } catch (error) {
-    throw new PhotosError(
-      error instanceof Error ? error.message : "google_auth",
-      401,
-    );
+    if (error instanceof AuthError) throw error;
+    throw new PhotosError("google_transport", 502, transportCode(error));
   }
   if (!response.ok) {
     const text = (await response.text()).slice(0, 400);
@@ -147,7 +179,17 @@ export async function listPickerPhotos(sessionId: string) {
   return photos;
 }
 export async function fetchPhoto(baseUrl: string) {
-  const response = await gfetch(`${baseUrl}=w1920-h1080`);
-  await throwIfGoogleFailed(response, "Google Photos image");
+  let response: Response;
+  try {
+    response = await gfetch(`${baseUrl}=w1920-h1080`);
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    throw new PhotosError("google_transport", 502, transportCode(error));
+  }
+  if (!response.ok) {
+    // Body release is best effort; retain the upstream HTTP status on failure.
+    await response.body?.cancel().catch(() => {});
+    throw new PhotosError("image_http", response.status);
+  }
   return response;
 }

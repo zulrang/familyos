@@ -66,7 +66,9 @@ and full-screen state are local UI state on each Display.
 
 Picker session data and temporary media URLs are retained in the server's
 private data directory for the session lifetime. Media URLs are refreshed
-approximately every 50 minutes while the session remains valid. If the server
+approximately every 50 minutes while the session remains valid and a Display
+is polling. A failed refresh retries after one minute. Display photo requests
+time out after 30 seconds; a timed-out poll retries after one minute. If the server
 restarts after the user taps Done, it resumes the saved session and imports the
 completed selection. If Google expires the session, select the photos again.
 
@@ -77,6 +79,22 @@ The server requests images up to 2560×1440 from Google.
 Disconnect clears the local session and selected media immediately, then
 attempts to delete the Google Picker session. If Google is unavailable, local
 disconnect still succeeds.
+
+## Troubleshooting refreshes
+
+The server writes `[photos]` events with UTC `at` timestamps to its standard
+log. `poll_received` is an hourly heartbeat with a cumulative process-local
+count. `media_refresh_started` should be followed by `media_refresh_succeeded`
+or `media_refresh_failed`; a start without either completion suggests a stalled
+server request. Failures distinguish authentication, transport, invalid Google
+responses, and HTTP status. `expired_status` and `expired_image` are emitted at
+most hourly and include the last poll receipt time and count. An expired read
+without recent poll receipts points to a stopped Display poll; receipts without
+a refresh completion point to the server or Google path. The Display console
+also emits `request_timed_out` when a photo request exceeds 30 seconds. Logs
+contain counts, timing, categories, and status codes, never Picker or media URLs,
+session IDs, photo IDs, credentials, or provider response bodies. Process-local
+counts reset when the server restarts.
 
 ## References
 
