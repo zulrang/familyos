@@ -6,6 +6,8 @@ import {
   fetchPhoto,
   getPickerSession,
   listPickerPhotos,
+  PhotosError,
+  type PhotosTransportCode,
 } from "./google-photos";
 import type { PhotosConnection, PhotosStatus } from "./photos";
 import {
@@ -15,6 +17,66 @@ import {
 } from "./photos-store";
 
 const MEDIA_INTERVAL = 50 * 60_000;
+const MEDIA_RETRY_INTERVAL = 60_000;
+const DIAGNOSTIC_INTERVAL = 60 * 60_000;
+const lastDiagnostic = new Map<string, number>();
+let pollCount = 0;
+let lastPollReceivedAt: string | null = null;
+
+type FailureDetail =
+  | { failure: "auth" | "unexpected" }
+  | { failure: "transport"; transportCode: PhotosTransportCode }
+  | { failure: "provider_http" | "invalid_response"; status: number };
+type PhotoDiagnostic =
+  | { event: "poll_received"; pollCount: number }
+  | {
+      event: "expired_status" | "expired_image";
+      overdueMs: number;
+      refreshOverdueMs: number;
+      photoCount: number;
+      pollCount: number;
+      lastPollReceivedAt: string | null;
+    }
+  | { event: "media_refresh_started"; overdueMs: number; photoCount: number }
+  | { event: "media_refresh_succeeded"; durationMs: number; photoCount: number }
+  | ({ event: "media_refresh_failed"; durationMs: number } & FailureDetail)
+  | ({ event: "image_fetch_failed" } & FailureDetail)
+  | ({
+      event: "request_failed";
+      operation: "status" | "connect" | "poll" | "disconnect";
+    } & FailureDetail);
+
+function diagnostic(details: PhotoDiagnostic, interval = 0) {
+  const now = Date.now();
+  const last = lastDiagnostic.get(details.event);
+  if (interval && last !== undefined && now - last < interval) return;
+  lastDiagnostic.set(details.event, now);
+  console.info("[photos]", { at: new Date(now).toISOString(), ...details });
+}
+
+function failureDetails(error: unknown): FailureDetail {
+  if (error instanceof AuthError) return { failure: "auth" };
+  if (error instanceof PhotosError) {
+    if (error.code === "google_transport")
+      return {
+        failure: "transport",
+        transportCode: error.transport ?? "unknown",
+      };
+    if (error.code.startsWith("invalid_"))
+      return { failure: "invalid_response", status: error.status };
+    return { failure: "provider_http", status: error.status };
+  }
+  return { failure: "unexpected" };
+}
+export function logPhotosRequestFailure(
+  operation: "status" | "connect" | "poll" | "disconnect",
+  error: unknown,
+) {
+  diagnostic(
+    { event: "request_failed", operation, ...failureDetails(error) },
+    60_000,
+  );
+}
 async function signedIn() {
   return Boolean((await readProvider()).tokens?.access_token);
 }
@@ -48,9 +110,22 @@ function publicStatus(
   };
 }
 export function getPhotosStatus() {
-  return withPhotosConnection(async () =>
-    publicStatus(await readPhotosConnection(), await signedIn()),
-  );
+  return withPhotosConnection(async () => {
+    const connection = await readPhotosConnection();
+    if (connection.state === "ready" && Date.now() >= connection.mediaExpiresAt)
+      diagnostic(
+        {
+          event: "expired_status",
+          overdueMs: Date.now() - connection.mediaExpiresAt,
+          refreshOverdueMs: Date.now() - connection.nextMediaPollAt,
+          photoCount: connection.photos.length,
+          pollCount,
+          lastPollReceivedAt,
+        },
+        DIAGNOSTIC_INTERVAL,
+      );
+    return publicStatus(connection, await signedIn());
+  });
 }
 export function connectPhotos() {
   return withPhotosConnection(async () => {
@@ -71,6 +146,9 @@ export function connectPhotos() {
   });
 }
 export function pollPhotos() {
+  pollCount += 1;
+  lastPollReceivedAt = new Date().toISOString();
+  diagnostic({ event: "poll_received", pollCount }, DIAGNOSTIC_INTERVAL);
   return withPhotosConnection(async () => {
     const connection = await readPhotosConnection();
     if (!(await signedIn())) return { state: "unconfigured" } as const;
@@ -105,11 +183,33 @@ export function pollPhotos() {
       return publicStatus(ready, true);
     }
     if (Date.now() >= connection.nextMediaPollAt) {
+      const startedAt = Date.now();
+      diagnostic({
+        event: "media_refresh_started",
+        overdueMs: startedAt - connection.nextMediaPollAt,
+        photoCount: connection.photos.length,
+      });
       connection.nextMediaPollAt = Date.now() + MEDIA_INTERVAL;
       await writePhotosConnection(connection);
-      connection.photos = await listPickerPhotos(connection.sessionId);
-      connection.mediaExpiresAt = Date.now() + MEDIA_INTERVAL;
-      await writePhotosConnection(connection);
+      try {
+        connection.photos = await listPickerPhotos(connection.sessionId);
+        connection.mediaExpiresAt = Date.now() + MEDIA_INTERVAL;
+        await writePhotosConnection(connection);
+        diagnostic({
+          event: "media_refresh_succeeded",
+          durationMs: Date.now() - startedAt,
+          photoCount: connection.photos.length,
+        });
+      } catch (error) {
+        connection.nextMediaPollAt = Date.now() + MEDIA_RETRY_INTERVAL;
+        await writePhotosConnection(connection);
+        diagnostic({
+          event: "media_refresh_failed",
+          durationMs: Date.now() - startedAt,
+          ...failureDetails(error),
+        });
+        throw error;
+      }
     }
     return publicStatus(connection, true);
   });
@@ -133,8 +233,24 @@ export function readPhoto(id: string) {
   // write-serialization queue that status polls and media refreshes share.
   return (async () => {
     const connection = await readPhotosConnection();
-    if (connection.state !== "ready" || connection.mediaExpiresAt <= Date.now())
+    if (
+      connection.state !== "ready" ||
+      connection.mediaExpiresAt <= Date.now()
+    ) {
+      if (connection.state === "ready")
+        diagnostic(
+          {
+            event: "expired_image",
+            overdueMs: Date.now() - connection.mediaExpiresAt,
+            refreshOverdueMs: Date.now() - connection.nextMediaPollAt,
+            photoCount: connection.photos.length,
+            pollCount,
+            lastPollReceivedAt,
+          },
+          DIAGNOSTIC_INTERVAL,
+        );
       throw new Error("photo_unavailable");
+    }
     const photo = connection.photos.find((p) => p.id === id);
     if (!photo) throw new Error("photo_unavailable");
     try {
@@ -156,6 +272,10 @@ export function readPhoto(id: string) {
         },
       });
     } catch (error) {
+      diagnostic(
+        { event: "image_fetch_failed", ...failureDetails(error) },
+        DIAGNOSTIC_INTERVAL,
+      );
       if (error instanceof AuthError) throw error;
       throw new Error("photo_unavailable");
     }

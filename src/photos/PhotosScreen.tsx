@@ -87,23 +87,47 @@ async function requestPhotos(
   action?: "connect" | "poll" | "disconnect",
   signal?: AbortSignal,
 ): Promise<PhotosStatus> {
-  const response = await fetch("/api/photos", {
-    method: action === "disconnect" ? "DELETE" : action ? "POST" : "GET",
-    headers:
-      action && action !== "disconnect"
-        ? { "Content-Type": "application/json" }
-        : undefined,
-    body:
-      action && action !== "disconnect"
-        ? JSON.stringify({ action })
-        : undefined,
-    cache: "no-store",
-    signal,
-  });
-  const body = await response.json();
-  if (!response.ok)
-    throw new Error(body.error ?? "Google Photos is unavailable.");
-  return body as PhotosStatus;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 30_000);
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  try {
+    const response = await fetch("/api/photos", {
+      method: action === "disconnect" ? "DELETE" : action ? "POST" : "GET",
+      headers:
+        action && action !== "disconnect"
+          ? { "Content-Type": "application/json" }
+          : undefined,
+      body:
+        action && action !== "disconnect"
+          ? JSON.stringify({ action })
+          : undefined,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const body = await response.json();
+    if (!response.ok)
+      throw new Error(body.error ?? "Google Photos is unavailable.");
+    return body as PhotosStatus;
+  } catch (error) {
+    if (timedOut) {
+      console.warn("[photos]", {
+        at: new Date().toISOString(),
+        event: "request_timed_out",
+        action: action ?? "status",
+      });
+      throw new Error("Google Photos took too long to respond.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
+  }
 }
 
 export function PhotosScreen(props: PhotosPresentation = {}) {
@@ -166,7 +190,7 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
     const pollAfterMs =
       screen.state === "loaded" && "pollAfterMs" in screen.status
         ? screen.status.pollAfterMs
-        : props.mode === "idle"
+        : screen.state === "error" || props.mode === "idle"
           ? 60_000
           : null;
     if (pollAfterMs === null) return;
