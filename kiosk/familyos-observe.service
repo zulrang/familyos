@@ -1,0 +1,21 @@
+[Unit]
+Description=FamilyOS wall kiosk local diagnostics
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+StateDirectory=familyos-observe
+StateDirectoryMode=0700
+ExecStart=/usr/local/lib/familyos/observe.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/familyos-observe
+
+[Install]
+WantedBy=multi-user.target
