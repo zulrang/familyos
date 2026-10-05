@@ -27,7 +27,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Importing `kiosk/` into the Next app
 
 ## Non-Obvious Rules
-- One Server Installation = one Household and multiple paired Displays. Not phone-first or multi-tenant. Fixed 74px rail; light-only (no create-next-app dark mode or Geist).
+- One Server Installation = one Household and multiple paired Displays. Not phone-first or multi-tenant. Fixed 90px rail; light-only (no create-next-app dark mode or Geist).
 - The primary device is a wall touchscreen kiosk used by all ages, including children. Every interaction should be easy, pleasant, delightful — Guiding Principles in `docs/SSD.md`.
 - Production (`pnpm start`) is port 3000; development (`pnpm dev`) is 3001 so both can run. On the household Mac, a LaunchAgent (`scripts/macos-server`) KeepAlives `:3000` and a second one auto-deploys every new `main` commit as a release under `releases/` (ADR 0009); `./scripts/macos-server rollback` returns to the previous release. Merging to `main` is deploying.
 - Google Calendar (one selected) backs Calendar and Google Tasks (explicitly selected tasklists) backs Lists — no local event/list database. Tasks, Bounties, Star Balances, and Rewards are FamilyOS-owned in `node:sqlite` (ADR 0006), never Google Tasks.

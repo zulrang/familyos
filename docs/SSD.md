@@ -84,8 +84,11 @@ remain independent; the agenda never stores or changes events in Tasks.
   `docs/adr/0002-id-only-event-participants.md`.
 
 **Decision: Wall UI, light-only**
-- Choice: Fixed 74px icon rail, equal-width columns, dense type, member
-  pastels. Newsreader + Nunito Sans from the design skill. No dark mode. The
+- Choice: Fixed 90px icon rail, equal-width columns, dense type, member
+  pastels. Each rail section has its own pastel tone (`src/shared/nav.ts`):
+  its icon is drawn in the tone's ink, and the active section is a soft-tint
+  slab with an ink accent bar. Rail rows share the available height so all
+  nine fit at the largest UI Scale. Newsreader + Nunito Sans from the design skill. No dark mode. The
   rolling Five-Day View starts today, pages in five-day increments, and
   contrasts weekend columns.
 - Alternatives considered: Responsive collapsing nav; create-next-app Geist + `prefers-color-scheme` dark; a redesigned “modern” calendar.
@@ -246,7 +249,7 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 - Do not import from `.cursor/skills/`. The kit’s `window.DS` / unpkg Lucide pattern is invalid in this Next app.
 - Do not delete or “clean up” the `nextjs-agent-rules` block in `AGENTS.md`.
-- The rail is 74px and always visible. No hamburger, no collapsing sidebar, no mobile bottom tab bar.
+- The rail is 90px and always visible. Rail rows flex to share its height; do not give them a fixed height, or nine will not fit at the 1.5 UI Scale. No hamburger, no collapsing sidebar, no mobile bottom tab bar.
 - Stable Household Member IDs in Google private event properties are the only
   Event Participant identity. Do not infer participants from `colorId`,
   attendees, or email.

@@ -3,11 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type CSSProperties, useContext } from "react";
-import { FAMILYOS_NAV } from "@/shared/nav";
+import { FAMILYOS_NAV, type NavTone } from "@/shared/nav";
 import { SleepContext } from "@/shared/SleepContext";
 import { Icon } from "@/shared/ui/Icon";
 
-export type NavRailItem = { id: string; label: string; icon: string };
+export type NavRailItem = {
+  id: string;
+  label: string;
+  icon: string;
+  tone: NavTone;
+};
+
+function toneColors(tone: NavTone) {
+  return tone === "neutral"
+    ? { ink: "var(--neutral-700)", soft: "var(--neutral-200)" }
+    : { ink: `var(--member-${tone}-ink)`, soft: `var(--member-${tone}-soft)` };
+}
 
 export function NavRail({
   items = FAMILYOS_NAV,
@@ -47,24 +58,53 @@ export function NavRail({
       >
         {brand}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          minHeight: 0,
+        }}
+      >
         {items.map((it) => {
           const on = it.id === active;
+          const { ink, soft } = toneColors(it.tone);
+          // Rows share the rail height so nine fit at the largest UI Scale.
           const itemStyle: CSSProperties = {
+            position: "relative",
+            flex: "1 1 0",
+            minHeight: 0,
+            maxHeight: 94,
             border: "none",
-            background: on ? "var(--white)" : "transparent",
-            color: on ? "var(--text-title)" : "var(--neutral-600)",
+            background: on ? soft : "transparent",
+            color: on ? ink : "var(--neutral-600)",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            gap: 6,
-            padding: "13px 2px",
+            justifyContent: "center",
+            gap: 7,
+            padding: "0 2px",
             marginTop: it.id === "sleep" ? "auto" : 0,
             font: "var(--type-nav-label)",
+            fontWeight: on ? "var(--fw-bold)" : undefined,
           };
           const content = (
             <>
-              <Icon name={it.icon} size={22} />
+              {on ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 14,
+                    bottom: 14,
+                    width: 5,
+                    borderRadius: "0 5px 5px 0",
+                    background: ink,
+                  }}
+                />
+              ) : null}
+              <Icon name={it.icon} size={29} strokeColor={ink} />
               {it.label}
             </>
           );
@@ -77,6 +117,7 @@ export function NavRail({
               key={it.id}
               href={it.id === "calendar" ? "/" : `/${it.id}`}
               prefetch={false}
+              aria-current={on ? "page" : undefined}
               style={itemStyle}
             >
               {content}

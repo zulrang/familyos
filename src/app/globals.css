@@ -82,14 +82,14 @@
     var(--fw-bold) var(--fs-body) / var(--lh-snug) var(--font-sans);
   --type-card-meta:
     var(--fw-semibold) var(--fs-label) / var(--lh-snug) var(--font-sans);
-  --type-nav-label: var(--fw-semibold) var(--fs-caption) / 1.2 var(--font-sans);
+  --type-nav-label: var(--fw-semibold) var(--fs-label) / 1.2 var(--font-sans);
 
   --space-3: 6px;
   --space-4: 8px;
   --space-5: 12px;
   --space-8: 20px;
   --space-9: 24px;
-  --rail-width: 74px;
+  --rail-width: 90px;
   --hit-min: 44px;
   --pad-list-row: 11px 14px;
   --gap-list-row: 6px;

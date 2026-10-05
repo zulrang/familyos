@@ -146,7 +146,7 @@ SSH default on that image is `pi@fullpageos.local`.
 
 ## Touchscreen compatibility
 
-FamilyOS is laid out for a **1080p landscape panel** read from 6–10 feet. The left rail is a fixed 74px. There is no phone layout, no collapsing nav, no “it also works in your pocket.”
+FamilyOS is laid out for a **1080p landscape panel** read from 6–10 feet. The left rail is a fixed 90px. There is no phone layout, no collapsing nav, no “it also works in your pocket.”
 
 ### What works without a panel
 

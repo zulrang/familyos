@@ -24,5 +24,5 @@
 --type-section:var(--fw-semibold) var(--fs-heading)/var(--lh-snug) var(--font-display);
 --type-card-title:var(--fw-bold) var(--fs-body)/var(--lh-snug) var(--font-sans);
 --type-card-meta:var(--fw-semibold) var(--fs-label)/var(--lh-snug) var(--font-sans);
---type-nav-label:var(--fw-semibold) var(--fs-caption)/1.2 var(--font-sans);
+--type-nav-label:var(--fw-semibold) var(--fs-label)/1.2 var(--font-sans);
 }
