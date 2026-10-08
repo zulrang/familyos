@@ -68,6 +68,29 @@ describe("slice import boundaries", () => {
     assert.equal(hits.length, 1);
   });
 
+  test("Today may compose Calendar and Tasks", () => {
+    const hits = scanFile(
+      "src/today/TodayScreen.tsx",
+      `import { useHouseholdCalendar } from "@/calendar/HouseholdCalendar";
+       import { MemberTasks } from "@/tasks/TasksBoard";`,
+    );
+    assert.equal(hits.length, 0);
+  });
+
+  test("no slice may import Today", () => {
+    for (const from of [
+      "src/calendar/CalendarScreen.tsx",
+      "src/shared/NavRail.tsx",
+      "src/settings/settings.ts",
+    ]) {
+      const hits = scanFile(
+        from,
+        `import { TodayScreen } from "@/today/TodayScreen";`,
+      );
+      assert.equal(hits.length, 1, from);
+    }
+  });
+
   test("a route file may import its slice", () => {
     const hits = scanFile(
       "src/app/page.tsx",

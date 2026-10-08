@@ -2,13 +2,16 @@ import type { CSSProperties } from "react";
 import type { MemberPastel } from "@/shared/member-pastel";
 import { AvatarStack } from "@/shared/ui/AvatarStack";
 
+/** Shared by every surface that draws an event that has ended. */
+export const PAST_EVENT_OPACITY = 0.55;
+
 export function EventCard({
   title,
   time,
   tone = "teal",
   fill,
   ink,
-  multi = false,
+  past = false,
   people = [],
   height,
   onClick,
@@ -19,7 +22,8 @@ export function EventCard({
   tone?: MemberPastel;
   fill?: string;
   ink?: string;
-  multi?: boolean;
+  /** Dims an event that has already ended. */
+  past?: boolean;
   people?: {
     name?: string;
     src?: string;
@@ -30,7 +34,7 @@ export function EventCard({
   onClick?: () => void;
   style?: CSSProperties;
 }) {
-  const onFill = multi ? undefined : ink;
+  const onFill = ink;
   return (
     <button
       type="button"
@@ -44,9 +48,8 @@ export function EventCard({
         padding: "10px 12px",
         border: "none",
         borderRadius: "var(--radius-event)",
-        background: multi
-          ? "var(--stripe-multi)"
-          : (fill ?? `var(--member-${tone})`),
+        background: fill ?? `var(--member-${tone})`,
+        opacity: past ? PAST_EVENT_OPACITY : 1,
         color: onFill ?? "var(--text-title)",
         cursor: onClick ? "pointer" : "default",
         overflow: "hidden",

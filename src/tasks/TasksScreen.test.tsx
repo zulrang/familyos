@@ -13,7 +13,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { PublicSettings } from "@/settings/types";
 import { TaskCelebration } from "./TaskCelebration";
-import { markDone, skipOccurrence, TasksScreen } from "./TasksScreen";
+import { TasksScreen } from "./TasksScreen";
+import { markDone, skipOccurrence } from "./TasksWorkspace";
 import type {
   AvailableBounty,
   BountyDefinition,

@@ -254,24 +254,49 @@ export function visibleUnderMemberFilter(
   return people.some((p) => !off[p.id]);
 }
 
-export function eventPaint(people: Member[]): {
+/** How one event is drawn. `fill` and `soft` are CSS backgrounds, not always one colour. */
+export type EventPaint = {
+  /** Two or more Active participants: bands of each participant's Member Color. */
   multi: boolean;
   fill: string;
   soft: string;
   onFill: string;
-} {
-  const multi = people.length > 1;
+};
+
+const STRIPE_BAND_PX = 34;
+const STRIPE_INK = "#1f2a33";
+
+function memberStripes(colors: string[]): string {
+  const bands = colors.map(
+    (color, i) =>
+      `${color} ${i * STRIPE_BAND_PX}px ${(i + 1) * STRIPE_BAND_PX}px`,
+  );
+  return `repeating-linear-gradient(115deg, ${bands.join(", ")})`;
+}
+
+/** Retired participants hold no Member Color, so only Active ones paint. */
+export function eventPaint(people: Member[]): EventPaint {
   const active = people.filter((p) => p.status === "active");
-  const surface =
-    active.length === 1
-      ? memberSurface(active[0].color)
-      : memberSurface(LEGACY_TONE_COLORS.sand);
+  if (active.length > 1) {
+    const stripes = memberStripes(
+      active.map((p) => memberSurface(p.color).soft),
+    );
+    return { multi: true, fill: stripes, soft: stripes, onFill: STRIPE_INK };
+  }
+  const surface = memberSurface(
+    active.length === 1 ? active[0].color : LEGACY_TONE_COLORS.sand,
+  );
   return {
-    multi,
+    multi: false,
     fill: surface.fill,
     soft: surface.soft,
     onFill: onFillInk(surface.fill),
   };
+}
+
+/** An event that has ended is drawn dimmed. */
+export function isPastEvent(event: CalEvent, nowMs: number): boolean {
+  return event.endMs <= nowMs;
 }
 
 export function coversDay(

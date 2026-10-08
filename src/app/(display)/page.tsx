@@ -1,5 +1,5 @@
-import { CalendarScreen } from "@/calendar/CalendarScreen";
+import { TodayScreen } from "@/today/TodayScreen";
 
 export default function Home() {
-  return <CalendarScreen />;
+  return <TodayScreen />;
 }

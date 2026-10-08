@@ -21,10 +21,30 @@ configuration and data is shared.
 
 ## Product surfaces
 
-The implemented product surfaces are Calendar, Lists, Tasks, Photos, Rewards,
+The implemented product surfaces are Today, Calendar, Lists, Tasks, Photos, Rewards,
 Settings, the fixed left navigation rail, and pairing. Meals and Recipes
 remain "not yet implemented" screens. Sleep on the rail starts the idle
 slideshow rather than opening a screen.
+
+### Today
+
+- Today is the wall's home screen and the first rail item. It shows the
+  current Household date only.
+- Every Active Member has a Lane of the events they take part in, with their
+  completed and total Tasks for the day. An event with several participants
+  appears in each participant's Lane.
+- An event for everyone — a Household Event, or one with no Active
+  participant — spans all Lanes when it clashes with nobody's own event, and
+  otherwise appears in every Lane.
+- Choosing a member shows only that member's events and events for everyone,
+  beside that member's Tasks and claimed Bounties. Choosing the member again,
+  or Everyone, returns to all Lanes.
+- From Today a Display can complete, skip, and edit Tasks, complete and
+  release claimed Bounties, add a Task, and add or edit events. Tapping a Lane
+  starts an event for that member at the tapped hour. Claiming a Bounty stays
+  on Tasks.
+- The day shows 7 AM to 9 PM and fits that window to the screen when it can.
+  Events outside it stay visible at its edge.
 
 ### Calendar
 
@@ -41,6 +61,8 @@ slideshow rather than opening a screen.
 - An event with no participant IDs is a Household Event and remains visible
   regardless of member filters.
 - Events for retired members remain visible and retain that member's identity.
+- An event with two or more Active participants is filled with bands of those
+  members' colors. An event that has ended is dimmed.
 
 ### Lists
 

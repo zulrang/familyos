@@ -22,6 +22,11 @@ const SLICES = new Set([
   "admin",
   "rewards",
 ]);
+/**
+ * Slices whose capability is a view across several feature slices (ADR 0011).
+ * They may import any slice; no slice may import them.
+ */
+const COMPOSING_SLICES = new Set(["today"]);
 const SETTINGS_HTTP = "src/settings/settings-http.ts";
 const LIST_CALENDARS = "src/calendar/google-events";
 
@@ -31,7 +36,7 @@ function posix(p: string): string {
 
 function srcDirOf(repoPath: string): string | null {
   const m = stripExt(repoPath).match(
-    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos|admin|rewards)(?:\/|$)/,
+    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos|admin|rewards|today)(?:\/|$)/,
   );
   return m ? m[1] : null;
 }
@@ -88,6 +93,11 @@ export function forbiddenReason(
   if (isTestFile(from)) return null;
   const fromSlice = srcDirOf(from);
   const toSlice = srcDirOf(to);
+  if (fromSlice && toSlice && fromSlice !== toSlice) {
+    if (COMPOSING_SLICES.has(toSlice)) {
+      return `${fromSlice} must not import composing slice ${toSlice}`;
+    }
+  }
   if (fromSlice === "shared" && toSlice && SLICES.has(toSlice)) {
     return `shared must not import slice ${toSlice}`;
   }

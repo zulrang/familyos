@@ -1,10 +1,11 @@
 import { notFound, redirect } from "next/navigation";
 import { NotImplemented } from "@/shared/NotImplemented";
-import { FAMILYOS_NAV } from "@/shared/nav";
+import { FAMILYOS_NAV, HOME_SECTION } from "@/shared/nav";
 
 const STUBS: Set<string> = new Set(
   FAMILYOS_NAV.map((i) => i.id).filter(
     (id) =>
+      id !== HOME_SECTION &&
       id !== "calendar" &&
       id !== "settings" &&
       id !== "lists" &&
@@ -19,7 +20,7 @@ export default async function StubPage({
   params: Promise<{ section: string }>;
 }) {
   const { section } = await params;
-  if (section === "calendar") redirect("/");
+  if (section === HOME_SECTION) redirect("/");
   if (!STUBS.has(section)) notFound();
   return <NotImplemented name={section} />;
 }

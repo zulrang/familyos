@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FamilyOS — Today page mockups</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&display=swap" rel="stylesheet">
+<style>
+/* Static design mockups. Tokens are copied from src/app/globals.css; nothing here ships. */
+:root{
+--white:#fff;--neutral-50:#f7fafc;--neutral-100:#eef3f7;--neutral-200:#e3ebf1;--neutral-300:#d3dde5;--neutral-400:#a9b7c2;--neutral-500:#7d8b96;--neutral-600:#5c6a75;--neutral-700:#3f4b55;--neutral-800:#2e3a45;--neutral-900:#1f2a33;
+--member-teal-soft:#d6ece9;--member-teal-ink:#2c5d58;--member-blush-soft:#fbe3e1;--member-blush-ink:#7d413d;--member-lilac-soft:#efe8f5;--member-lilac-ink:#54406b;--member-sage-soft:#e5f2e7;--member-sage-ink:#3a6144;--member-coral-soft:#fce0de;--member-coral-ink:#8a4340;--member-sand-soft:#fbf1e3;--member-sand-ink:#7a5a2c;
+--brand-blue:#1878c8;--accent-coral:#ef6c4d;--accent-amber:#d9a02b;--now-line:#f4795d;
+--surface-rail:#eef4f8;--surface-rail-active:#dcebf6;--surface-sunken:var(--neutral-50);--grid-line:var(--neutral-200);
+--text-title:var(--neutral-900);--text-body:var(--neutral-800);--text-muted:var(--neutral-500);
+--font-display:"Newsreader",Georgia,serif;--font-sans:"Nunito Sans","Segoe UI",system-ui,sans-serif;
+--pill:999px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:#cfd8df;font-family:var(--font-sans);color:var(--text-body);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;border:none;background:none;color:inherit;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent}
+button:active{transform:scale(.97)}
+h1,h2,h3{font-family:var(--font-display);font-weight:600;color:var(--text-title)}
+svg.i{flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* --- mockup switcher (not part of the design) --- */
+.bar{height:56px;display:flex;align-items:center;gap:8px;padding:0 16px;background:#1f2a33;color:#fff;font:600 15px/1 var(--font-sans)}
+.bar b{font:600 19px/1 var(--font-display);margin-right:10px}
+.bar button{padding:10px 16px;border-radius:var(--pill);color:#c9d4dc;font:700 15px/1 var(--font-sans)}
+.bar button[aria-pressed=true]{background:#fff;color:#1f2a33}
+.bar span{margin-left:auto;color:#93a3af;font-weight:600}
+.fit{position:absolute;top:56px;left:0;transform-origin:0 0}
+
+/* --- shell --- */
+.stage{width:1920px;height:1080px;display:flex;background:var(--white);overflow:hidden}
+.rail{width:90px;flex:none;background:var(--surface-rail);display:flex;flex-direction:column}
+.rail .brand{height:64px;display:flex;align-items:center;justify-content:center;font:600 24px/1 var(--font-display);color:var(--neutral-600);background:var(--surface-rail-active)}
+.rail .items{flex:1;display:flex;flex-direction:column;min-height:0}
+.rail .it{position:relative;flex:1 1 0;max-height:94px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;font:600 15px/1.2 var(--font-sans);color:var(--neutral-600)}
+.rail .it.on{font-weight:700}
+.rail .it.on::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:5px;border-radius:0 5px 5px 0;background:currentColor}
+.screen{flex:1;min-width:0;display:flex;flex-direction:column}
+.hdr{display:flex;align-items:center;gap:18px;padding:10px 28px;min-height:72px;flex:none}
+.hdr h1{font:600 34px/1.1 var(--font-display);letter-spacing:-.01em}
+.hdr .meta{font:600 22px/1 var(--font-sans)}
+.hdr .date{color:var(--text-muted)}
+.hdr .wx{display:inline-flex;align-items:center;gap:7px}
+.hdr .wx svg{color:var(--accent-amber)}
+.hdr .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+.body{flex:1;min-height:0;display:flex;flex-direction:column}
+
+/* --- shared atoms --- */
+.av{display:inline-flex;align-items:center;justify-content:center;flex:none;width:var(--s,48px);height:var(--s,48px);border-radius:var(--pill);font:700 calc(var(--s,48px)*.42)/1 var(--font-sans)}
+.av.ring{box-shadow:0 0 0 2px #fff}
+.stack{display:inline-flex}
+.stack .av+.av{margin-left:-8px}
+.bar-p{display:block;height:7px;border-radius:var(--pill);background:#fff;overflow:hidden;flex:1;min-width:0}
+.bar-p i{display:block;height:100%;border-radius:var(--pill);background:var(--ctl)}
+.pal{color:var(--ink)}
+.eyebrow{font:700 13px/1.3 var(--font-sans);letter-spacing:.06em;text-transform:uppercase}
+.pill-btn{display:inline-flex;align-items:center;gap:8px;min-height:48px;padding:10px 20px;border-radius:var(--pill);background:#fff;box-shadow:0 0 0 1px var(--neutral-200),0 1px 2px rgba(31,42,51,.06);font:700 16px/1.3 var(--font-sans)}
+
+/* filter chips */
+.chips{display:flex;gap:12px;padding:2px 28px 18px;flex:none}
+.chip{display:flex;align-items:center;gap:12px;min-height:64px;padding:8px 22px 8px 8px;border-radius:var(--pill);border:2px solid transparent;background:var(--panel,var(--neutral-100));color:var(--ink,var(--text-body));font:700 19px/1.2 var(--font-sans)}
+.chip small{font:600 15px/1 var(--font-sans);opacity:.8}
+.chip[aria-pressed=true]{background:var(--hdr,var(--neutral-200));border-color:var(--ctl,var(--neutral-600))}
+.chips.filtered .chip[aria-pressed=false]{background:var(--surface-sunken);color:var(--text-body);opacity:.55}
+.chip .all{--s:48px;background:var(--neutral-300);color:var(--neutral-700)}
+
+/* task rows + panel */
+.trow{display:flex;align-items:center;gap:18px;min-height:var(--trow,84px);padding:12px 0;color:var(--ink);width:100%}
+.trow+.trow{border-top:1px solid var(--hdr)}
+.ck{flex:none;width:var(--ck,50px);height:var(--ck,50px);border-radius:var(--pill);border:2px solid var(--ctl);background:#fff;display:flex;align-items:center;justify-content:center;color:#fff}
+.trow.done .ck{background:var(--ctl)}
+.trow .t{font:600 var(--tt,24px)/1.3 var(--font-sans)}
+.trow.done .t{text-decoration:line-through}
+.trow .m{display:block;margin-top:3px;font:600 16px/1.3 var(--font-sans);opacity:.85}
+.trow .star{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:var(--pill);background:#fff3c4;color:#805719;font:700 16px/1 var(--font-sans)}
+.tpanel{background:var(--panel);border-radius:24px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.tpanel>header{display:flex;align-items:center;gap:16px;padding:22px 26px;background:var(--hdr);border-top:6px solid var(--acc)}
+.tpanel>header h2{font:600 32px/1.15 var(--font-display);color:inherit}
+.tpanel>header p{margin-top:4px;font:600 17px/1.3 var(--font-sans)}
+.tpanel .big{margin-left:auto;text-align:right;font:600 44px/1 var(--font-sans)}
+.tpanel .big span{font-size:22px;margin-left:4px}
+.tpanel .big .bar-p{width:150px;margin-top:10px}
+.tpanel .rows{padding:6px 26px 16px;overflow:hidden}
+.tpanel .sub{padding:16px 0 4px;border-top:1px solid var(--hdr);margin-top:6px}
+
+/* events */
+.ev{border-radius:14px;background:var(--fill);color:var(--ink);overflow:hidden}
+.ev.house{background:var(--neutral-200);color:var(--neutral-800)}
+.ev b{font:700 17px/1.25 var(--font-sans)}
+.ev em{font:600 15px/1.25 var(--font-sans);font-style:normal}
+.past{opacity:.55}
+.nowdot{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--now-line)}
+
+/* ============ 1 · Lanes ============ */
+.m1{flex:1;min-height:0;display:flex;flex-direction:column;padding-right:20px}
+.m1 .cols{display:grid;grid-template-columns:76px repeat(5,minmax(0,1fr));column-gap:8px}
+.lhead{display:block;padding:12px 16px 14px;border-radius:18px 18px 0 0;background:var(--hdr);border-top:6px solid var(--acc);color:var(--ink)}
+.lhead .top{display:flex;align-items:center;gap:12px;font:600 28px/1.1 var(--font-display)}
+.lhead .top small{margin-left:auto;font:700 17px/1 var(--font-sans)}
+.lhead .bar-p{margin-top:12px}
+.m1.filtered .lhead[aria-pressed=false]{background:var(--surface-sunken);border-top-color:var(--neutral-300);color:var(--text-body);opacity:.55}
+.m1.filtered .lhead[aria-pressed=false] .av{background:var(--neutral-300)!important;color:var(--neutral-700)!important}
+.m1.filtered .lhead[aria-pressed=false] .bar-p i{background:var(--neutral-400)}
+.m1 .allday{padding:6px 0;row-gap:4px;border-bottom:1px solid var(--grid-line)}
+.m1 .allday .lbl{font:600 15px/30px var(--font-sans);color:var(--text-muted);text-align:right;padding-right:12px}
+.adbar{height:30px;display:flex;align-items:center;gap:8px;padding:0 14px;border-radius:var(--pill);background:var(--fill,var(--neutral-200));color:var(--ink,var(--neutral-800));font:700 16px/1 var(--font-sans);white-space:nowrap;overflow:hidden}
+.m1 .grid{position:relative;flex:1;min-height:0}
+.m1 .grid .cols{height:100%}
+.gutter{position:relative}
+.gutter span{position:absolute;right:12px;font:600 16px/1 var(--font-sans);color:var(--text-muted);transform:translateY(-50%)}
+.lane{position:relative;background-color:var(--panel);background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--h) - 1px),rgba(31,42,51,.07) calc(var(--h) - 1px),rgba(31,42,51,.07) var(--h))}
+.lane .ev,.over .ev{position:absolute;left:6px;right:6px;padding:8px 12px;display:flex;flex-direction:column}
+.lane .ev.short,.over .ev.short{flex-direction:row;align-items:center;gap:10px;padding-block:0}
+.lane .ev .stack{position:absolute;right:10px;bottom:8px}
+.lane .ev.short .stack,.lane .ev.short .hh{position:static;margin:0 0 0 auto}
+.over{position:absolute;top:0;bottom:0;left:84px;right:0;pointer-events:none}
+.over .ev{left:0;right:0;flex-direction:row!important;align-items:center;gap:12px;padding:0 18px}
+.nowline{position:absolute;left:-8px;right:0;height:3px;background:var(--now-line);z-index:5}
+.nowline .nowdot{left:-4px;top:-4.5px}
+.m1 .focus{display:grid;grid-template-columns:76px minmax(0,1fr) minmax(0,1.35fr);column-gap:8px;height:100%}
+.m1 .focus .lane .ev b{font-size:21px}
+.m1 .focus .lane .ev em{font-size:17px}
+.m1 .focus .tpanel{margin:14px 0 20px 20px;align-self:start;max-height:calc(100% - 34px)}
+
+/* ============ 2 · Agenda ============ */
+.m2{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:28px;padding:0 28px 24px}
+.m2 h2.sec{font:600 26px/1.2 var(--font-display);margin-bottom:12px}
+.ag{display:flex;flex-direction:column;gap:6px}
+.ag .r{display:grid;grid-template-columns:118px minmax(0,1fr);align-items:center;gap:8px}
+.ag .when{font:700 18px/1.2 var(--font-sans);text-align:right;padding-right:14px}
+.ag .when small{display:block;font:600 14px/1.3 var(--font-sans);color:var(--text-muted)}
+.ag .ev{display:flex;align-items:center;gap:14px;min-height:var(--agh,52px);padding:8px 14px 8px 20px}
+.ag .ev b{font-size:var(--agt,20px)}
+.ag .ev .stack{margin-left:auto}
+.ag .ev .hh{margin-left:auto;font:600 15px/1 var(--font-sans);display:inline-flex;gap:6px;align-items:center}
+.ag .now{display:grid;grid-template-columns:118px 1fr;align-items:center;gap:8px;margin:2px 0}
+.ag .now span{font:700 15px/1 var(--font-sans);color:var(--accent-coral);text-align:right;padding-right:14px}
+.ag .now i{position:relative;height:3px;background:var(--now-line);border-radius:2px}
+.ag .now i .nowdot{left:-4px;top:-4.5px}
+.fam{display:flex;flex-direction:column;gap:12px}
+.famrow{display:grid;grid-template-columns:56px minmax(0,1fr) 24px;align-items:center;gap:4px 16px;padding:16px 20px;border-radius:18px;background:var(--panel);color:var(--ink);width:100%}
+.famrow h3{font:600 28px/1.1 var(--font-display);color:inherit;display:flex;align-items:baseline;gap:12px}
+.famrow h3 small{font:700 16px/1 var(--font-sans)}
+.famrow .next{font:600 17px/1.3 var(--font-sans);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.famrow .bar-p{grid-column:2/4;margin-top:6px}
+
+/* ============ 3 · Board ============ */
+.m3{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 28px 24px}
+.strip{display:flex;align-items:center;gap:10px;padding:0 0 16px}
+.strip .lbl{font:600 22px/1 var(--font-display);margin-right:6px;color:var(--text-title)}
+.strip .adbar{height:44px;padding:0 20px;font-size:17px}
+.strip .adbar em{font:600 15px/1 var(--font-sans);font-style:normal;opacity:.8}
+.board{flex:1;min-height:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px}
+.card{background:var(--panel);color:var(--ink);border-radius:22px;overflow:hidden;display:flex;flex-direction:column}
+.card .lhead{border-radius:0;width:100%}
+.card .sec{padding:14px 18px 4px}
+.card .sec+.sec{border-top:1px solid var(--hdr);margin-top:10px}
+.card .erow{display:flex;gap:12px;align-items:baseline;padding:9px 0;font:600 19px/1.25 var(--font-sans)}
+.card .erow time{flex:none;width:76px;font:700 15px/1.25 var(--font-sans)}
+.card .erow.nxt{margin:4px -10px;padding:10px;border-radius:12px;background:var(--fill)}
+.card .none{padding:10px 0;font:600 17px/1.3 var(--font-sans);opacity:.8}
+.card .more{margin-top:auto;display:flex;justify-content:space-between;align-items:center;min-height:52px;padding:0 18px;border-top:1px solid var(--hdr);font:700 16px/1 var(--font-sans);width:100%}
+.hero{display:flex;align-items:center;gap:20px;padding:20px 28px;border-radius:24px;background:var(--hdr);border-top:6px solid var(--acc);color:var(--ink);margin-bottom:20px}
+.hero h2{font:600 44px/1.05 var(--font-display);color:inherit}
+.hero p{font:600 20px/1.3 var(--font-sans);margin-top:4px}
+.hero .big{margin-left:auto;font:600 64px/1 var(--font-sans)}
+.hero .big span{font-size:28px;margin-left:6px}
+.hero .bar-p{flex:none;width:260px;height:10px}
+.m3 .two{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:20px;align-items:start}
+.spanel{background:var(--panel);border-radius:24px;padding:20px 22px 22px;color:var(--ink)}
+.spanel h3{font:600 28px/1.2 var(--font-display);color:inherit;margin-bottom:14px}
+.spanel .ag .when small{color:inherit;opacity:.75}
+.spanel .ag .r,.spanel .ag .now{grid-template-columns:100px minmax(0,1fr)}
+
+/* ============ 4 · Day Parts ============ */
+.m4{flex:1;min-height:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;padding:0 28px 24px}
+.part{display:flex;flex-direction:column;border-radius:22px;background:var(--surface-sunken);padding:18px 16px;min-height:0}
+.part.cur{background:var(--neutral-100);box-shadow:inset 0 0 0 2px var(--neutral-300)}
+.part>header{display:flex;align-items:center;gap:12px;padding:0 6px 14px;color:var(--neutral-600)}
+.part>header h2{font:600 28px/1.1 var(--font-display)}
+.part>header small{font:600 15px/1 var(--font-sans);color:var(--text-muted)}
+.part>header .nowb{margin-left:auto;padding:7px 14px;border-radius:var(--pill);background:var(--accent-coral);color:#fff;font:700 14px/1 var(--font-sans)}
+.part .list{display:flex;flex-direction:column;gap:8px}
+.part .ev{padding:12px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;align-items:center;min-height:68px}
+.part .ev b{font-size:20px}
+.part .ev em{grid-column:1;font-size:16px}
+.part .ev .stack,.part .ev .hh{grid-row:1/3;grid-column:2}
+.part .trow{--trow:68px;--tt:20px;--ck:44px;background:#fff;border-radius:14px;padding:10px 14px;gap:14px;border:none!important;box-shadow:inset 0 0 0 2px var(--hdr)}
+.part .trow .m{font-size:15px}
+.part .empty{padding:26px 6px;font:600 18px/1.3 var(--font-sans);color:var(--text-muted)}
+.part .famrow{background:var(--panel);padding:12px 16px}
+.part .famrow h3{font-size:24px}
+
+/* ============ 5 · Swimlanes ============ */
+.m5{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 24px 20px 0}
+.sw{position:relative;display:flex;flex-direction:column;gap:6px}
+.sw.fill{flex:1;min-height:0}
+.swr{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0}
+.sw.fill .swr.mem{flex:1}
+.swr .who{display:flex;align-items:center;gap:12px;padding:0 16px 0 24px;border-radius:0 18px 18px 0;background:var(--hdr,transparent);color:var(--ink,var(--neutral-700));width:100%;height:100%}
+.swr .who .n{font:600 26px/1.1 var(--font-display)}
+.swr .who small{display:block;font:700 15px/1.2 var(--font-sans);margin-top:4px}
+.swr .who .bar-p{flex:none;width:100%;margin-top:8px}
+.track{position:relative;background-color:var(--panel,var(--surface-sunken));border-radius:0 14px 14px 0;background-image:linear-gradient(to right,rgba(31,42,51,.07) 1px,transparent 1px);background-size:calc(100%/14) 100%}
+.track .ev{position:absolute;top:6px;bottom:6px;padding:8px 10px;display:flex;flex-direction:column;justify-content:center}
+.track .ev b{font-size:16px;line-height:1.2}
+.track .ev em{font-size:14px;margin-top:2px}
+.swr.axis{height:34px}
+.swr.axis .track{background:none}
+.swr.axis span{position:absolute;top:8px;transform:translateX(-50%);font:600 16px/1 var(--font-sans);color:var(--text-muted);white-space:nowrap}
+.swr.ad{height:42px}
+.swr.ad .track{display:flex;gap:8px;align-items:center;background:none;padding-left:6px}
+.swr.ad .who,.swr.hh .who{font:600 20px/1 var(--font-display);color:var(--neutral-600)}
+.swr.hh{height:64px}
+.swr.thin{height:60px;flex:none!important}
+.swr.thin .who .n{font-size:21px}
+.swr.thin .who small,.swr.thin .who .bar-p,.swr.thin .ev em{display:none}
+.swr.thin .ev b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.swr.thin{opacity:.6}
+.swr.sel{height:132px;flex:none!important}
+.sw .vnow{position:absolute;top:34px;bottom:0;width:3px;background:var(--now-line);z-index:5;pointer-events:none}
+.sw .vnow .nowdot{top:-5px;left:-4.5px}
+.sw .vnow b{position:absolute;top:-30px;left:50%;transform:translateX(-50%);padding:5px 10px;border-radius:var(--pill);background:var(--accent-coral);color:#fff;font:700 14px/1 var(--font-sans);white-space:nowrap;box-shadow:0 0 0 5px #fff}
+.m5 .tray{flex:1;min-height:0;margin:14px 0 0 24px;border-radius:24px;background:var(--panel);color:var(--ink);display:grid;grid-template-columns:300px minmax(0,1fr);overflow:hidden}
+.m5 .tray aside{background:var(--hdr);border-left:6px solid var(--acc);padding:24px 26px}
+.m5 .tray aside h2{font:600 34px/1.1 var(--font-display);color:inherit;margin-top:14px}
+.m5 .tray aside p{font:600 18px/1.3 var(--font-sans);margin-top:6px}
+.m5 .tray aside .big{font:600 60px/1 var(--font-sans);margin:22px 0 12px}
+.m5 .tray aside .big span{font-size:26px;margin-left:6px}
+.m5 .tray .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 28px;padding:10px 28px;align-content:start}
+.m5 .tray .trow{--trow:92px;--tt:22px;border-top:none!important;border-bottom:1px solid var(--hdr)}
+</style>
+</head>
+<body>
+<div class="bar" id="bar"></div>
+<div class="fit" id="fit"><div class="stage" id="stage"></div></div>
+<script>
+// ---------- sample household ----------
+const NOW = 15 * 60 + 10; // 3:10 PM
+const DAY0 = 7 * 60, DAY1 = 21 * 60; // 7 AM – 9 PM
+const MEMBERS = [
+  { id: "dad", name: "Dad", color: "#3f9c92" },
+  { id: "mom", name: "Mom", color: "#e0796d" },
+  { id: "ellie", name: "Ellie", color: "#9b7fc7" },
+  { id: "harper", name: "Harper", color: "#5aa469" },
+  { id: "luke", name: "Luke", color: "#dba032" },
+];
+const ALLDAY = [
+  { title: "Grandma visiting", who: [] },
+  { title: "Picture Day", who: ["ellie", "harper"] },
+];
+const EVENTS = [
+  { title: "Yoga", s: 480, e: 525, who: ["mom"] },
+  { title: "Dentist", s: 540, e: 600, who: ["dad"] },
+  { title: "Library visit", s: 630, e: 675, who: ["ellie"] },
+  { title: "Science fair setup", s: 660, e: 720, who: ["harper"] },
+  { title: "Lunch with Priya", s: 720, e: 780, who: ["mom"] },
+  { title: "Oil change", s: 780, e: 840, who: ["dad"] },
+  { title: "Reading buddy", s: 915, e: 960, who: ["luke"] },
+  { title: "Art club", s: 930, e: 990, who: ["ellie"] },
+  { title: "Piano lesson", s: 960, e: 1005, who: ["mom", "harper"] },
+  { title: "Soccer practice", s: 1050, e: 1110, who: ["dad", "luke"] },
+  { title: "Family dinner", s: 1125, e: 1170, who: [] },
+  { title: "Movie night", s: 1170, e: 1245, who: [] },
+];
+const TASKS = [
+  { who: "dad", title: "Take out trash", done: true },
+  { who: "dad", title: "Pay water bill" },
+  { who: "dad", title: "Walk Biscuit", time: 1080 },
+  { who: "dad", title: "Wash the car", stars: 5 },
+  { who: "mom", title: "Water plants", done: true },
+  { who: "mom", title: "Plan next week’s meals" },
+  { who: "mom", title: "Fold laundry" },
+  { who: "ellie", title: "Brush teeth", time: 435, done: true },
+  { who: "ellie", title: "Make bed", done: true },
+  { who: "ellie", title: "Homework", time: 990 },
+  { who: "ellie", title: "Feed Biscuit", time: 1020 },
+  { who: "ellie", title: "Practice violin" },
+  { who: "ellie", title: "Brush teeth", time: 1200 },
+  { who: "harper", title: "Brush teeth", time: 435, done: true },
+  { who: "harper", title: "Make bed", done: true },
+  { who: "harper", title: "Practice piano" },
+  { who: "harper", title: "Set the table", time: 1110 },
+  { who: "harper", title: "Rake the leaves", stars: 4 },
+  { who: "luke", title: "Brush teeth", time: 435, done: true },
+  { who: "luke", title: "Make bed" },
+  { who: "luke", title: "Pack soccer bag", time: 1020 },
+  { who: "luke", title: "Tidy room" },
+  { who: "luke", title: "Brush teeth", time: 1200 },
+].map((t, i) => ({ ...t, id: i }));
+
+// ---------- colour: same derivation as memberTaskPalette() in src/members/members.ts ----------
+const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const mix = (a, b, t) => "#" + rgb(a).map((v, i) => Math.round(v + (rgb(b)[i] - v) * t).toString(16).padStart(2, "0")).join("");
+const lum = (h) => { const [r, g, b] = rgb(h).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrast = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+for (const m of MEMBERS) {
+  const panel = mix(m.color, "#ffffff", 0.94), hdr = mix(m.color, "#ffffff", 0.76), fill = mix(m.color, "#ffffff", 0.55);
+  let ink = m.color, ctl = m.color;
+  for (let s = 0; s <= 20; s++) {
+    const c = mix(m.color, "#1f2a33", s / 20);
+    if (contrast(ink, hdr) < 4.5 || contrast(ink, fill) < 4.5) ink = c;
+    if (contrast(ctl, "#ffffff") < 4.5) ctl = c;
+  }
+  m.css = `--acc:${m.color};--panel:${panel};--hdr:${hdr};--fill:${fill};--ink:${ink};--ctl:${ctl}`;
+  m.on = contrast(m.color, "#ffffff") >= 3 ? "#fff" : "#1f2a33";
+}
+const byId = Object.fromEntries(MEMBERS.map((m) => [m.id, m]));
+
+// ---------- helpers ----------
+const P = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+  calendar: '<path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/>',
+  list: '<path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  star: '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+  utensils: '<path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/>',
+  book: '<path d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>',
+  sunrise: '<path d="M12 2v8M4.93 10.93l1.41 1.41M2 18h2M20 18h2M19.07 10.93l-1.41 1.41M22 22H2M8 6l4-4 4 4M16 18a4 4 0 0 0-8 0"/>',
+  cloud: '<path d="M12 2v2M4.93 4.93l1.41 1.41M20 12h2M19.07 4.93l-1.41 1.41M15.947 12.65a4 4 0 0 0-5.925-4.128M13 22H7a5 5 0 1 1 4.9-6H13a3 3 0 0 1 0 6Z"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  home: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+};
+const ic = (n, s = 22, extra = "") => `<svg class="i" width="${s}" height="${s}" viewBox="0 0 24 24" ${extra}>${P[n]}</svg>`;
+const fmt = (min) => { const h = Math.floor(min / 60), m = min % 60; return `${h % 12 || 12}${m ? ":" + String(m).padStart(2, "0") : ""} ${h >= 12 ? "PM" : "AM"}`; };
+const range = (e) => `${fmt(e.s).replace(/ (AM|PM)$/, (x) => (Math.floor(e.s / 720) === Math.floor(e.e / 720) ? "" : x))} – ${fmt(e.e)}`;
+const av = (m, s = 48, ring = false) => `<span class="av${ring ? " ring" : ""}" style="--s:${s}px;background:${m.color};color:${m.on}">${m.name[0]}</span>`;
+const stack = (ids, s = 28) => `<span class="stack">${ids.map((id) => av(byId[id], s, true)).join("")}</span>`;
+const tasksOf = (id) => TASKS.filter((t) => t.who === id);
+const prog = (id) => { const t = tasksOf(id); return { done: t.filter((x) => x.done).length, total: t.length }; };
+const pbar = (id) => { const p = prog(id); return `<span class="bar-p"><i style="width:${(p.done / (p.total || 1)) * 100}%"></i></span>`; };
+const sees = (who) => (e) => !who || e.who.length === 0 || e.who.includes(who);
+// An event takes its participant's colour; a Household Event is neutral; several participants stripe.
+function paint(e, lane) {
+  if (e.who.length === 0) return ['class="ev house"', ""];
+  const ids = lane ? [lane] : e.who;
+  if (ids.length === 1) return ['class="ev"', byId[ids[0]].css];
+  const bands = ids.map((id, i) => `${mix(byId[id].color, "#ffffff", 0.62)} ${i * 34}px ${(i + 1) * 34}px`).join(",");
+  return ['class="ev"', `background:repeating-linear-gradient(115deg,${bands});color:var(--neutral-900)`];
+}
+const house = `<span class="hh">${ic("home", 18)} Everyone</span>`;
+function trow(t) {
+  const meta = [t.time != null ? fmt(t.time) : "", t.stars ? "Bounty" : ""].filter(Boolean).join(" · ");
+  return `<button class="trow${t.done ? " done" : ""}" data-task="${t.id}"><span class="ck">${t.done ? ic("check", 26, 'stroke-width="2.6"') : ""}</span><span><span class="t">${t.title}</span>${meta ? `<span class="m">${meta}</span>` : ""}</span>${t.stars ? `<span class="star">${ic("star", 18)} ${t.stars}</span>` : ""}</button>`;
+}
+const sortOpen = (ts) => [...ts].sort((a, b) => (a.time ?? 9e9) - (b.time ?? 9e9));
+function tpanel(m) {
+  const all = tasksOf(m.id), open = sortOpen(all.filter((t) => !t.done)), done = all.filter((t) => t.done), p = prog(m.id);
+  return `<section class="tpanel pal" style="${m.css}"><header>${av(m, 56)}<div><h2>${m.name}’s tasks</h2><p>${open.length} remaining</p></div><div class="big">${p.done}<span>/${p.total}</span>${pbar(m.id)}</div></header><div class="rows">${open.map(trow).join("")}${done.length ? `<div class="sub eyebrow">${done.length} completed</div>${done.map(trow).join("")}` : ""}</div></section>`;
+}
+function chips(who) {
+  return `<div class="chips${who ? " filtered" : ""}"><button class="chip" data-who="" aria-pressed="${!who}"><span class="av all">${ic("users", 24)}</span>Everyone</button>${MEMBERS.map((m) => { const p = prog(m.id); return `<button class="chip" style="${m.css}" data-who="${m.id}" aria-pressed="${who === m.id}">${av(m, 48)}${m.name}<small>${p.done}/${p.total}</small></button>`; }).join("")}</div>`;
+}
+function agenda(who, opts = {}) {
+  const ev = EVENTS.filter(sees(who)), ad = ALLDAY.filter(sees(who));
+  let out = "", nowDone = false;
+  const nowRow = `<div class="now"><span>${fmt(NOW)}</span><i><span class="nowdot"></span></i></div>`;
+  for (const e of ad) { const [c, s] = paint(e); out += `<div class="r"><div class="when">All day</div><div ${c} style="${s}"><b>${e.title}</b>${e.who.length ? stack(e.who, 32) : house}</div></div>`; }
+  for (const e of ev) {
+    if (!nowDone && e.e > NOW && e.s > NOW) { out += nowRow; nowDone = true; }
+    const [c, s] = paint(e);
+    out += `<div class="r${e.e <= NOW ? " past" : ""}"><div class="when">${fmt(e.s)}<small>to ${fmt(e.e)}</small></div><div ${c} style="${s}"><b>${e.title}</b>${e.who.length ? (who && e.who.length === 1 ? "" : stack(e.who, 32)) : house}</div></div>`;
+  }
+  if (!nowDone) out += nowRow;
+  return `<div class="ag" style="${opts.style || ""}">${out}</div>`;
+}
+const nextTask = (id) => sortOpen(tasksOf(id).filter((t) => !t.done))[0];
+function famrow(m) {
+  const p = prog(m.id), n = nextTask(m.id);
+  return `<button class="famrow" style="${m.css}" data-who="${m.id}">${av(m, 56)}<div><h3>${m.name}<small>${p.done}/${p.total} done</small></h3><div class="next">${n ? `Next: ${n.title}${n.time != null ? " · " + fmt(n.time) : ""}` : "All done for today"}</div></div>${ic("right", 24)}${pbar(m.id)}</button>`;
+}
+function lhead(m, who) {
+  const p = prog(m.id);
+  return `<button class="lhead" style="${m.css}" data-who="${m.id}" aria-pressed="${who === m.id}"><span class="top">${av(m, 48)}${m.name}<small>${p.done}/${p.total}</small></span>${pbar(m.id)}</button>`;
+}
+
+// ---------- 1 · Lanes: today's time grid with one column per person ----------
+function m1(who) {
+  const H = who ? 59 : 57, y = (min) => ((min - DAY0) / 60) * H + 14;
+  const hours = Array.from({ length: 15 }, (_, i) => `<span style="top:${y(DAY0 + i * 60)}px">${fmt(DAY0 + i * 60)}</span>`).join("");
+  const block = (e, lane, wide) => {
+    const [c, s] = paint(e, lane), h = ((e.e - e.s) / 60) * H - 4, short = wide || h < 56;
+    const others = e.who.filter((id) => id !== lane);
+    return `<div ${c.replace('"ev', `"ev${short ? " short" : ""}`)} style="${s};top:${y(e.s)}px;height:${h}px"><b>${e.title}</b><em>${range(e)}</em>${e.who.length === 0 ? (wide ? house : "") : others.length ? stack(lane ? others : e.who, 26) : ""}</div>`;
+  };
+  const now = `<div class="nowline" style="top:${y(NOW)}px"><span class="nowdot"></span></div>`;
+  const heads = `<div class="cols"><div></div>${MEMBERS.map((m) => lhead(m, who)).join("")}</div>`;
+  if (!who) {
+    const allday = `<div class="cols allday"><div class="lbl">All day</div><div class="adbar" style="grid-column:2/-1">${ic("home", 18)} Grandma visiting</div><div></div>${MEMBERS.map((m) => { const a = ALLDAY.find((x) => x.who.includes(m.id)); return a ? `<div class="adbar" style="${m.css}">${a.title}</div>` : "<div></div>"; }).join("")}</div>`;
+    const lanes = MEMBERS.map((m) => `<div class="lane" style="${m.css};--h:${H}px;background-position:0 14px">${EVENTS.filter((e) => e.who.includes(m.id)).map((e) => block(e, m.id)).join("")}</div>`).join("");
+    const over = `<div class="over">${EVENTS.filter((e) => !e.who.length).map((e) => block(e, null, true)).join("")}${now}</div>`;
+    return `<div class="m1">${heads}${allday}<div class="grid"><div class="cols"><div class="gutter">${hours}</div>${lanes}</div>${over}</div></div>`;
+  }
+  const m = byId[who];
+  const ad = ALLDAY.filter(sees(who));
+  const allday = `<div class="cols allday" style="grid-template-columns:76px minmax(0,1fr)"><div class="lbl">All day</div><div style="display:flex;gap:8px">${ad.map((a) => `<div class="adbar" style="${a.who.length ? m.css : ""};flex:1">${a.who.length ? "" : ic("home", 18)} ${a.title}</div>`).join("")}</div></div>`;
+  const lane = `<div class="lane" style="${m.css};--h:${H}px;background-position:0 14px">${EVENTS.filter(sees(who)).map((e) => block(e, e.who.length ? who : null, true)).join("")}<div class="nowline" style="top:${y(NOW)}px;left:0"><span class="nowdot"></span></div></div>`;
+  return `<div class="m1 filtered">${heads}${allday}<div class="grid"><div class="focus"><div class="gutter">${hours}</div>${lane}${tpanel(m)}</div></div></div>`;
+}
+
+// ---------- 2 · Agenda: one chronological list beside a tasks column ----------
+function m2(who) {
+  const right = who
+    ? tpanel(byId[who])
+    : `<div><h2 class="sec">Tasks</h2><div class="fam">${MEMBERS.map(famrow).join("")}</div></div>`;
+  return `${chips(who)}<div class="m2"><div><h2 class="sec">${who ? byId[who].name + "’s schedule" : "Schedule"}</h2>${agenda(who, { style: who ? "--agh:84px;--agt:24px" : "" })}</div>${right}</div>`;
+}
+
+// ---------- 3 · Board: a card per person; focus one for the whole day ----------
+function m3(who) {
+  if (who) {
+    const m = byId[who], p = prog(who), up = EVENTS.filter(sees(who)).find((e) => e.e > NOW);
+    return `${chips(who)}<div class="m3 pal" style="${m.css}"><div class="hero">${av(m, 80)}<div><h2>${m.name}’s day</h2><p>${up ? (up.s <= NOW ? `Now: ${up.title} until ${fmt(up.e)}` : `Next: ${up.title} at ${fmt(up.s)}`) : "Nothing else on the calendar"}</p></div><div class="big">${p.done}<span>/${p.total}</span></div>${pbar(who)}</div><div class="two"><section class="spanel"><h3>Calendar</h3>${agenda(who, { style: "--agh:72px;--agt:22px" })}</section>${tpanel(m).replace(/<header>.*?<\/header>/, `<header><div><h2>Tasks</h2></div></header>`)}</div></div>`;
+  }
+  const strip = `<div class="strip"><span class="lbl">Everyone</span>${ALLDAY.filter((a) => !a.who.length).map((a) => `<span class="adbar">${a.title} <em>All day</em></span>`).join("")}${EVENTS.filter((e) => !e.who.length).map((e) => `<span class="adbar">${e.title} <em>${fmt(e.s)}</em></span>`).join("")}</div>`;
+  const card = (m) => {
+    const ev = EVENTS.filter((e) => e.who.includes(m.id) && e.e > NOW), ad = ALLDAY.filter((a) => a.who.includes(m.id));
+    const open = sortOpen(tasksOf(m.id).filter((t) => !t.done));
+    return `<section class="card" style="${m.css};--trow:66px;--tt:20px;--ck:44px">${lhead(m, null)}<div class="sec"><div class="eyebrow">Coming up</div>${ad.map((a) => `<div class="erow"><time>All day</time>${a.title}</div>`).join("")}${ev.map((e, i) => `<div class="erow${i === 0 ? " nxt" : ""}"><time>${fmt(e.s)}</time>${e.title}</div>`).join("") || (ad.length ? "" : `<div class="none">Nothing else today</div>`)}</div><div class="sec"><div class="eyebrow">Tasks</div>${open.slice(0, 4).map(trow).join("") || `<div class="none">All done for today</div>`}</div><button class="more" data-who="${m.id}">${m.name}’s day ${ic("right", 22)}</button></section>`;
+  };
+  return `<div class="m3">${strip}<div class="board">${MEMBERS.map(card).join("")}</div></div>`;
+}
+
+// ---------- 4 · Day Parts: Morning / Afternoon / Evening, events and tasks interleaved ----------
+function m4(who) {
+  const parts = [
+    { name: "Morning", icon: "sunrise", a: 0, b: 720, span: "until noon" },
+    { name: "Afternoon", icon: "sun", a: 720, b: 1020, span: "12 – 5 PM" },
+    { name: "Evening", icon: "moon", a: 1020, b: 1440, span: "after 5 PM" },
+  ];
+  const m = who ? byId[who] : null;
+  const evHtml = (e) => { const [c, s] = paint(e); return `<div ${c.replace('"ev', `"ev${e.e <= NOW ? " past" : ""}`)} style="${s}"><b>${e.title}</b><em>${range(e)}</em>${e.who.length ? (who && e.who.length === 1 ? "" : stack(e.who, 32)) : house}</div>`; };
+  const cols = parts.map((p) => {
+    const items = EVENTS.filter(sees(who)).filter((e) => e.s >= p.a && e.s < p.b).map((e) => ({ at: e.s, html: evHtml(e) }));
+    if (who) for (const t of tasksOf(who)) if (t.time != null && t.time >= p.a && t.time < p.b) items.push({ at: t.time, html: trow(t) });
+    items.sort((x, y) => x.at - y.at);
+    const cur = NOW >= p.a && NOW < p.b;
+    return `<section class="part${cur ? " cur" : ""}"><header>${ic(p.icon, 28)}<div><h2>${p.name}</h2></div><small>${p.span}</small>${cur ? `<span class="nowb">Now</span>` : ""}</header><div class="list pal" style="${m ? m.css : ""}">${items.map((i) => i.html).join("") || `<div class="empty">Nothing planned</div>`}</div></section>`;
+  });
+  const last = who
+    ? `<section class="part"><header>${ic("check", 28)}<div><h2>Anytime</h2></div><small>${prog(who).done}/${prog(who).total} done today</small></header><div class="list pal" style="${m.css}">${[...sortOpen(tasksOf(who).filter((t) => t.time == null && !t.done)), ...tasksOf(who).filter((t) => t.time == null && t.done)].map(trow).join("")}</div></section>`
+    : `<section class="part"><header>${ic("check", 28)}<div><h2>Tasks</h2></div><small>tap a person</small></header><div class="list">${ALLDAY.length ? "" : ""}${MEMBERS.map(famrow).join("")}</div></section>`;
+  const allday = ALLDAY.filter(sees(who)).map((a) => `<span class="adbar" style="${a.who.length ? byId[who && a.who.includes(who) ? who : a.who[0]].css : ""};height:40px;padding:0 18px">${a.who.length ? stack(who ? [who] : a.who, 26) : ic("home", 18)} ${a.title}</span>`).join("");
+  return `${chips(who).replace("</div>", "").replace(/$/, "")}<span style="margin-left:auto;display:flex;gap:8px;align-items:center">${allday}</span></div><div class="m4">${cols.join("")}${last}</div>`;
+}
+
+// ---------- 5 · Swimlanes: time runs left to right, one row per person ----------
+function m5(who) {
+  const x = (min) => ((min - DAY0) / (DAY1 - DAY0)) * 100;
+  const ev = (e, lane) => { const [c, s] = paint(e, lane); return `<div ${c} style="${s};left:calc(${x(e.s)}% + 3px);width:calc(${x(e.e) - x(e.s)}% - 6px)"><b>${e.title}</b>${e.e - e.s >= 60 ? `<em>${range(e)}</em>` : ""}</div>`; };
+  const axis = `<div class="swr axis"><div></div><div class="track">${Array.from({ length: 14 }, (_, i) => `<span style="left:${(i / 14) * 100}%">${fmt(DAY0 + i * 60)}</span>`).slice(1).join("")}</div></div>`;
+  const ad = `<div class="swr ad"><div class="who">All day</div><div class="track">${ALLDAY.filter(sees(who)).map((a) => `<span class="adbar" style="${a.who.length ? "background:" + mix(byId[a.who[0]].color, "#ffffff", 0.76) : ""}">${a.who.length ? stack(a.who, 24) : ic("home", 18)} ${a.title}</span>`).join("")}</div></div>`;
+  const hh = `<div class="swr hh"><div class="who">${ic("home", 24)} Everyone</div><div class="track">${EVENTS.filter((e) => !e.who.length).map((e) => ev(e)).join("")}</div></div>`;
+  const row = (m) => {
+    const p = prog(m.id), cls = who ? (who === m.id ? " sel" : " thin") : "";
+    return `<div class="swr mem${cls}" style="${m.css}"><button class="who" data-who="${m.id}" aria-pressed="${who === m.id}">${av(m, who && who !== m.id ? 40 : 52)}<span style="flex:1;min-width:0"><span class="n">${m.name}</span><small>${p.done}/${p.total} tasks</small>${pbar(m.id)}</span></button><div class="track">${EVENTS.filter((e) => e.who.includes(m.id)).map((e) => ev(e, m.id)).join("")}</div></div>`;
+  };
+  const now = `<div class="vnow" style="left:calc(232px + (100% - 232px) * ${x(NOW) / 100})"><b>${fmt(NOW)}</b><span class="nowdot"></span></div>`;
+  let tray = "";
+  if (who) {
+    const m = byId[who], p = prog(who), all = tasksOf(who);
+    tray = `<div class="tray pal" style="${m.css}"><aside>${av(m, 64)}<h2>${m.name}’s tasks</h2><p>${all.filter((t) => !t.done).length} remaining</p><div class="big">${p.done}<span>/${p.total}</span></div>${pbar(who)}</aside><div class="grid3">${[...sortOpen(all.filter((t) => !t.done)), ...all.filter((t) => t.done)].map(trow).join("")}</div></div>`;
+  }
+  return `<div class="m5"><div class="sw${who ? "" : " fill"}">${axis}${ad}${hh}${MEMBERS.map(row).join("")}${now}</div>${tray}</div>`;
+}
+
+// ---------- shell + routing ----------
+const MOCKS = [["Lanes", m1], ["Agenda", m2], ["Board", m3], ["Day Parts", m4], ["Swimlanes", m5]];
+const NAV = [["Today", "sun", "coral"], ["Calendar", "calendar", "teal"], ["Lists", "list", "sand"], ["Tasks", "check", "sage"], ["Rewards", "star", "coral"], ["Meals", "utensils", "blush"], ["Recipes", "book", "lilac"], ["Photos", "image", "teal"], ["Sleep", "moon", "lilac"], ["Settings", "settings", null]];
+const state = { m: 0, who: "" };
+function read() { const q = new URLSearchParams(location.hash.slice(1)); state.m = Math.min(4, Math.max(0, (+q.get("m") || 1) - 1)); state.who = byId[q.get("who")] ? q.get("who") : ""; }
+function go(patch) { Object.assign(state, patch); location.hash = `m=${state.m + 1}${state.who ? "&who=" + state.who : ""}`; }
+function render() {
+  document.getElementById("bar").innerHTML = `<b>Today page</b>${MOCKS.map(([n], i) => `<button data-m="${i}" aria-pressed="${i === state.m}">${i + 1} · ${n}</button>`).join("")}<span>Tap a person to filter · tap again for everyone · checkboxes work</span>`;
+  const rail = `<nav class="rail"><div class="brand">F</div><div class="items">${NAV.map(([l, i, t], n) => { const ink = t ? `var(--member-${t}-ink)` : "var(--neutral-700)"; return `<div class="it${n === 0 ? " on" : ""}" style="${n === 0 ? `background:var(--member-${t}-soft);color:${ink};` : ""}${l === "Sleep" ? "margin-top:auto" : ""}"><span style="color:${ink};display:flex">${ic(i, 29)}</span>${l}</div>`; }).join("")}</div></nav>`;
+  const everyone = state.who && (state.m === 0 || state.m === 4) ? `<button class="pill-btn" data-who="">${ic("users", 20)} Everyone</button>` : "";
+  const hdr = `<header class="hdr"><h1>Today</h1><span class="meta date">Thursday, October 8</span><span class="meta">${fmt(NOW)}</span><span class="meta wx">${ic("cloud", 24)} 64°</span><span class="right">${everyone}</span></header>`;
+  document.getElementById("stage").innerHTML = `${rail}<div class="screen">${hdr}<div class="body">${MOCKS[state.m][1](state.who)}</div></div>`;
+}
+function fit() { const s = Math.min(innerWidth / 1920, (innerHeight - 56) / 1080); const f = document.getElementById("fit"); f.style.transform = `scale(${s})`; f.style.left = `${Math.max(0, (innerWidth - 1920 * s) / 2)}px`; }
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-task],[data-who],[data-m]");
+  if (!t) return;
+  if (t.dataset.task != null) { const k = TASKS[+t.dataset.task]; k.done = !k.done; render(); }
+  else if (t.dataset.m != null) go({ m: +t.dataset.m });
+  else go({ who: t.dataset.who === state.who ? "" : t.dataset.who });
+});
+addEventListener("hashchange", () => { read(); render(); });
+addEventListener("resize", fit);
+read(); render(); fit();
+</script>
+</body>
+</html>

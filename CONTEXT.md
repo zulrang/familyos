@@ -112,6 +112,17 @@ The calendar's rolling view of five consecutive days, initially today and the
 next four days.
 _Avoid_: Week view
 
+**Today**:
+The wall's home view of the current Household date: every Active Member's
+events side by side, or one chosen member's events beside their Tasks.
+_Avoid_: Dashboard, home screen, agenda
+
+**Lane**:
+One Active Member's column of events on Today. An event with several
+participants appears in each participant's Lane; an event for everyone spans
+them all.
+_Avoid_: Column, swimlane
+
 ## Lists and providers
 
 **Provider Connection**:

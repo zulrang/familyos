@@ -1,18 +1,19 @@
 import type { CSSProperties } from "react";
 import type { MemberPastel } from "@/shared/member-pastel";
+import { PAST_EVENT_OPACITY } from "./EventCard";
 
 export function AllDayBar({
   label,
   tone = "sage",
   soft,
-  multi = false,
+  past = false,
   onClick,
   style,
 }: {
   label: string;
   tone?: MemberPastel;
   soft?: string;
-  multi?: boolean;
+  past?: boolean;
   onClick?: () => void;
   style?: CSSProperties;
 }) {
@@ -27,9 +28,8 @@ export function AllDayBar({
         padding: "0 14px",
         border: "none",
         borderRadius: "var(--radius-pill)",
-        background: multi
-          ? "var(--stripe-multi)"
-          : (soft ?? `var(--member-${tone}-soft)`),
+        background: soft ?? `var(--member-${tone}-soft)`,
+        opacity: past ? PAST_EVENT_OPACITY : 1,
         color: "var(--text-title)",
         font: "var(--type-card-title)",
         overflow: "hidden",

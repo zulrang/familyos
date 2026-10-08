@@ -2,23 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  addDays,
   coversDay,
   eventPaint,
   formatTimeRange,
-  fromDateAndTime,
-  fromDateOnly,
   gridHeight,
   HOUR_PX,
   heightPx,
   hoursInView,
+  isPastEvent,
   isSameDay,
   isWeekend,
   layoutColumns,
   mountGridScrollTop,
-  msToDateInput,
-  msToTimeInput,
-  nextHour,
   nowLineTop,
   pageFiveDays,
   peopleOf,
@@ -32,23 +27,22 @@ import {
   visibleUnderMemberFilter,
   weekdayLabel,
 } from "@/calendar/calendar";
-import type { CalEvent, CalendarRead } from "@/calendar/types";
+import type { CalEvent } from "@/calendar/types";
 import {
   LEGACY_TONE_COLORS,
   type Member,
   memberSurface,
 } from "@/members/members";
-import type { PublicSettings } from "@/settings/types";
 import { AppHeader } from "@/shared/AppHeader";
-import { redirectIfPairingRequired } from "@/shared/display-client";
 import { formatClock, zonedDayOfMonth } from "@/shared/time";
 import { Button } from "@/shared/ui/Button";
 import { Fab } from "@/shared/ui/Fab";
 import { IconButton } from "@/shared/ui/IconButton";
+import { useClock } from "@/shared/use-clock";
 import { AllDayBar } from "./AllDayBar";
 import { DayHeader } from "./DayHeader";
 import { EventCard } from "./EventCard";
-import { type EventDraft, EventSheet } from "./EventSheet";
+import { useHouseholdCalendar } from "./HouseholdCalendar";
 import { MemberChip } from "./MemberChip";
 import { NowLine } from "./NowLine";
 import { TimeGutter } from "./TimeGutter";
@@ -56,40 +50,6 @@ import { TimeGutter } from "./TimeGutter";
 function chipSurface(m: Member) {
   if (m.status !== "active") return memberSurface(LEGACY_TONE_COLORS.sand);
   return memberSurface(m.color);
-}
-
-function toDraft(ev: CalEvent, timeZone: string): EventDraft {
-  const endInclusive = ev.allDay
-    ? addDays(new Date(ev.endMs), -1, timeZone).getTime()
-    : ev.endMs;
-  return {
-    id: ev.id,
-    title: ev.title,
-    allDay: ev.allDay,
-    date: msToDateInput(ev.startMs, timeZone),
-    endDate: msToDateInput(endInclusive, timeZone),
-    startTime: msToTimeInput(ev.startMs, timeZone),
-    endTime: msToTimeInput(ev.endMs, timeZone),
-    // Round-trip stored IDs even if some no longer resolve on the roster.
-    memberIds: [...ev.participantIds],
-    recurringEventId: ev.recurringEventId,
-    expectedVersion: ev.expectedVersion,
-    scope: "this",
-  };
-}
-
-function createDraft(now: Date, timeZone: string): EventDraft {
-  const n = nextHour(now, timeZone);
-  return {
-    title: "",
-    allDay: false,
-    date: msToDateInput(n.startMs, timeZone),
-    endDate: msToDateInput(n.startMs, timeZone),
-    startTime: msToTimeInput(n.startMs, timeZone),
-    endTime: msToTimeInput(n.endMs, timeZone),
-    memberIds: [],
-    scope: "this",
-  };
 }
 
 function LiveClock({ timeZone }: { timeZone: string }) {
@@ -107,66 +67,19 @@ let savedGridScroll: number | null = null;
 export function CalendarScreen() {
   const [now, setNow] = useState(() => new Date());
   const [anchor, setAnchor] = useState<Date | null>(null);
-  const [settings, setSettings] = useState<PublicSettings | null>(null);
-  const [calendarRead, setCalendarRead] = useState<CalendarRead>({
-    events: [],
-    stale: false,
-  });
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [showChips, setShowChips] = useState(true);
-  const [sheet, setSheet] = useState<EventDraft | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
+  const calendar = useHouseholdCalendar((zone) =>
+    visibleFetchBounds(anchor ?? now, zone),
+  );
+  const { settings, members, events, canMutate } = calendar;
   const timeZone = settings?.timeZone;
   const viewStart = anchor ?? now;
   const days = timeZone ? viewDays(viewStart, timeZone) : [];
-  const members = settings?.members ?? [];
-  const events = calendarRead.events;
-  const stale = calendarRead.stale;
-  const bounds = timeZone ? visibleFetchBounds(viewStart, timeZone) : null;
-  const from = bounds?.from;
-  const to = bounds?.to;
-
-  async function load(signal?: AbortSignal) {
-    const req = signal ? { signal } : undefined;
-    const sRes = await fetch("/api/settings", req);
-    if (signal?.aborted) return;
-    if (await redirectIfPairingRequired(sRes)) return;
-    const s = (await sRes.json()) as PublicSettings;
-    if (signal?.aborted) return;
-    setSettings(s);
-    if (!s.calendarId) {
-      setCalendarRead({ events: [], stale: false });
-      return;
-    }
-    const range = visibleFetchBounds(viewStart, s.timeZone);
-    const eRes = await fetch(
-      `/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
-      req,
-    );
-    if (signal?.aborted) return;
-    if (await redirectIfPairingRequired(eRes)) return;
-    if (eRes.status === 401) {
-      setCalendarRead({ events: [], stale: false });
-      setSettings({ ...s, signedIn: false });
-      return;
-    }
-    if (!eRes.ok) {
-      setCalendarRead((cur) => ({ ...cur, stale: true }));
-      setError("Could not load events.");
-      return;
-    }
-    const data = (await eRes.json()) as CalendarRead;
-    if (signal?.aborted) return;
-    setCalendarRead({
-      events: Array.isArray(data.events) ? data.events : [],
-      stale: data.stale === true,
-    });
-    setError(null);
-  }
+  const clock = useClock(60_000);
 
   useEffect(() => {
     if (!timeZone) return;
@@ -176,27 +89,6 @@ export function CalendarScreen() {
     }, 60_000);
     return () => clearInterval(t);
   }, [timeZone]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible range bounds change
-  useEffect(() => {
-    let inFlight: AbortController | null = null;
-    const run = () => {
-      inFlight?.abort();
-      const ac = new AbortController();
-      inFlight = ac;
-      return load(ac.signal).catch((err: unknown) => {
-        if (ac.signal.aborted) return;
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        setError("Could not load calendar.");
-      });
-    };
-    run();
-    const poll = setInterval(run, 60_000);
-    return () => {
-      inFlight?.abort();
-      clearInterval(poll);
-    };
-  }, [from, to]);
 
   useEffect(() => {
     if (!timeZone) return;
@@ -219,131 +111,9 @@ export function CalendarScreen() {
 
   const status = timeZone ? statusEvent(events, now, timeZone) : null;
 
-  function applyCurrentEvent(eventId: string, current: CalEvent | null) {
-    setCalendarRead((cur) => ({
-      ...cur,
-      events: current
-        ? cur.events.map((e) => (e.id === eventId ? current : e))
-        : cur.events.filter((e) => e.id !== eventId),
-    }));
-  }
-
-  /** Keep the open editor when a 409 includes `event`; a missing key is not a delete. */
-  async function reloadConflictingEvent(res: Response, eventId: string) {
-    const body = (await res.json()) as { event?: CalEvent | null };
-    if ("event" in body) {
-      applyCurrentEvent(eventId, body.event ?? null);
-      if (timeZone) {
-        setSheet((s) => {
-          if (!s?.id || s.id !== eventId) return s;
-          if (!body.event) return null;
-          return toDraft(body.event, timeZone);
-        });
-      }
-    }
-    setError("This event changed on another Display. Reloaded — try again.");
-  }
-
-  async function save(draft: EventDraft) {
-    if (!timeZone) return;
-    setBusy(true);
-    try {
-      const startMs = draft.allDay
-        ? fromDateOnly(draft.date, timeZone)
-        : fromDateAndTime(draft.date, draft.startTime, timeZone);
-      const endMs = draft.allDay
-        ? addDays(
-            new Date(fromDateOnly(draft.endDate, timeZone)),
-            1,
-            timeZone,
-          ).getTime()
-        : fromDateAndTime(draft.date, draft.endTime, timeZone);
-      const body: Record<string, unknown> = {
-        title: draft.title.trim() || "Busy",
-        allDay: draft.allDay,
-        startMs,
-        endMs,
-        participantIds: draft.memberIds,
-        scope: draft.recurringEventId ? draft.scope : "this",
-      };
-      if (draft.id) body.expectedVersion = draft.expectedVersion ?? "";
-      const res = await fetch(
-        draft.id
-          ? `/api/events/${encodeURIComponent(draft.id)}`
-          : "/api/events",
-        {
-          method: draft.id ? "PATCH" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      );
-      if (res.status === 409 && draft.id) {
-        await reloadConflictingEvent(res, draft.id);
-        return;
-      }
-      if (!res.ok) throw new Error(String(res.status));
-      setSheet(null);
-      await load();
-    } catch {
-      setError("Could not save event.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove(draft: EventDraft) {
-    if (!draft.id) return;
-    const scope = draft.recurringEventId ? draft.scope : "this";
-    const msg =
-      scope === "all"
-        ? "Delete all events in this series?"
-        : scope === "following"
-          ? "Delete this and following events?"
-          : "Delete this event?";
-    if (!confirm(msg)) return;
-    setBusy(true);
-    try {
-      const q = scope === "this" ? "" : `?scope=${scope}`;
-      const res = await fetch(
-        `/api/events/${encodeURIComponent(draft.id)}${q}`,
-        {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            expectedVersion: draft.expectedVersion ?? "",
-          }),
-        },
-      );
-      if (res.status === 409) {
-        await reloadConflictingEvent(res, draft.id);
-        return;
-      }
-      if (!res.ok) throw new Error(String(res.status));
-      setSheet(null);
-      await load();
-    } catch {
-      setError("Could not delete event.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   const hours = hoursInView();
   const gh = gridHeight();
-  const canMutate = Boolean(
-    settings?.signedIn && settings.calendarId && !stale,
-  );
-  const banner = !settings
-    ? null
-    : stale
-      ? "Google is unavailable. Calendar is read-only."
-      : !settings.googleConfigured
-        ? "Add Google credentials in .env.local, then sign in under Settings."
-        : !settings.signedIn
-          ? "Sign in with Google under Settings to load the family calendar."
-          : !settings.calendarId
-            ? "Pick a family calendar under Settings."
-            : error;
+  const banner = calendar.notice;
 
   return (
     <div
@@ -512,15 +282,13 @@ export function CalendarScreen() {
                           key={e.id}
                           label={e.title}
                           soft={paint.soft}
-                          multi={paint.multi}
+                          past={isPastEvent(e, clock.getTime())}
                           style={{
                             height: 30,
                             cursor: canMutate ? "pointer" : "default",
                           }}
                           onClick={
-                            canMutate
-                              ? () => setSheet(toDraft(e, timeZone))
-                              : undefined
+                            canMutate ? () => calendar.editEvent(e) : undefined
                           }
                         />
                       );
@@ -580,15 +348,7 @@ export function CalendarScreen() {
                             e.currentTarget.getBoundingClientRect().top,
                           timeZone,
                         );
-                        if (!start) return;
-                        const end = new Date(start.getTime() + 3600000);
-                        setSheet({
-                          ...createDraft(start, timeZone),
-                          date: msToDateInput(start.getTime(), timeZone),
-                          endDate: msToDateInput(start.getTime(), timeZone),
-                          startTime: msToTimeInput(start.getTime(), timeZone),
-                          endTime: msToTimeInput(end.getTime(), timeZone),
-                        });
+                        if (start) calendar.newEvent({ start });
                       }}
                     />
                   ) : null}
@@ -614,16 +374,14 @@ export function CalendarScreen() {
                           time={formatTimeRange(e.startMs, e.endMs, timeZone)}
                           fill={paint.fill}
                           ink={paint.onFill}
-                          multi={paint.multi}
+                          past={isPastEvent(e, clock.getTime())}
                           height={h}
                           people={people.map((p) => ({
                             name: p.name,
                             surface: chipSurface(p),
                           }))}
                           onClick={
-                            canMutate
-                              ? () => setSheet(toDraft(e, timeZone))
-                              : undefined
+                            canMutate ? () => calendar.editEvent(e) : undefined
                           }
                           style={{ height: "100%", minHeight: 0 }}
                         />
@@ -638,19 +396,9 @@ export function CalendarScreen() {
         </div>
       ) : null}
       {canMutate && timeZone ? (
-        <Fab onClick={() => setSheet(createDraft(new Date(), timeZone))} />
+        <Fab onClick={() => calendar.newEvent()} />
       ) : null}
-      {sheet ? (
-        <EventSheet
-          draft={sheet}
-          members={members}
-          busy={busy}
-          onChange={setSheet}
-          onClose={() => setSheet(null)}
-          onSave={() => save(sheet)}
-          onDelete={sheet.id ? () => remove(sheet) : undefined}
-        />
-      ) : null}
+      {calendar.editor}
     </div>
   );
 }

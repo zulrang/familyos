@@ -14,6 +14,7 @@ import {
   googleDateTime,
   gridHeight,
   HOUR_PX,
+  isPastEvent,
   isWeekend,
   LEGACY_TONE_COLOR_ID,
   layoutColumns,
@@ -186,16 +187,11 @@ describe("Household Calendar", () => {
       peopleOf(members, { ...bath, participantIds: ["ex"] }).map((m) => m.id),
       ["ex"],
     );
-    assert.equal(
-      eventPaint(peopleOf(members, { ...bath, participantIds: ["ex", "dad"] }))
-        .multi,
-      true,
+    const paint = eventPaint(
+      peopleOf(members, { ...bath, participantIds: ["ex", "dad"] }),
     );
-    assert.equal(
-      eventPaint(peopleOf(members, { ...bath, participantIds: ["ex", "dad"] }))
-        .fill,
-      LEGACY_TONE_COLORS.teal,
-    );
+    assert.equal(paint.multi, false);
+    assert.equal(paint.fill, LEGACY_TONE_COLORS.teal);
   });
 
   test("paints custom Member Color fill and soft for a single Active participant", () => {
@@ -217,7 +213,34 @@ describe("Household Calendar", () => {
       soft: "#fbf1e3",
       onFill: "#1f2a33",
     });
-    assert.equal(eventPaint(peopleOf(members, bath)).multi, true);
+  });
+
+  test("stripes a shared event in its Active participants' Member Colors", () => {
+    const ellie: Member = {
+      id: "ellie",
+      name: "Ellie",
+      status: "active",
+      color: "#4a90d9",
+    };
+    const luke: Member = {
+      id: "luke",
+      name: "Luke",
+      status: "active",
+      color: "#d9a02b",
+    };
+    const paint = eventPaint([ellie, luke]);
+    assert.equal(paint.multi, true);
+    assert.equal(
+      paint.fill,
+      "repeating-linear-gradient(115deg, #aecdee 0px 34px, #eed4a0 34px 68px)",
+    );
+    assert.equal(paint.soft, paint.fill);
+    assert.equal(paint.onFill, "#1f2a33");
+  });
+
+  test("an event is past once it has ended", () => {
+    assert.equal(isPastEvent(bath, bath.endMs - 1), false);
+    assert.equal(isPastEvent(bath, bath.endMs), true);
   });
 
   test("Household Events stay visible under every Member filter", () => {

@@ -13,7 +13,8 @@ data, not authentication principals. Companion phones/tablets are out of v1
 scope, although any paired browser profile follows the same Trusted Display
 rules.
 
-Implemented surfaces are pairing, the Five-Day Calendar in `src/calendar/`,
+Implemented surfaces are pairing, Today in `src/today/` (the wall's home
+screen), the Five-Day Calendar in `src/calendar/`,
 Lists in `src/lists/` (Google Tasks), Tasks in `src/tasks/`, Photos in
 `src/photos/`, Settings, Rewards in `src/rewards/`, parent admin, and the fixed
 left rail. Meals and Recipes remain stubs. Sleep on the rail starts the idle
@@ -73,6 +74,14 @@ midnight bounds and filters by stable participant IDs while retaining
 Household Events. The app route composes Calendar and Tasks so feature slices
 remain independent; the agenda never stores or changes events in Tasks.
 
+Today (`src/today/`) is a composing slice (ADR 0011): it lays out the Calendar
+slice's events as one Lane per Active Member and, for a chosen member, shows
+the Tasks slice's task list beside that Lane. It holds no data of its own.
+Event reads and edits go through `useHouseholdCalendar`
+(`src/calendar/HouseholdCalendar.tsx`) and task reads and changes through
+`useTasksWorkspace` (`src/tasks/TasksWorkspace.tsx`), the same hooks the
+Calendar and Tasks screens use.
+
 **Decision: Stable IDs are the only Event Participant identity**
 - Choice: FamilyOS stores stable Household Member IDs in Google event private
   properties. Zero IDs means Household Event. Event colors are presentation
@@ -88,7 +97,7 @@ remain independent; the agenda never stores or changes events in Tasks.
   pastels. Each rail section has its own pastel tone (`src/shared/nav.ts`):
   its icon is drawn in the tone's ink, and the active section is a soft-tint
   slab with an ink accent bar. Rail rows share the available height so all
-  nine fit at the largest UI Scale. Newsreader + Nunito Sans from the design skill. No dark mode. The
+  ten fit at the largest UI Scale. Newsreader + Nunito Sans from the design skill. No dark mode. The
   rolling Five-Day View starts today, pages in five-day increments, and
   contrasts weekend columns.
 - Alternatives considered: Responsive collapsing nav; create-next-app Geist + `prefers-color-scheme` dark; a redesigned “modern” calendar.
@@ -153,6 +162,7 @@ remain independent; the agenda never stores or changes events in Tasks.
 | Component | Owns | Must not own |
 |-----------|------|----------------|
 | Wall shell (`src/app/(display)/layout.tsx` + `src/shared/NavRail.tsx`) | Frame, routing between rail destinations, pairing gate, shared chrome | Google tokens, event fetch/write, member identity |
+| Today (`src/today/`) | The home screen: Lane layout of one Household date, the member filter, and placing a chosen member's Tasks beside their day | Event or task storage, fetching, or mutation rules (it calls the Calendar and Tasks hooks); being imported by any slice |
 | Calendar (`src/calendar/`) | Five-Day View, member filters, event editing through the Google adapter | OAuth, calendar selection, identity inference from colors or attendees |
 | Lists (`src/lists/`) | Selected multi-column Household Lists through the Google Tasks adapter | Personal/unselected tasklists, chores/Tasks screen |
 | Tasks (`src/tasks/`) | Task Definitions, Task events, Bounties and Bounty Claims, star values, stored Star Balances and Star Adjustments (keyed by MemberId), the pure Occurrence projection, the Tasks screen, and the admin Tasks/Bounties/Stars pages | Google Tasks rows, Grant/Spend UX on the wall, verification workflow, member roster |
@@ -249,13 +259,13 @@ commit OAuth client secrets, refresh tokens, or pairing credentials.
 
 - Do not import from `.cursor/skills/`. The kit’s `window.DS` / unpkg Lucide pattern is invalid in this Next app.
 - Do not delete or “clean up” the `nextjs-agent-rules` block in `AGENTS.md`.
-- The rail is 90px and always visible. Rail rows flex to share its height; do not give them a fixed height, or nine will not fit at the 1.5 UI Scale. No hamburger, no collapsing sidebar, no mobile bottom tab bar.
+- The rail is 90px and always visible. Rail rows flex to share its height; do not give them a fixed height, or ten will not fit at the 1.5 UI Scale. No hamburger, no collapsing sidebar, no mobile bottom tab bar.
 - Stable Household Member IDs in Google private event properties are the only
   Event Participant identity. Do not infer participants from `colorId`,
   attendees, or email.
 - Member Colors are presentation. They are unique only among Active Members and
   may be reused after retirement. They are not Google Calendar colors.
-- Multi-person events use the diagonal `--stripe-multi` fill, not a single member color.
+- An event with two or more Active participants is filled with diagonal bands of those members' colors (`eventPaint` in `src/calendar/calendar.ts`), not a single member color. An event that has ended is drawn dimmed. Both hold on Calendar and Today.
 - Unimplemented rail items stay stubs. Do not invent a visual language for Meals or Recipes beyond existing chrome. Sleep has no screen; it starts the idle slideshow. Tasks is specified in `docs/design/tasks-design-spec.md`; build that, not the kit's tabs/points variant. Rewards follows `docs/rewards.md`. Photos setup and slideshow behavior are documented in `docs/photos.md`.
 - Task data is FamilyOS-owned and append-only (ADR 0006), except Star Balance
   which is a mutable integer (ADR 0007). Do not store Tasks in Google Tasks,

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { type CSSProperties, useContext } from "react";
-import { FAMILYOS_NAV, type NavTone } from "@/shared/nav";
+import { FAMILYOS_NAV, HOME_SECTION, type NavTone } from "@/shared/nav";
 import { SleepContext } from "@/shared/SleepContext";
 import { Icon } from "@/shared/ui/Icon";
 
@@ -31,7 +31,7 @@ export function NavRail({
 }) {
   const path = usePathname();
   const sleep = useContext(SleepContext);
-  const active = path === "/" ? "calendar" : path.slice(1).split("/")[0];
+  const active = path === "/" ? HOME_SECTION : path.slice(1).split("/")[0];
   return (
     <nav
       style={{
@@ -69,7 +69,7 @@ export function NavRail({
         {items.map((it) => {
           const on = it.id === active;
           const { ink, soft } = toneColors(it.tone);
-          // Rows share the rail height so nine fit at the largest UI Scale.
+          // Rows share the rail height so all ten fit at the largest UI Scale.
           const itemStyle: CSSProperties = {
             position: "relative",
             flex: "1 1 0",
@@ -115,7 +115,7 @@ export function NavRail({
           ) : (
             <Link
               key={it.id}
-              href={it.id === "calendar" ? "/" : `/${it.id}`}
+              href={it.id === HOME_SECTION ? "/" : `/${it.id}`}
               prefetch={false}
               aria-current={on ? "page" : undefined}
               style={itemStyle}

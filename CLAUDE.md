@@ -8,6 +8,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 ## Entry Points
 - Wall shell / pairing gate: `src/app/(display)/layout.tsx` (thin Next router; imports from slices)
 - Parent admin: `src/app/admin/layout.tsx` → `src/admin/AdminShell.tsx` (PIN session; pages compose slice `Admin*` components)
+- Today (home screen): `src/today/`
 - Calendar: `src/calendar/`
 - Lists: `src/lists/`
 - Tasks (incl. Bounties, Star Balances): `src/tasks/`
@@ -17,7 +18,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Displays / pairing UI + HTTP: `src/displays/` (session/auth in `src/shared/`)
 - Members: `src/members/`
 - Shared UI + infra: `src/shared/` (`shared/ui/` for design-system primitives)
-- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. Display session/auth lives in `shared/` so APIs need not import `displays`. Enforced by `scripts/import-boundaries.ts`.
+- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. `today` is the one composing slice: it may import `calendar` and `tasks`, and nothing imports it (ADR 0011). Display session/auth lives in `shared/` so APIs need not import `displays`. Enforced by `scripts/import-boundaries.ts`.
 
 ## Do Not Touch
 - The `nextjs-agent-rules` block in `AGENTS.md` (`next dev` rewrites it)
@@ -32,9 +33,10 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Production (`pnpm start`) is port 3000; development (`pnpm dev`) is 3001 so both can run. On the household Mac, a LaunchAgent (`scripts/macos-server`) KeepAlives `:3000` and a second one auto-deploys every new `main` commit as a release under `releases/` (ADR 0009); `./scripts/macos-server rollback` returns to the previous release. Merging to `main` is deploying.
 - Google Calendar (one selected) backs Calendar and Google Tasks (explicitly selected tasklists) backs Lists — no local event/list database. Tasks, Bounties, Star Balances, and Rewards are FamilyOS-owned in `node:sqlite` (ADR 0006), never Google Tasks.
 - Event Participants are stable Household Member IDs in Google private event properties only; Member Color is presentation.
+- Today is the home screen at `/` (Calendar is `/calendar`): one Lane of today's events per Active Member; choosing a member shows their Tasks beside their day (`docs/requirements.md`).
 - Calendar is a rolling Five-Day View with five-day paging and contrasted weekends. `docs/calendar.png` is an older seven-day capture.
 - Unimplemented rail items (Meals, Recipes) stay stubs until in scope. Sleep is a rail action that starts the idle slideshow (`docs/photos.md`), not a screen. Tasks follows `docs/design/tasks-design-spec.md` with Bounties per `docs/design/bounties-design-spec.md`; Rewards follows `docs/rewards.md`; parent admin follows `docs/admin.md`; Photos follows `docs/photos.md`.
-- Intentional on the wall: the Tasks `Add task` FAB (assigned Task create/edit) and the Settings `Update` button (deploys `origin/main` now instead of waiting for auto-deploy). Bounty creation stays admin-only.
+- Intentional on the wall: the Tasks `Add task` FAB and Today's `Add event` / `Add task` buttons (event and assigned Task create/edit) and the Settings `Update` button (deploys `origin/main` now instead of waiting for auto-deploy). Bounty creation stays admin-only.
 - Reimplement UI in `src/` from the design skill; the kit uses `window.DS` / CDN icons and will not run as Next modules.
 - Kiosk typing is the Chromium extension in `kiosk/osk/`, not a React overlay and not Onboard.
 - When changing, authoring, or reviewing code, follow `docs/code-design-principles.md`.

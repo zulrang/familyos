@@ -45,7 +45,7 @@ type TaskGroup = {
   bounties: ClaimedBounty[];
 };
 
-type TaskActions = {
+export type TaskActions = {
   onComplete: (row: Occurrence) => void;
   onSkip: (row: Occurrence) => void;
   onEdit: (row: Occurrence) => void;
@@ -231,6 +231,71 @@ function GroupTasks({
   );
 }
 
+function memberTaskGroup(
+  member: ActiveMember,
+  tasks: TasksViewRead,
+): TaskGroup {
+  const progress = tasks.progress.find((row) => row.member === member.id);
+  return {
+    key: `member:${member.id}`,
+    location: { kind: "member", member: member.id },
+    name: member.name,
+    palette: memberTaskPalette(member.color),
+    done: progress?.done ?? 0,
+    total: progress?.total ?? 0,
+    rows: occurrencesForColumn(
+      tasks.occurrences.filter(
+        (row) => row.assignee === member.id && row.state !== "expired",
+      ),
+    ),
+    bounties: tasks.bountyClaims.filter(
+      (row) => row.claim.member === member.id,
+    ),
+  };
+}
+
+function remainingCount(group: TaskGroup): number {
+  return (
+    group.rows.filter(
+      (row) => row.state === "pending" || row.state === "claimed",
+    ).length + group.bounties.filter(isUnfinishedBountyClaim).length
+  );
+}
+
+function MemberTasksSection({
+  group,
+  ...actions
+}: TaskActions & { group: TaskGroup }) {
+  return (
+    <section className={styles.focusTasks} aria-label={`${group.name} tasks`}>
+      <header className={styles.focusHeader}>
+        <GroupAvatar group={group} />
+        <div>
+          <h2>{group.name}’s tasks</h2>
+          <p>{remainingCount(group)} remaining</p>
+        </div>
+      </header>
+      <GroupTasks key={group.key} {...actions} group={group} />
+    </section>
+  );
+}
+
+/** One member's Tasks for today, usable outside the Family Board. */
+export function MemberTasks({
+  member,
+  tasks,
+  ...actions
+}: TaskActions & { member: ActiveMember; tasks: TasksViewRead }) {
+  const group = memberTaskGroup(member, tasks);
+  return (
+    <div className={styles.boardScreen}>
+      <div className={styles.memberTasks} style={paletteStyle(group.palette)}>
+        <MemberTasksSection {...actions} group={group} />
+      </div>
+    </div>
+  );
+}
+
 export function TasksBoard({
   members,
   tasks,
@@ -247,25 +312,7 @@ export function TasksBoard({
   const returnKey = useRef<string | null>(null);
   const boardHeaders = useRef(new Map<string, HTMLButtonElement>());
   const backRef = useRef<HTMLButtonElement>(null);
-  const groups: TaskGroup[] = members.map((member) => {
-    const progress = tasks.progress.find((row) => row.member === member.id);
-    return {
-      key: `member:${member.id}`,
-      location: { kind: "member", member: member.id },
-      name: member.name,
-      palette: memberTaskPalette(member.color),
-      done: progress?.done ?? 0,
-      total: progress?.total ?? 0,
-      rows: occurrencesForColumn(
-        tasks.occurrences.filter(
-          (row) => row.assignee === member.id && row.state !== "expired",
-        ),
-      ),
-      bounties: tasks.bountyClaims.filter(
-        (row) => row.claim.member === member.id,
-      ),
-    };
-  });
+  const groups = members.map((member) => memberTaskGroup(member, tasks));
   const selected = groups.find(
     (group) =>
       location.kind === "member" && group.location.member === location.member,
@@ -403,27 +450,7 @@ export function TasksBoard({
         ) : null}
         {selected ? (
           <div className={styles.focus} style={paletteStyle(selected.palette)}>
-            <section
-              className={styles.focusTasks}
-              aria-label={`${selected.name} tasks`}
-            >
-              <header className={styles.focusHeader}>
-                <GroupAvatar group={selected} />
-                <div>
-                  <h2>{selected.name}’s tasks</h2>
-                  <p>
-                    {selected.rows.filter(
-                      (row) =>
-                        row.state === "pending" || row.state === "claimed",
-                    ).length +
-                      selected.bounties.filter(isUnfinishedBountyClaim)
-                        .length}{" "}
-                    remaining
-                  </p>
-                </div>
-              </header>
-              <GroupTasks key={selected.key} {...actions} group={selected} />
-            </section>
+            <MemberTasksSection {...actions} group={selected} />
             <aside className={styles.focusSummary}>
               <div className={styles.progressSummary}>
                 <p>Today’s progress</p>

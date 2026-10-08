@@ -451,6 +451,20 @@
   margin-inline: auto;
   --task-title-size: clamp(24px, 2cqi, 32px);
 }
+.memberTasks {
+  --task-title-size: clamp(22px, 2.4cqi, 28px);
+}
+.memberTasks .groupTasks {
+  padding: 8px 24px 16px;
+}
+.memberTasks .taskRow {
+  min-height: 84px;
+  gap: 18px;
+}
+.memberTasks .check {
+  width: 50px;
+  height: 50px;
+}
 .focusTasks {
   background: var(--task-panel);
   border-radius: 24px;

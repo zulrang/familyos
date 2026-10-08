@@ -1,0 +1,272 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--surface-screen);
+  position: relative;
+}
+.date {
+  margin-right: 14px;
+  color: var(--text-muted);
+}
+.notice {
+  padding: 0 24px 12px;
+  font: var(--type-card-meta);
+  color: var(--text-muted);
+}
+.columns {
+  position: relative;
+  display: grid;
+  grid-template-columns: 76px repeat(var(--lanes), minmax(0, 1fr));
+  column-gap: 8px;
+  padding-right: 20px;
+}
+.head {
+  display: block;
+  padding: 10px 14px 12px;
+  border: none;
+  border-top: 6px solid var(--lane-accent);
+  border-radius: 18px 18px 0 0;
+  background: var(--lane-header);
+  color: var(--lane-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.head[data-dimmed="true"] {
+  border-top-color: var(--neutral-300);
+  background: var(--surface-sunken);
+  color: var(--text-body);
+  opacity: 0.5;
+}
+.head:focus-visible,
+.event:focus-visible,
+.allDayBar:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.headName {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font: var(--fw-semibold) 26px / 1.1 var(--font-display);
+}
+.headName > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.headProgress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  font: var(--fw-bold) 16px / 1 var(--font-sans);
+}
+.progress {
+  appearance: none;
+  display: block;
+  flex: 1;
+  min-width: 0;
+  height: 7px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--white);
+  overflow: hidden;
+}
+.progress::-webkit-progress-bar {
+  background: var(--white);
+  border-radius: var(--radius-pill);
+}
+.progress::-webkit-progress-value {
+  background: var(--lane-control);
+  border-radius: var(--radius-pill);
+}
+.progress::-moz-progress-bar {
+  background: var(--lane-control);
+  border-radius: var(--radius-pill);
+}
+.head[data-dimmed="true"] .progress::-webkit-progress-value {
+  background: var(--neutral-400);
+}
+.allDay {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  column-gap: 8px;
+  padding: 6px 20px 6px 0;
+  border-bottom: 1px solid var(--surface-grid-line);
+}
+.allDayLabel {
+  padding-right: 12px;
+  color: var(--text-muted);
+  font: var(--fw-semibold) 15px / 34px var(--font-sans);
+  text-align: right;
+}
+.allDayBars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.allDayBar {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 14px 0 6px;
+  border: none;
+  border-radius: var(--radius-pill);
+  color: var(--text-title);
+  font: var(--type-card-title);
+  cursor: pointer;
+}
+.allDayBar[data-everyone="true"] {
+  padding-left: 14px;
+  background: var(--neutral-200);
+}
+.allDayBar > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.allDayBar:disabled,
+.event:disabled {
+  cursor: default;
+}
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.grid {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
+.grid > .columns {
+  padding-block: 12px;
+}
+.hours {
+  position: relative;
+}
+.hours span {
+  position: absolute;
+  right: 12px;
+  color: var(--text-muted);
+  font: var(--fw-semibold) 16px / 1 var(--font-sans);
+  transform: translateY(-50%);
+}
+.lane {
+  position: relative;
+  background-color: var(--lane-panel);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(31, 42, 51, 0.07) 0,
+    rgba(31, 42, 51, 0.07) 1px,
+    transparent 1px,
+    transparent var(--hour)
+  );
+}
+.slot {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+.event {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-event);
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+}
+.event[data-everyone="true"] {
+  background: var(--neutral-200);
+  color: var(--text-body);
+}
+.event[data-layout="line"] {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding-block: 0;
+}
+.eventTitle {
+  min-width: 0;
+  font: var(--type-card-title);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* On one line the time gives way before the title does. */
+.eventTime {
+  flex-shrink: 1000;
+  min-width: 0;
+  font: var(--type-card-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eventWho {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-card-meta);
+}
+.event[data-layout="line"] .eventWho {
+  position: static;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+/* Spans every lane, to the right of the hour gutter. */
+.bands {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 84px;
+  right: 20px;
+  pointer-events: none;
+}
+.bands .event {
+  pointer-events: auto;
+}
+.nowLine {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--now-line);
+  pointer-events: none;
+}
+.nowLine::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: -4.5px;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--now-line);
+}
+.tasks {
+  flex: 1.35;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 20px 24px 12px;
+}

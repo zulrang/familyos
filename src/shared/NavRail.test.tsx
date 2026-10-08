@@ -28,3 +28,14 @@ test("tints the current section's slab in that section's tone", () => {
     "transparent",
   );
 });
+
+test("Today is the home section and leads the rail", () => {
+  render(<NavRail />);
+  const links = screen.getAllByRole("link");
+  expect(links[0]).toHaveAccessibleName("Today");
+  expect(links[0]).toHaveAttribute("href", "/");
+  expect(screen.getByRole("link", { name: "Calendar" })).toHaveAttribute(
+    "href",
+    "/calendar",
+  );
+});
