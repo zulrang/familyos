@@ -85,6 +85,11 @@ Upgrading a Mac that predates `releases/`: pull `main` (or press **Update**
 once), then run `./scripts/macos-server install`. It releases the checked-out
 commit, restarts into it, and installs the auto-deploy agent.
 
+Serving needs no network: `run` turns off pnpm's packageManager version
+download, so a pnpm upgrade plus an outage cannot stop `:3000`. Deploys use
+the first working git (Homebrew, then Command Line Tools) rather than the
+`/usr/bin/git` shim, which fails until an updated Xcode's license is accepted.
+
 Pi Chromium also ships `--force-renderer-accessibility` (screen-reader tree on every tap). `/etc/chromium.d/familyos-perf` strips that and raises raster threads. Repo copy: `kiosk/chromium.d/familyos-perf`.
 
 ```bash
