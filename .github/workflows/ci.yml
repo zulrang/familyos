@@ -31,7 +31,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run kiosk diagnostics tests
-        run: python3 -m unittest kiosk/test_observe.py
+        run: python3 -m unittest kiosk/test_observe.py kiosk/test_touch_guard.py
 
       - name: Run tests
         run: pnpm test

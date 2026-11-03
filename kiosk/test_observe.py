@@ -208,6 +208,53 @@ class ObserveTests(unittest.TestCase):
         self.assertEqual(observe.ready_url("http://mac.local:3000/"), "http://mac.local:3000/api/ready")
         self.assertEqual(observe.cpu_ticks("42 (chromium) S " + "0 " * 10 + "17 23 0"), 40)
 
+    def test_touch_guard_state_is_recorded_and_fallback_sets_verdict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "state.json")
+            now = 1_000_000.0
+            self.assertEqual(observe.touch_status(path, now)[0], "unavailable")
+            def write(**fields):
+                path.write_text(json.dumps({"updated": now, "device": "present", "mode": "multitouch",
+                                            "touch_idle_s": 12.5, "fallback_reports": 3, "rebinds": 1, **fields}))
+            write()
+            self.assertEqual(observe.touch_status(path, now),
+                             ("healthy", {"touch_idle_s": 12.5, "touch_fallback_reports": 3, "touch_rebinds": 1}))
+            write(mode="fallback")
+            self.assertEqual(observe.touch_status(path, now)[0], "fallback")
+            write(mode="unknown")
+            self.assertEqual(observe.touch_status(path, now)[0], "healthy")
+            write(device="absent")
+            self.assertEqual(observe.touch_status(path, now)[0], "absent")
+            write(updated=now - 120)
+            self.assertEqual(observe.touch_status(path, now)[0], "unavailable")
+            write(fallback_reports="SECRET", touch_idle_s=-1)
+            self.assertEqual(observe.touch_status(path, now)[1], {"touch_idle_s": None, "touch_fallback_reports": None, "touch_rebinds": 1})
+            path.write_text("[1, 2]")
+            self.assertEqual(observe.touch_status(path, now)[0], "unavailable")
+        self.assertEqual(observe.classify("healthy", "healthy", "healthy", "fallback"), "touch_fallback")
+        self.assertEqual(observe.classify("healthy", "healthy", "healthy", "absent"), "touch_absent")
+        self.assertEqual(observe.classify("healthy", "healthy", "healthy", "unavailable"), "healthy")
+        self.assertEqual(observe.classify("unavailable", "healthy", "healthy", "fallback"), "server_unreachable")
+
+    def test_sample_records_touch_fields(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FakeCDP)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory, "touch.json")
+            state.write_text(json.dumps({"updated": time.time(), "device": "present", "mode": "fallback",
+                                         "touch_idle_s": 99, "fallback_reports": 7, "rebinds": 0}))
+            journal = observe.Journal(Path(directory, "log"))
+            page = observe.PageProbe(base, observe.origin("http://familyos.local"), journal)
+            try:
+                record = observe.sample(journal, page, base, base + "/api/ready", state)
+                self.assertEqual((record["verdict"], record["touch"], record["touch_fallback_reports"], record["touch_idle_s"]),
+                                 ("touch_fallback", "fallback", 7, 99))
+            finally:
+                page.close()
+                server.shutdown()
+                server.server_close()
+
     def test_deadlines_and_kiosk_target_selection(self):
         observe.TIMEOUT = 0.15
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeCDP)
