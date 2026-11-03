@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+# Run on the Pi as root with touch-guard and its unit beside this script.
+source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+install -d -m 755 /usr/local/lib/familyos
+install -m 755 "$source_dir/touch-guard" /usr/local/lib/familyos/touch-guard
+install -m 644 "$source_dir/familyos-touch-guard.service" /etc/systemd/system/familyos-touch-guard.service
+systemctl daemon-reload
+systemctl enable familyos-touch-guard.service
+systemctl restart familyos-touch-guard.service

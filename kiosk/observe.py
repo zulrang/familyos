@@ -25,6 +25,8 @@ MAX_FRAME = 256 * 1024
 MAX_REQUESTS = 128
 MAX_LOG_BYTES = 2 * 1024 * 1024
 LOG_FILES = 4
+TOUCH_STATE = "/run/familyos-touch/state.json"
+TOUCH_STALE_S = 60
 ROUTES = frozenset(("auth", "calendars", "displays", "events", "lists", "mcp", "pair", "photos", "ready", "rewards", "settings", "tasklists", "tasks"))
 RESOURCE_TYPES = frozenset(("Document", "Fetch", "XHR", "Image", "Script", "Stylesheet", "Other"))
 EXCEPTIONS = frozenset(("Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "NetworkError", "DOMException"))
@@ -61,7 +63,7 @@ def ready_url(kiosk_url):
     return f"{parsed.scheme}://{parsed.netloc}/api/ready"
 
 
-def classify(server, browser, page):
+def classify(server, browser, page, touch="unavailable"):
     if server in ("not_ready", "http_error"):
         return "server_unhealthy"
     if server != "healthy":
@@ -69,6 +71,10 @@ def classify(server, browser, page):
     if browser != "healthy":
         return "browser_unreachable"
     if page == "healthy":
+        if touch == "fallback":
+            return "touch_fallback"
+        if touch == "absent":
+            return "touch_absent"
         return "healthy"
     if page == "timeout":
         return "renderer_unresponsive"
@@ -437,7 +443,31 @@ def available_memory_kib():
         return None
 
 
-def sample(journal, page, cdp_base, server_url):
+def touch_status(path, wall_now):
+    """Reads the touch guard's counters. Only states and counts are retained, never touch data."""
+    empty = {"touch_idle_s": None, "touch_fallback_reports": None, "touch_rebinds": None}
+    try:
+        data = json.loads(Path(path).read_text()[:4096])
+    except (OSError, ValueError):
+        return "unavailable", empty
+    if not isinstance(data, dict):
+        return "unavailable", empty
+    updated = data.get("updated")
+    if not isinstance(updated, (int, float)) or not -5 <= wall_now - updated <= TOUCH_STALE_S:
+        return "unavailable", empty
+
+    def number(key):
+        value = data.get(key)
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
+
+    fields = {"touch_idle_s": number("touch_idle_s"), "touch_fallback_reports": number("fallback_reports"),
+              "touch_rebinds": number("rebinds")}
+    if data.get("device") != "present":
+        return "absent", fields
+    return ("fallback" if data.get("mode") == "fallback" else "healthy"), fields
+
+
+def sample(journal, page, cdp_base, server_url, touch_state=TOUCH_STATE):
     started = time.monotonic()
     page.flush_dropped()
     server, build, server_status = server_probe(server_url)
@@ -447,7 +477,9 @@ def sample(journal, page, cdp_base, server_url):
     else:
         page.close()
         renderer = "unavailable"
-    record = journal.write("sample", verdict=classify(server, browser, renderer), server=server,
+    touch, touch_fields = touch_status(touch_state, time.time())
+    record = journal.write("sample", verdict=classify(server, browser, renderer, touch), server=server,
+                           touch=touch, **touch_fields,
                            server_http_status=server_status, browser=browser, renderer=renderer, build=build, chromium=version,
                            duration_ms=round((time.monotonic() - started) * 1000),
                            pending_requests=len(page.requests),
@@ -464,6 +496,7 @@ def main():
     parser.add_argument("--cdp-base", default="http://127.0.0.1:9222")
     parser.add_argument("--server-url")
     parser.add_argument("--page-origin")
+    parser.add_argument("--touch-state", default=TOUCH_STATE)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--read", type=int, metavar="N")
     args = parser.parse_args()
@@ -480,12 +513,12 @@ def main():
         parser.error("invalid kiosk page origin")
     server_url = args.server_url or ready_url(page_url)
     journal = Journal(args.log_dir)
-    journal.write("start", schema=1, collector_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
+    journal.write("start", schema=2, collector_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     page = PageProbe(args.cdp_base, page_origin, journal)
     try:
         while True:
             start = time.monotonic()
-            record = sample(journal, page, args.cdp_base, server_url)
+            record = sample(journal, page, args.cdp_base, server_url, args.touch_state)
             if args.once:
                 print(json.dumps(record, sort_keys=True))
                 return

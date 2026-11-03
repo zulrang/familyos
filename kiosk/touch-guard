@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Put the wall touchscreen back into multitouch mode when it falls back to mouse mode.
+
+The reference panel (Goodix 27c6:0529) exposes a multitouch interface, which
+hid-multitouch drives and the kiosk uses, and a mouse-mode interface, which
+udev hides from libinput because it would double taps. After an in-place USB
+reset the panel can come back reporting only on the mouse-mode interface, so
+every tap reaches the kernel and none reach the kiosk. Re-binding hid-multitouch
+makes it send the multitouch mode switch again.
+
+The guard reads raw reports from both interfaces (contents are never logged or
+stored). A report on the mouse-mode interface while the multitouch interface
+has been quiet means the panel fell back, so the guard re-binds hid-multitouch.
+It publishes counters to a small state file that familyos-observe records.
+"""
+
+import argparse
+import json
+import os
+import select
+import sys
+import time
+from pathlib import Path
+
+QUIET_S = 2.0  # multitouch silence that makes a mouse-mode report mean "fell back"
+COOLDOWN_S = 30.0  # minimum gap between re-binds, so a stubborn panel cannot loop
+RESCAN_S = 5.0  # how often to look for the panel when it is missing
+PUBLISH_S = 10.0  # state file refresh while nothing happens
+DRIVER = "hid-multitouch"
+
+
+class Guard:
+    """Decides when to re-bind. Times are monotonic seconds."""
+
+    def __init__(self, quiet_s=QUIET_S, cooldown_s=COOLDOWN_S):
+        self.quiet_s = quiet_s
+        self.cooldown_s = cooldown_s
+        self.mode = "unknown"  # multitouch | fallback | unknown (no report since start or re-bind)
+        self.last_touch = None
+        self.last_fallback = None
+        self.last_rebind = None
+        self.fallback_reports = 0
+        self.rebinds = 0
+
+    def touch_report(self, now):
+        self.last_touch = now
+        self.mode = "multitouch"
+
+    def fallback_report(self, now):
+        """Returns True when the caller should re-bind hid-multitouch now."""
+        self.fallback_reports += 1
+        self.last_fallback = now
+        if self.last_touch is not None and now - self.last_touch < self.quiet_s:
+            return False  # multitouch is live; this is not the fallback state
+        self.mode = "fallback"
+        if self.last_rebind is not None and now - self.last_rebind < self.cooldown_s:
+            return False
+        return True
+
+    def rebound(self, now):
+        self.rebinds += 1
+        self.last_rebind = now
+        self.mode = "unknown"
+
+    def state(self, now, wall_now, device):
+        def age(t):
+            return None if t is None else round(now - t, 1)
+        return {
+            "schema": 1,
+            "updated": round(wall_now, 3),
+            "device": device,
+            "mode": self.mode if device == "present" else "unknown",
+            "touch_idle_s": age(self.last_touch),
+            "fallback_reports": self.fallback_reports,
+            "last_fallback_age_s": age(self.last_fallback),
+            "rebinds": self.rebinds,
+            "last_rebind_age_s": age(self.last_rebind),
+        }
+
+
+class Panel:
+    """The two HID interfaces of one panel, found by VID:PID and USB interface number."""
+
+    def __init__(self, hid_id, touch_hidraw, fallback_hidraw, touch_driver):
+        self.hid_id = hid_id
+        self.touch_hidraw = touch_hidraw
+        self.fallback_hidraw = fallback_hidraw
+        self.touch_driver = touch_driver
+
+
+def find_panel(sys_root, vid, pid, touch_interface, fallback_interface):
+    devices = Path(sys_root, "bus/hid/devices")
+    prefix = f"0003:{vid.upper()}:{pid.upper()}."
+    by_interface = {}
+    for entry in sorted(devices.glob(prefix + "*")):
+        try:
+            interface = int((entry.resolve().parent / "bInterfaceNumber").read_text().strip(), 16)
+        except (OSError, ValueError):
+            continue
+        hidraw_dir = entry / "hidraw"
+        hidraws = sorted(p.name for p in hidraw_dir.iterdir()) if hidraw_dir.is_dir() else []
+        driver = (entry / "driver").resolve().name if (entry / "driver").exists() else None
+        by_interface[interface] = (entry.name, hidraws[0] if hidraws else None, driver)
+    touch = by_interface.get(touch_interface)
+    fallback = by_interface.get(fallback_interface)
+    if not touch or not fallback or not fallback[1] or (touch[2] == DRIVER and not touch[1]):
+        return None  # missing, or mid re-bind (driver bound, hidraw not created yet)
+    return Panel(touch[0], touch[1], fallback[1], touch[2])
+
+
+def rebind(sys_root, panel):
+    driver = Path(sys_root, "bus/hid/drivers", DRIVER)
+    if panel.touch_driver == DRIVER:
+        (driver / "unbind").write_text(panel.hid_id)
+    elif panel.touch_driver:
+        Path(sys_root, "bus/hid/drivers", panel.touch_driver, "unbind").write_text(panel.hid_id)
+    (driver / "bind").write_text(panel.hid_id)
+
+
+def publish(path, state):
+    path = Path(path)
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(state, sort_keys=True, separators=(",", ":")) + "\n")
+    os.chmod(tmp, 0o644)
+    tmp.replace(path)
+
+
+def log(message):
+    print(message, flush=True)
+
+
+def open_nodes(dev_root, panel):
+    fds = {}
+    for name, kind in ((panel.touch_hidraw, "touch"), (panel.fallback_hidraw, "fallback")):
+        if name:
+            fds[os.open(os.path.join(dev_root, name), os.O_RDONLY | os.O_NONBLOCK)] = kind
+    return fds
+
+
+def close_nodes(fds):
+    for fd in fds:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    fds.clear()
+
+
+def run(args, clock=time.monotonic, wall=time.time, stop=lambda: False):
+    guard = Guard(args.quiet, args.cooldown)
+    fds = {}
+    panel = None
+    last_publish = None
+    last_scan = None
+    try:
+        while not stop():
+            now = clock()
+            if panel is None and (last_scan is None or now - last_scan >= RESCAN_S):
+                last_scan = now
+                panel = find_panel(args.sys_root, args.vid, args.pid, args.touch_interface, args.fallback_interface)
+                if panel:
+                    try:
+                        fds = open_nodes(args.dev_root, panel)
+                        log(f"watching {panel.hid_id} (touch {panel.touch_hidraw}, fallback {panel.fallback_hidraw}, driver {panel.touch_driver})")
+                        if panel.touch_driver != DRIVER:
+                            log(f"{panel.hid_id} is not bound to {DRIVER}; binding it")
+                            rebind(args.sys_root, panel)
+                            guard.rebound(now)
+                            close_nodes(fds)
+                            panel = None
+                            last_scan = None
+                    except OSError as error:
+                        log(f"cannot open panel nodes: {error.strerror}")
+                        close_nodes(fds)
+                        panel = None
+            if last_publish is None or now - last_publish >= PUBLISH_S:
+                publish(args.state, guard.state(now, wall(), "present" if panel else "absent"))
+                last_publish = now
+            if not fds:
+                time.sleep(min(RESCAN_S, args.poll))
+                continue
+            ready = select.select(list(fds), [], [], args.poll)[0]
+            now = clock()
+            lost = False
+            for fd in ready:
+                try:
+                    data = os.read(fd, 4096)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    lost = True
+                    break
+                if not data:
+                    lost = True
+                    break
+                if fds[fd] == "touch":
+                    guard.touch_report(now)
+                elif guard.fallback_report(now):
+                    log(f"panel fell back to mouse mode; re-binding {DRIVER} for {panel.hid_id}")
+                    try:
+                        rebind(args.sys_root, panel)
+                        guard.rebound(now)
+                    except OSError as error:
+                        log(f"re-bind failed: {error.strerror}")
+                        guard.rebound(now)  # still start the cooldown
+                    lost = True  # hidraw nodes are recreated by the re-bind
+                    break
+            if lost:
+                close_nodes(fds)
+                panel = None
+                last_scan = None
+                last_publish = None
+            elif ready:
+                last_publish = None  # publish promptly after activity
+    finally:
+        close_nodes(fds)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--vid", default=os.environ.get("TOUCH_VID", "27c6"))
+    parser.add_argument("--pid", default=os.environ.get("TOUCH_PID", "0529"))
+    parser.add_argument("--touch-interface", type=int, default=int(os.environ.get("TOUCH_INTERFACE", "0")))
+    parser.add_argument("--fallback-interface", type=int, default=int(os.environ.get("FALLBACK_INTERFACE", "2")))
+    parser.add_argument("--state", default="/run/familyos-touch/state.json")
+    parser.add_argument("--sys-root", default="/sys")
+    parser.add_argument("--dev-root", default="/dev")
+    parser.add_argument("--quiet", type=float, default=QUIET_S)
+    parser.add_argument("--cooldown", type=float, default=COOLDOWN_S)
+    parser.add_argument("--poll", type=float, default=1.0)
+    parser.add_argument("--check", action="store_true", help="print what the guard would watch and exit")
+    args = parser.parse_args(argv)
+    if args.check:
+        panel = find_panel(args.sys_root, args.vid, args.pid, args.touch_interface, args.fallback_interface)
+        if not panel:
+            print("panel=absent")
+            return 1
+        print(f"panel={panel.hid_id} touch={panel.touch_hidraw} fallback={panel.fallback_hidraw} driver={panel.touch_driver}")
+        return 0
+    run(args)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

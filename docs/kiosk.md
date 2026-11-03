@@ -38,6 +38,39 @@ Pi 5 xHCI is hostile to some full-speed HID devices. The reference stack needed:
 
 Whether those are already applied on a given Pi is a local-doc fact.
 
+### Touch guard (mouse-mode fallback)
+
+The reference panel has a multitouch interface (USB interface 0, driven by
+`hid-multitouch`) and a mouse-mode interface (interface 2) that the udev rule
+above hides from libinput. After an in-place USB reset the panel can come back
+reporting only on the mouse-mode interface: the kernel still gets every tap, but
+the kiosk gets none, so the wall looks frozen (and stays at the Idle Dim
+brightness). Re-binding `hid-multitouch` sends the multitouch mode switch again
+and fixes it. Seen once on the reference unit, 2026-10-31.
+
+`familyos-touch-guard` is a root systemd service that does that re-bind
+automatically. It reads raw reports from both interfaces; a report on the
+mouse-mode interface while the multitouch interface has been quiet for 2 seconds
+means the panel fell back, so it re-binds (at most once every 30 seconds) and
+logs it to the journal. The tap that revealed the fallback is lost; the next one
+works. It never logs or stores report contents. It publishes counters to
+`/run/familyos-touch/state.json`, which `familyos-observe` records.
+
+Other panels: set `TOUCH_VID`, `TOUCH_PID`, `TOUCH_INTERFACE` and
+`FALLBACK_INTERFACE` in `/etc/default/familyos-touch-guard`.
+`touch-guard --check` prints the interfaces it would watch.
+
+```bash
+ssh -4 pi@fullpageos.local 'mkdir -m 700 -p /home/pi/familyos-touch-guard-stage'
+scp -4 kiosk/touch-guard kiosk/familyos-touch-guard.service kiosk/install-touch-guard pi@fullpageos.local:/home/pi/familyos-touch-guard-stage/
+ssh -4 pi@fullpageos.local 'sudo /home/pi/familyos-touch-guard-stage/install-touch-guard'
+ssh -4 pi@fullpageos.local 'sudo /usr/local/lib/familyos/touch-guard --check; journalctl -u familyos-touch-guard --no-pager -n 5'
+```
+
+Rollback: `sudo systemctl disable --now familyos-touch-guard.service`.
+`python3 -m unittest kiosk/test_touch_guard.py` exercises the guard against a
+fake sysfs tree.
+
 ## Display lag
 
 `pnpm dev` over LAN is the usual reason taps feel slow: unminified modules, Fast Refresh, React Strict Mode. For the kiosk, serve production instead:
@@ -215,7 +248,7 @@ PID/role/RSS/CPU ticks/threads/state/wait-channel, pending request count/age, an
 allowlisted network failures, slow requests (at least 2 seconds), HTTP errors,
 and JavaScript exception class. It does not read browser cookies or record raw
 URLs, queries, headers, bodies, console messages, page content, or provider IDs.
-It has no recovery action.
+It has no recovery action. It also records the touch guard's state (below).
 
 To install or update on the Pi, copy the three files to a private staging
 directory and run the installer there. This does not edit `start_gui` or any
@@ -246,7 +279,14 @@ a kernel deadlock. `browser_unreachable` means the browser CDP probe failed;
 `server_unreachable` means the Pi could not reach readiness, while
 `server_unhealthy` means readiness returned `ready:false` or an HTTP error;
 `page_unavailable`
-means no matching kiosk page or a page transport/error response. A `timeout`
+means no matching kiosk page or a page transport/error response.
+`touch_fallback` means everything else answered but the touchscreen is
+reporting on its mouse-mode interface (the kiosk receives no taps);
+`touch_absent` means the guard cannot find the panel. Each sample also has
+`touch` (`healthy`, `fallback`, `absent`, or `unavailable` when the guard is not
+running or its state is older than 60 seconds), `touch_idle_s` (seconds since
+the last multitouch report), `touch_fallback_reports` and `touch_rebinds`
+(counts since the guard started). A `timeout`
 state differs from `unavailable` (disconnect, rejected endpoint, or malformed
 response). Multiple failures can coexist, so inspect `server`, `browser`, and
 `renderer` rather than relying only on the verdict. `events_dropped` indicates
