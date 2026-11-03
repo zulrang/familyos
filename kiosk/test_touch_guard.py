@@ -94,6 +94,17 @@ class PanelTest(unittest.TestCase):
             self.assertEqual((drivers / "unbind").read_text(), "")
             self.assertEqual((drivers / "bind").read_text(), panel.hid_id)
 
+    def test_failed_open_closes_the_node_that_did_open(self):
+        with tempfile.TemporaryDirectory() as root:
+            sys_root, dev_root = fake_panel(root)
+            panel = guard_module.find_panel(sys_root, VID, PID, 0, 2)
+            (dev_root / panel.fallback_hidraw).unlink()
+            before = len(os.listdir("/proc/self/fd"))
+            for _ in range(5):
+                with self.assertRaises(OSError):
+                    guard_module.open_nodes(str(dev_root), panel)
+            self.assertEqual(len(os.listdir("/proc/self/fd")), before)
+
     def test_check_reports_panel(self):
         with tempfile.TemporaryDirectory() as root:
             sys_root, _ = fake_panel(root)

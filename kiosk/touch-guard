@@ -132,9 +132,13 @@ def log(message):
 
 def open_nodes(dev_root, panel):
     fds = {}
-    for name, kind in ((panel.touch_hidraw, "touch"), (panel.fallback_hidraw, "fallback")):
-        if name:
-            fds[os.open(os.path.join(dev_root, name), os.O_RDONLY | os.O_NONBLOCK)] = kind
+    try:
+        for name, kind in ((panel.touch_hidraw, "touch"), (panel.fallback_hidraw, "fallback")):
+            if name:
+                fds[os.open(os.path.join(dev_root, name), os.O_RDONLY | os.O_NONBLOCK)] = kind
+    except OSError:
+        close_nodes(fds)  # do not leak the node that did open
+        raise
     return fds
 
 
