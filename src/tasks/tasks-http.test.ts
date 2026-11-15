@@ -861,6 +861,46 @@ describe("Tasks HTTP", () => {
       assert.equal(response.status, 400, JSON.stringify(members));
     }
     assert.equal(loadDefinitions().length, before);
+
+    const household = {
+      familyName: "TasksHousehold",
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 1,
+    } as const;
+    await writeHousehold({
+      ...household,
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+        { id: "gran", name: "Gran", status: "retired" },
+      ],
+    });
+    try {
+      const retired = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Not all",
+            type: "chore",
+            recurrence: { kind: "daily" },
+            assignment: { kind: "each", members: ["dad", "gran"] },
+          }),
+        }),
+      );
+      assert.equal(retired.status, 400);
+      assert.equal(loadDefinitions().length, before);
+    } finally {
+      await writeHousehold({
+        ...household,
+        members: [
+          { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+          { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+        ],
+      });
+    }
   });
 
   test("public create and save reject every open assigned Task", async () => {

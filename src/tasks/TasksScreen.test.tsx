@@ -1135,6 +1135,29 @@ describe("TasksScreen", () => {
     });
   });
 
+  test("members picked for a new task carry between Fixed and Rotation", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    expect(screen.getByText(/Pick one or more/)).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Title"), "Tidy room");
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+    await user.click(screen.getByRole("button", { name: "Rotation" }));
+    expect(screen.queryByText(/Pick one or more/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Fixed" }));
+    expect(
+      screen.getByRole("button", { name: "Ellie", pressed: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dad", pressed: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add 2 tasks" })).toBeEnabled();
+  });
+
   test("the editor submits selected weekly days", async () => {
     const user = userEvent.setup();
     const store = emptyView();
@@ -1768,6 +1791,34 @@ describe("TasksScreen", () => {
     );
     return definition;
   }
+
+  test("switching an edited rotation to Fixed keeps only the first member", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = seedFixed(store, "Dishes", "dad");
+    store.definitions = [
+      {
+        ...definition,
+        assignment: { kind: "rotation", order: ["dad", "ellie"] },
+      },
+    ];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Edit Dishes" }));
+    await user.click(screen.getByRole("button", { name: "Fixed" }));
+    expect(screen.queryByText(/Pick one or more/)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Dad", pressed: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Ellie", pressed: false }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
 
   test("editing only the title overwrites the row without minting a new task", async () => {
     const user = userEvent.setup();

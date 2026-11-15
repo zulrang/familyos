@@ -875,6 +875,16 @@ function CreateSheet({
                 Rotation
               </Button>
             </div>
+            {!draft.task && draft.assignment.kind === "fixed" ? (
+              <p
+                style={{
+                  font: "var(--type-card-meta)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Pick one or more. Each person gets their own task.
+              </p>
+            ) : null}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {members.map((member) => {
                 const surface = memberSurface(member.color);
