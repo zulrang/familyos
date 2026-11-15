@@ -590,7 +590,10 @@ const CREATE_KEYS = new Set([
   "stars",
 ]);
 
-export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
+/** Every create field except assignment, which each caller parses itself. */
+function parseCreateTaskFields(
+  raw: unknown,
+): Omit<CreateTaskDraft, "assignment"> | null {
   if (!isRecord(raw)) return null;
   for (const key of Object.keys(raw)) {
     if (!CREATE_KEYS.has(key)) return null;
@@ -599,8 +602,7 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   const title = raw.title.trim();
   const type = parseTaskType(raw.type);
   const recurrence = parseRecurrence(raw.recurrence);
-  const assignment = parseAssignment(raw.assignment);
-  if (!title || !type || !recurrence || !assignment) return null;
+  if (!title || !type || !recurrence) return null;
   const stars = parseStarAmount(raw.stars === undefined ? 0 : raw.stars);
   if (stars === null) return null;
   let time: LocalTime | null = null;
@@ -608,7 +610,51 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
     time = parseLocalTime(raw.time);
     if (!time) return null;
   }
-  return { title, type, recurrence, assignment, time, stars };
+  return { title, type, recurrence, time, stars };
+}
+
+export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
+  const fields = parseCreateTaskFields(raw);
+  const assignment = isRecord(raw) ? parseAssignment(raw.assignment) : null;
+  return fields && assignment ? { ...fields, assignment } : null;
+}
+
+/**
+ * A request to create the same Task once for each chosen member: one
+ * independent fixed-assignment Task per member, written together. "each" is a
+ * create-time instruction only; it is never stored as an AssignmentPolicy.
+ */
+export type EachMemberTaskDraft = { kind: "each-member" } & Omit<
+  AssignedTaskDraft,
+  "assignment"
+> & {
+    assignment: { kind: "each"; members: NonEmpty<MemberId> };
+  };
+
+export function parseEachMemberTaskDraft(
+  raw: unknown,
+): EachMemberTaskDraft | null {
+  if (!isRecord(raw) || !isRecord(raw.assignment)) return null;
+  if (raw.assignment.kind !== "each") return null;
+  const members = parseNonEmpty(raw.assignment.members, nonEmptyString);
+  if (!members || new Set(members).size !== members.length) return null;
+  const fields = parseCreateTaskFields(raw);
+  return fields
+    ? { kind: "each-member", ...fields, assignment: { kind: "each", members } }
+    : null;
+}
+
+/** The fixed-assignment Task drafts an each-member request creates, in member order. */
+export function eachMemberDrafts(
+  draft: EachMemberTaskDraft,
+): NonEmpty<AssignedTaskDraft> {
+  const { kind: _kind, assignment, ...fields } = draft;
+  const [first, ...rest] = assignment.members;
+  const forMember = (member: MemberId): AssignedTaskDraft => ({
+    ...fields,
+    assignment: { kind: "fixed", member },
+  });
+  return [forMember(first), ...rest.map(forMember)];
 }
 
 const BOUNTY_CREATE_KEYS = new Set([

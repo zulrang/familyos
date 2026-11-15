@@ -467,7 +467,13 @@ Components: `TasksBoard`, `TaskRow`, the standard FAB.
   an existing Task runs the Section 4.3 flow. Type has no visual effect in v1
   (D14), and the star value is captured but rendered nowhere (D19). This wall
   editor is intentional alongside parent admin Task editing; Bounty creation
-  remains admin-only.
+  remains admin-only. A new fixed Task may choose several members: no member
+  is preselected unless the editor opened from a member's view, the save
+  button reads "Add N tasks", and `POST /api/tasks` with
+  `assignment: { kind: "each", members }` writes one independent fixed Task
+  (own id and lineage) per member in one transaction, or nothing if any member
+  is inactive or repeated. "each" is a create request only, never a stored
+  `AssignmentPolicy`. Editing an existing fixed Task keeps exactly one member.
 - **No points pill, no tabs, no expired rows, no star display.**
 
 ---
