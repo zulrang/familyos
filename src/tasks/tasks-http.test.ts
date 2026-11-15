@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
+import type { HouseholdConfig } from "@/settings/settings";
 import { parseTaskAdminCommand } from "./admin-types";
 import { correctBountyCompletion } from "./bounty-correction-store";
 import {
@@ -862,14 +863,14 @@ describe("Tasks HTTP", () => {
     }
     assert.equal(loadDefinitions().length, before);
 
-    const household = {
+    const household: Omit<HouseholdConfig, "members"> = {
       familyName: "TasksHousehold",
       calendarId: null,
       calendarTimeZone: null,
       listIds: [],
       timeZone: "America/New_York",
       configVersion: 1,
-    } as const;
+    };
     await writeHousehold({
       ...household,
       members: [
