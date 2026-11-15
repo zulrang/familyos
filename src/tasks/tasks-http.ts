@@ -28,12 +28,15 @@ import {
   loadStoredStarBalances,
   saveDefinition,
   tasksDatabase,
+  taskTransaction,
 } from "./store";
 import {
   type AssignmentPolicy,
   createDefinition,
+  eachMemberDrafts,
   isUnfinishedBountyClaim,
   parseBountyCommand,
+  parseEachMemberTaskDraft,
   parseEventBatch,
   parseLocalDate,
   parseSaveTaskDraft,
@@ -149,7 +152,8 @@ export async function handleCreateTask(
 ): Promise<Response> {
   const display = await requireTrustedDisplay(request);
   if (isUnauthorized(display)) return display;
-  const draft = parseTaskCreateDraft(await readJson(request));
+  const body = await readJson(request);
+  const draft = parseEachMemberTaskDraft(body) ?? parseTaskCreateDraft(body);
   if (!draft) return jsonError("invalid body", 400);
   const household = await readHousehold();
   const today = parseLocalDate(
@@ -157,6 +161,24 @@ export async function handleCreateTask(
   );
   if (!today) return jsonError("invalid household date", 500);
   reconcileRetiredMembers(household.members, today);
+  if (draft.kind === "each-member") {
+    const drafts = eachMemberDrafts(draft);
+    if (
+      drafts.some((each) =>
+        hasInactiveAssignee(each.assignment, household.members),
+      )
+    ) {
+      return jsonError("active member required", 400);
+    }
+    const definitions = taskTransaction(() =>
+      drafts.map((each) => {
+        const definition = createDefinition(each);
+        insertDefinition(definition);
+        return definition;
+      }),
+    );
+    return Response.json({ definitions });
+  }
   if (draft.kind === "bounty") {
     const definition = createBounty(tasksDatabase(), draft, today);
     return Response.json({ definition });

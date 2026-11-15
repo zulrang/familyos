@@ -117,54 +117,66 @@ function installFetch(
           title: string;
           type: "chore" | "routine";
           recurrence: LegacyTaskDefinition["recurrence"];
-          assignment: LegacyTaskDefinition["assignment"];
+          assignment:
+            | LegacyTaskDefinition["assignment"]
+            | { kind: "each"; members: string[] };
           time?: string;
           stars: number;
         };
-        const assignee =
-          body.assignment.kind === "fixed"
-            ? body.assignment.member
-            : body.assignment.kind === "rotation"
-              ? (body.assignment.order[0] ?? null)
-              : null;
-        const occ: Occurrence = {
-          state: "pending",
-          task: `task-${store.occurrences.length + 1}` as Occurrence["task"],
-          window: store.today,
-          title: body.title,
-          type: body.type,
-          lineage:
-            `lin-${store.occurrences.length + 1}` as Occurrence["lineage"],
-          time: (body.time ?? null) as Occurrence["time"],
-          assignee,
-        };
-        store.occurrences = [...store.occurrences, occ].sort((a, b) => {
-          if (a.time && b.time)
-            return a.time < b.time ? -1 : a.time > b.time ? 1 : 0;
-          if (a.time) return -1;
-          if (b.time) return 1;
-          return 0;
-        });
-        if (assignee) {
-          store.progress = store.progress.map((row) =>
-            row.member === assignee ? { ...row, total: row.total + 1 } : row,
-          );
-        }
-        store.definitions = [
-          ...store.definitions,
-          {
-            id: occ.task,
-            lineage: occ.lineage,
+        const requested = body.assignment;
+        const assignments: LegacyTaskDefinition["assignment"][] =
+          requested.kind === "each"
+            ? requested.members.map((member) => ({ kind: "fixed", member }))
+            : [requested];
+        const created = assignments.map((assignment) => {
+          const assignee =
+            assignment.kind === "fixed"
+              ? assignment.member
+              : assignment.kind === "rotation"
+                ? (assignment.order[0] ?? null)
+                : null;
+          const occ: Occurrence = {
+            state: "pending",
+            task: `task-${store.occurrences.length + 1}` as Occurrence["task"],
+            window: store.today,
             title: body.title,
             type: body.type,
-            recurrence: body.recurrence,
-            assignment: body.assignment,
-            time: occ.time,
-            stars: body.stars,
-            retiredAt: null,
-          },
-        ];
-        return json({ definition: { id: occ.task } });
+            lineage:
+              `lin-${store.occurrences.length + 1}` as Occurrence["lineage"],
+            time: (body.time ?? null) as Occurrence["time"],
+            assignee,
+          };
+          store.occurrences = [...store.occurrences, occ].sort((a, b) => {
+            if (a.time && b.time)
+              return a.time < b.time ? -1 : a.time > b.time ? 1 : 0;
+            if (a.time) return -1;
+            if (b.time) return 1;
+            return 0;
+          });
+          if (assignee) {
+            store.progress = store.progress.map((row) =>
+              row.member === assignee ? { ...row, total: row.total + 1 } : row,
+            );
+          }
+          store.definitions = [
+            ...store.definitions,
+            {
+              id: occ.task,
+              lineage: occ.lineage,
+              title: body.title,
+              type: body.type,
+              recurrence: body.recurrence,
+              assignment,
+              time: occ.time,
+              stars: body.stars,
+              retiredAt: null,
+            },
+          ];
+          return { id: occ.task };
+        });
+        return requested.kind === "each"
+          ? json({ definitions: created })
+          : json({ definition: created[0] });
       }
       if (
         method === "PUT" &&
@@ -1086,6 +1098,66 @@ describe("TasksScreen", () => {
     expect(submittedRecurrence(fetchMock)).toEqual({ kind: "daily" });
   });
 
+  test("a new task for several members creates one for each of them", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const fetchMock = installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    await user.type(screen.getByPlaceholderText("Title"), "Make bed");
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    expect(
+      screen.getByRole("button", { name: "Dad", pressed: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Ellie", pressed: true }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add 2 tasks" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "New task" })).toBeNull(),
+    );
+    for (const name of ["Dad", "Ellie"]) {
+      const column = screen.getByRole("heading", { name }).closest("section");
+      expect(column).toHaveTextContent("Make bed");
+      expect(column).toHaveTextContent("0/1");
+    }
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        urlOf(input) === "/api/tasks" &&
+        (init?.method ?? "GET").toUpperCase() === "POST",
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toMatchObject({
+      assignment: { kind: "each", members: ["dad", "ellie"] },
+    });
+  });
+
+  test("members picked for a new task carry between Fixed and Rotation", async () => {
+    const user = userEvent.setup();
+    installFetch(emptyView());
+    render(<TasksScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Add task" }));
+    expect(screen.getByText(/Pick one or more/)).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Title"), "Tidy room");
+    await user.click(screen.getByRole("button", { name: "Ellie" }));
+    await user.click(screen.getByRole("button", { name: "Dad" }));
+    await user.click(screen.getByRole("button", { name: "Rotation" }));
+    expect(screen.queryByText(/Pick one or more/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Fixed" }));
+    expect(
+      screen.getByRole("button", { name: "Ellie", pressed: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dad", pressed: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add 2 tasks" })).toBeEnabled();
+  });
+
   test("the editor submits selected weekly days", async () => {
     const user = userEvent.setup();
     const store = emptyView();
@@ -1094,6 +1166,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Bins");
+    await user.click(screen.getByRole("button", { name: "Dad" }));
     await user.click(screen.getByRole("button", { name: "Weekly" }));
     expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Mon" }));
@@ -1114,6 +1187,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Change filter");
+    await user.click(screen.getByRole("button", { name: "Dad" }));
     await user.click(screen.getByRole("button", { name: "Once" }));
     expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
     await user.type(screen.getByLabelText("Date"), "2026-09-01");
@@ -1133,6 +1207,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Water filter");
+    await user.click(screen.getByRole("button", { name: "Dad" }));
     await user.click(screen.getByRole("button", { name: "Monthly" }));
     const day = screen.getByRole("spinbutton", { name: "Day of month" });
     await user.clear(day);
@@ -1156,6 +1231,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Feed cat");
+    await user.click(screen.getByRole("button", { name: "Dad" }));
     const stars = screen.getByRole("textbox", { name: "Stars" });
     await user.clear(stars);
     await user.type(stars, "6");
@@ -1214,6 +1290,7 @@ describe("TasksScreen", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add task" }));
     await user.type(screen.getByPlaceholderText("Title"), "Dishes rotation");
+    await user.click(screen.getByRole("button", { name: "Dad" }));
     await user.click(screen.getByRole("button", { name: "Weekly" }));
     await user.click(screen.getByRole("button", { name: "Mon" }));
     await user.click(screen.getByRole("button", { name: "Rotation" }));
@@ -1714,6 +1791,34 @@ describe("TasksScreen", () => {
     );
     return definition;
   }
+
+  test("switching an edited rotation to Fixed keeps only the first member", async () => {
+    const user = userEvent.setup();
+    const store = emptyView();
+    const definition = seedFixed(store, "Dishes", "dad");
+    store.definitions = [
+      {
+        ...definition,
+        assignment: { kind: "rotation", order: ["dad", "ellie"] },
+      },
+    ];
+    installFetch(store);
+    render(<TasksScreen />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "View tasks for Dad" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Edit Dishes" }));
+    await user.click(screen.getByRole("button", { name: "Fixed" }));
+    expect(screen.queryByText(/Pick one or more/)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Dad", pressed: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Ellie", pressed: false }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
 
   test("editing only the title overwrites the row without minting a new task", async () => {
     const user = userEvent.setup();

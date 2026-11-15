@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
+import type { HouseholdConfig } from "@/settings/settings";
 import { parseTaskAdminCommand } from "./admin-types";
 import { correctBountyCompletion } from "./bounty-correction-store";
 import {
@@ -797,6 +798,110 @@ describe("Tasks HTTP", () => {
       }),
     );
     assert.equal(missing.status, 400);
+  });
+
+  test("create for each member writes one fixed Task per member", async () => {
+    const created = await handleCreateTask(
+      req("http://familyos.test/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Make bed",
+          type: "routine",
+          recurrence: { kind: "daily" },
+          assignment: { kind: "each", members: ["dad", "ellie"] },
+          time: "07:30",
+          stars: 2,
+        }),
+      }),
+    );
+    assert.equal(created.status, 200);
+    const body = (await created.json()) as {
+      definitions: LegacyTaskDefinition[];
+    };
+    assert.deepEqual(
+      body.definitions.map((definition) => definition.assignment),
+      [
+        { kind: "fixed", member: "dad" },
+        { kind: "fixed", member: "ellie" },
+      ],
+    );
+    assert.notEqual(body.definitions[0]?.lineage, body.definitions[1]?.lineage);
+    const stored = loadDefinitions().filter((row) => row.title === "Make bed");
+    assert.equal(stored.length, 2);
+    for (const row of stored) {
+      assert.equal(row.type, "routine");
+      assert.equal(row.time, "07:30");
+      assert.equal(row.stars, 2);
+    }
+
+    const res = await handleGetTasks(req("http://familyos.test/api/tasks"));
+    const view = (await res.json()) as TasksViewRead;
+    assert.deepEqual(
+      view.occurrences
+        .filter((row) => row.title === "Make bed")
+        .map((row) => row.assignee)
+        .sort(),
+      ["dad", "ellie"],
+    );
+  });
+
+  test("create for each member writes nothing unless every member is valid", async () => {
+    const before = loadDefinitions().length;
+    for (const members of [[], ["dad", "ghost"], ["dad", "dad"]]) {
+      const response = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Not all",
+            type: "chore",
+            recurrence: { kind: "daily" },
+            assignment: { kind: "each", members },
+          }),
+        }),
+      );
+      assert.equal(response.status, 400, JSON.stringify(members));
+    }
+    assert.equal(loadDefinitions().length, before);
+
+    const household: Omit<HouseholdConfig, "members"> = {
+      familyName: "TasksHousehold",
+      calendarId: null,
+      calendarTimeZone: null,
+      listIds: [],
+      timeZone: "America/New_York",
+      configVersion: 1,
+    };
+    await writeHousehold({
+      ...household,
+      members: [
+        { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+        { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+        { id: "gran", name: "Gran", status: "retired" },
+      ],
+    });
+    try {
+      const retired = await handleCreateTask(
+        req("http://familyos.test/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: "Not all",
+            type: "chore",
+            recurrence: { kind: "daily" },
+            assignment: { kind: "each", members: ["dad", "gran"] },
+          }),
+        }),
+      );
+      assert.equal(retired.status, 400);
+      assert.equal(loadDefinitions().length, before);
+    } finally {
+      await writeHousehold({
+        ...household,
+        members: [
+          { id: "dad", name: "Dad", status: "active", color: "#a9d8d2" },
+          { id: "ellie", name: "Ellie", status: "active", color: "#f6c9c5" },
+        ],
+      });
+    }
   });
 
   test("public create and save reject every open assigned Task", async () => {

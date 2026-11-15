@@ -72,8 +72,12 @@ type RecurrenceRequest =
   | { kind: "weekly"; days: Weekday[] }
   | { kind: "monthly"; day: number };
 
+/**
+ * Fixed holds every chosen member: a new Task is created once per member, while
+ * an existing Task keeps exactly one (the editor replaces rather than adds).
+ */
 type DraftAssignment =
-  | { kind: "fixed"; member: string }
+  | { kind: "fixed"; members: string[] }
   | { kind: "rotation"; order: string[] };
 
 type Draft = DraftFields & {
@@ -147,10 +151,39 @@ function sheetFromDefinition(definition: LegacyTaskDefinition): Draft | null {
     title: definition.title,
     type: definition.type,
     recurrence: toDraftRecurrence(definition.recurrence),
-    assignment: definition.assignment,
+    assignment:
+      definition.assignment.kind === "fixed"
+        ? { kind: "fixed", members: [definition.assignment.member] }
+        : definition.assignment,
     time: definition.time ?? "",
     stars: String(definition.stars),
   };
+}
+
+/**
+ * The assignment the API receives, or null while the sheet cannot be saved. A
+ * new fixed Task asks for one Task per chosen member; an edit keeps one member.
+ */
+function assignmentRequest(
+  draft: Draft,
+):
+  | { kind: "fixed"; member: string }
+  | { kind: "each"; members: string[] }
+  | { kind: "rotation"; order: string[] }
+  | null {
+  const { assignment } = draft;
+  if (assignment.kind === "rotation") {
+    return assignment.order.length > 0 ? assignment : null;
+  }
+  if (draft.task) {
+    const [member] = assignment.members;
+    return member && assignment.members.length === 1
+      ? { kind: "fixed", member }
+      : null;
+  }
+  return assignment.members.length > 0
+    ? { kind: "each", members: assignment.members }
+    : null;
 }
 
 type MemberAction = { kind: "claim-bounty"; bounty: AvailableBounty };
@@ -537,11 +570,10 @@ export function useTasksWorkspace(): TasksWorkspace {
     const title = sheet.title.trim();
     const recurrence = parseDraftRecurrence(sheet.recurrence);
     const stars = Number(sheet.stars);
+    const assignment = assignmentRequest(sheet);
     if (
       !title ||
-      (sheet.assignment.kind === "fixed" && !sheet.assignment.member) ||
-      (sheet.assignment.kind === "rotation" &&
-        sheet.assignment.order.length === 0) ||
+      !assignment ||
       !recurrence ||
       !Number.isSafeInteger(stars) ||
       stars < 0
@@ -558,7 +590,7 @@ export function useTasksWorkspace(): TasksWorkspace {
           title,
           type: sheet.type,
           recurrence,
-          assignment: sheet.assignment,
+          assignment,
           ...(sheet.time ? { time: sheet.time } : {}),
           stars,
         }),
@@ -612,10 +644,7 @@ export function useTasksWorkspace(): TasksWorkspace {
           title: "",
           type: "chore",
           recurrence: { kind: "daily" },
-          assignment: {
-            kind: "fixed",
-            member: member ?? members[0]?.id ?? "",
-          },
+          assignment: { kind: "fixed", members: member ? [member] : [] },
           time: "",
           stars: "0",
         },
@@ -734,12 +763,9 @@ function CreateSheet({
   }, []);
   const closeFromBackdrop = useRef(false);
   const stars = Number(draft.stars);
-  const assignmentReady =
-    (draft.assignment.kind === "fixed" && draft.assignment.member.length > 0) ||
-    (draft.assignment.kind === "rotation" && draft.assignment.order.length > 0);
   const canSave =
     draft.title.trim().length > 0 &&
-    assignmentReady &&
+    assignmentRequest(draft) !== null &&
     parseDraftRecurrence(draft.recurrence) !== null &&
     Number.isSafeInteger(stars) &&
     stars >= 0;
@@ -815,10 +841,12 @@ function CreateSheet({
                     ...draft,
                     assignment: {
                       kind: "fixed",
-                      member:
+                      members:
                         draft.assignment.kind === "fixed"
-                          ? draft.assignment.member
-                          : (draft.assignment.order[0] ?? members[0]?.id ?? ""),
+                          ? draft.assignment.members
+                          : draft.task
+                            ? draft.assignment.order.slice(0, 1)
+                            : draft.assignment.order,
                     },
                   })
                 }
@@ -838,7 +866,7 @@ function CreateSheet({
                       order:
                         draft.assignment.kind === "rotation"
                           ? draft.assignment.order
-                          : [draft.assignment.member],
+                          : draft.assignment.members,
                     },
                   })
                 }
@@ -847,15 +875,24 @@ function CreateSheet({
                 Rotation
               </Button>
             </div>
+            {!draft.task && draft.assignment.kind === "fixed" ? (
+              <p
+                style={{
+                  font: "var(--type-card-meta)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Pick one or more. Each person gets their own task.
+              </p>
+            ) : null}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {members.map((member) => {
                 const surface = memberSurface(member.color);
-                const position =
+                const chosen =
                   draft.assignment.kind === "fixed"
-                    ? draft.assignment.member === member.id
-                      ? 0
-                      : -1
-                    : draft.assignment.order.indexOf(member.id);
+                    ? draft.assignment.members
+                    : draft.assignment.order;
+                const position = chosen.indexOf(member.id);
                 const selected = position >= 0;
                 return (
                   <button
@@ -864,23 +901,18 @@ function CreateSheet({
                     aria-label={member.name}
                     aria-pressed={selected}
                     onClick={() => {
-                      if (draft.assignment.kind !== "rotation") {
-                        onChange({
-                          ...draft,
-                          assignment: { kind: "fixed", member: member.id },
-                        });
-                        return;
-                      }
+                      const toggled = selected
+                        ? chosen.filter((id) => id !== member.id)
+                        : [...chosen, member.id];
                       onChange({
                         ...draft,
-                        assignment: {
-                          kind: "rotation",
-                          order: selected
-                            ? draft.assignment.order.filter(
-                                (id) => id !== member.id,
-                              )
-                            : [...draft.assignment.order, member.id],
-                        },
+                        assignment:
+                          draft.assignment.kind === "rotation"
+                            ? { kind: "rotation", order: toggled }
+                            : {
+                                kind: "fixed",
+                                members: draft.task ? [member.id] : toggled,
+                              },
                       });
                     }}
                     style={{
@@ -1023,7 +1055,12 @@ function CreateSheet({
             disabled={busy || !canSave}
             onClick={onSave}
           >
-            {draft.task ? "Save" : "Add"}
+            {draft.task
+              ? "Save"
+              : draft.assignment.kind === "fixed" &&
+                  draft.assignment.members.length > 1
+                ? `Add ${draft.assignment.members.length} tasks`
+                : "Add"}
           </Button>
         </div>
       </div>
