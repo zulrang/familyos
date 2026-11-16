@@ -16,8 +16,9 @@ rules.
 Implemented surfaces are pairing, Today in `src/today/` (the wall's home
 screen), the Five-Day Calendar in `src/calendar/`,
 Lists in `src/lists/` (Google Tasks), Tasks in `src/tasks/`, Photos in
-`src/photos/`, Settings, Rewards in `src/rewards/`, parent admin, and the fixed
-left rail. Meals and Recipes remain stubs. Sleep on the rail starts the idle
+`src/photos/`, Settings, Rewards in `src/rewards/`, parent admin, External
+Task Sources in `src/external-task-sources/` (Tasks pulled from Derupt,
+ADR 0013), and the fixed left rail. Meals and Recipes remain stubs. Sleep on the rail starts the idle
 slideshow (see `docs/photos.md`).
 
 ## Guiding Principles
@@ -81,6 +82,13 @@ Event reads and edits go through `useHouseholdCalendar`
 (`src/calendar/HouseholdCalendar.tsx`) and task reads and changes through
 `useTasksWorkspace` (`src/tasks/TasksWorkspace.tsx`), the same hooks the
 Calendar and Tasks screens use.
+
+External Task Sources (`src/external-task-sources/`) is the second composing
+slice (ADR 0013). A poller started from `src/instrumentation.ts` pulls Derupt
+hand-offs and writes each as one assigned Chore through the Tasks slice's
+`createExternalTask`, whose receipt table (`external_task_requests`) commits
+with the definition so redelivery never duplicates a Task. The default member
+lives in Household Configuration; poller status is per-process memory.
 
 **Decision: Stable IDs are the only Event Participant identity**
 - Choice: FamilyOS stores stable Household Member IDs in Google event private

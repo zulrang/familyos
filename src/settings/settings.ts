@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { RosterError } from "@/members/members";
+import type { MemberId, RosterError } from "@/members/members";
 import {
   type HouseholdMember,
   migrateRoster,
@@ -20,8 +20,20 @@ export type HouseholdConfig = {
   listIds: HouseholdListId[];
   /** IANA Household Time Zone — dates on every Display. */
   timeZone: string;
+  /**
+   * Stable ID of the member who receives an External Task Source request that
+   * names nobody. It may name a member retired since; intake then refuses.
+   */
+  externalTaskDefaultMember: MemberId | null;
   configVersion: number;
 };
+
+/** A configuration to store; settings added later default when omitted. */
+export type HouseholdConfigInput = Omit<
+  HouseholdConfig,
+  "externalTaskDefaultMember"
+> &
+  Partial<Pick<HouseholdConfig, "externalTaskDefaultMember">>;
 
 const EMPTY: HouseholdConfig = {
   familyName: "Family",
@@ -30,8 +42,13 @@ const EMPTY: HouseholdConfig = {
   calendarTimeZone: null,
   listIds: [],
   timeZone: fallbackTimeZone(),
+  externalTaskDefaultMember: null,
   configVersion: 1,
 };
+
+function parseMemberReference(raw: unknown): MemberId | null {
+  return typeof raw === "string" && raw.length > 0 ? raw : null;
+}
 
 /**
  * Normalize a Household List selection: non-empty string IDs, first-seen order,
@@ -88,6 +105,9 @@ function normalize(
     calendarTimeZone: raw.calendarTimeZone ?? null,
     listIds: parseListIds(raw.listIds),
     timeZone: parseTimeZone(raw.timeZone),
+    externalTaskDefaultMember: parseMemberReference(
+      raw.externalTaskDefaultMember,
+    ),
     configVersion: version,
   };
 }
@@ -133,7 +153,9 @@ export async function readHousehold(): Promise<HouseholdConfig> {
 }
 
 // Replace atomically so readers never observe a partially written roster.
-export async function writeHousehold(next: HouseholdConfig): Promise<void> {
+export async function writeHousehold(
+  next: HouseholdConfigInput,
+): Promise<void> {
   const file = householdFile();
   await mkdir(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -202,6 +224,10 @@ async function updateHouseholdUnlocked(
     listIds:
       patch.listIds === undefined ? cur.listIds : parseListIds(patch.listIds),
     timeZone: patch.timeZone === undefined ? cur.timeZone : patch.timeZone,
+    externalTaskDefaultMember:
+      patch.externalTaskDefaultMember === undefined
+        ? cur.externalTaskDefaultMember
+        : patch.externalTaskDefaultMember,
     configVersion: cur.configVersion + 1,
   };
   await writeHousehold(next);

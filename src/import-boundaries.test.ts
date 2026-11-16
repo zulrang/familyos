@@ -91,6 +91,25 @@ describe("slice import boundaries", () => {
     }
   });
 
+  test("External Task Sources may write Tasks", () => {
+    const hits = scanFile(
+      "src/external-task-sources/intake-store.ts",
+      `import { createExternalTask } from "@/tasks/external-task-store";
+       import { readHousehold } from "@/settings/settings";`,
+    );
+    assert.equal(hits.length, 0);
+  });
+
+  test("no slice may import External Task Sources", () => {
+    for (const from of ["src/tasks/store.ts", "src/settings/settings.ts"]) {
+      const hits = scanFile(
+        from,
+        `import { planExternalTask } from "@/external-task-sources/intake";`,
+      );
+      assert.equal(hits.length, 1, from);
+    }
+  });
+
   test("a route file may import its slice", () => {
     const hits = scanFile(
       "src/app/page.tsx",

@@ -138,7 +138,8 @@ _Avoid_: Household Album, synced album
 
 **Household Configuration**:
 The shared, versioned settings of one Household — family name, members,
-Household Calendar, and selected Household Lists.
+Household Calendar, selected Household Lists, and the default member for
+External Task Sources.
 _Avoid_: Kiosk settings, device preferences
 
 **Household List**:
@@ -243,6 +244,13 @@ and reassignment attributes it to the current credited member. Skips, claims,
 Grants, and Spends are not included; retired members and closed Task Windows
 are.
 _Avoid_: Star Balance, Window (for the range)
+
+**External Task Source**:
+Another app from which FamilyOS pulls requests for Tasks, such as Derupt. Each
+request becomes at most one assigned Chore, due once, for the member it names
+or else the Household's default member; a request FamilyOS cannot use is
+refused back to the source, never guessed at.
+_Avoid_: integration, webhook, import, inbox
 
 **Reward**:
 A household-wide choice with a positive Star cost. A retired Reward is no longer

@@ -229,8 +229,15 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <nav className={styles.nav} aria-label="Parent admin">
               <Link href="/admin">Home</Link>
               {(
-                ["tasks", "bounties", "members", "stars", "rewards"] as const
-              ).map((section) => (
+                [
+                  ["tasks", "Tasks"],
+                  ["bounties", "Bounties"],
+                  ["members", "Members"],
+                  ["stars", "Stars"],
+                  ["rewards", "Rewards"],
+                  ["task-sources", "Task sources"],
+                ] as const
+              ).map(([section, label]) => (
                 <Link
                   key={section}
                   href={`/admin/${section}`}
@@ -238,7 +245,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                     pathname === `/admin/${section}` ? "page" : undefined
                   }
                 >
-                  {section[0].toUpperCase() + section.slice(1)}
+                  {label}
                 </Link>
               ))}
             </nav>

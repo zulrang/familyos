@@ -99,11 +99,19 @@ previous Spend details. The wall Rewards screen handles goal selection and
 spending. See [Rewards](rewards.md). Rewards owed and delivery are deferred to
 [issue #82](https://github.com/zulrang/familyos/issues/82).
 
+**Task sources:** choose the default member who receives External Task Source
+Tasks that name nobody, and see each source's status: on, off or stopped, the
+last successful check, and the last problem code. The default is stored by
+member ID; if that member retires, admin asks for a new choice and requests
+without a member are refused until then. Tokens are set in the server
+environment, not here. See [External Task Sources](external-task-sources.md).
+
 Calendar, Google lists, photos, and system settings are not part of this admin release.
 
 ## Mobile workflow
 
-The home screen links to Tasks, Bounties, Members, Stars, and Rewards. Section
+The home screen links to Tasks, Bounties, Members, Stars, Rewards, and Task
+sources. Section
 navigation stays available on list pages. Create/edit actions for Tasks, Members, and
 Rewards open a rounded drawer covering 90% of the viewport. In Stars, select a
 member and choose **Adjust balance** to open the same drawer for Grant/Spend.
