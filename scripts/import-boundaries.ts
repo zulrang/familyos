@@ -23,10 +23,11 @@ const SLICES = new Set([
   "rewards",
 ]);
 /**
- * Slices whose capability is a view across several feature slices (ADR 0011).
+ * Slices whose capability is built on other feature slices (ADR 0011): Today
+ * views Calendar and Tasks; External Task Sources writes Tasks (ADR 0013).
  * They may import any slice; no slice may import them.
  */
-const COMPOSING_SLICES = new Set(["today"]);
+const COMPOSING_SLICES = new Set(["today", "external-task-sources"]);
 const SETTINGS_HTTP = "src/settings/settings-http.ts";
 const LIST_CALENDARS = "src/calendar/google-events";
 
@@ -36,7 +37,7 @@ function posix(p: string): string {
 
 function srcDirOf(repoPath: string): string | null {
   const m = stripExt(repoPath).match(
-    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos|admin|rewards|today)(?:\/|$)/,
+    /^src\/(calendar|lists|displays|members|settings|shared|tasks|photos|admin|rewards|today|external-task-sources)(?:\/|$)/,
   );
   return m ? m[1] : null;
 }

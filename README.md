@@ -42,8 +42,8 @@ and restart. Open `/admin` on home Wi-Fi; display pairing is not required.
 Safari's **Share → Add to Home Screen** provides standalone access. Sessions
 lock after 15 minutes of inactivity; the header's lock icon locks immediately.
 
-Manage assigned Tasks, Bounties, Members, Rewards, completion corrections, and
-Star Balances.
+Manage assigned Tasks, Bounties, Members, Rewards, completion corrections,
+Star Balances, and the default member for External Task Sources.
 Create/edit forms and star adjustments open in 90%-height drawers with their own
 scrolling area and a circular down-chevron close button. The list stays visible
 underneath.
@@ -58,6 +58,12 @@ Agents can manage assigned Tasks and confirm Reward Spends through `/api/mcp`.
 Set a separate `FAMILYOS_MCP_TOKEN` to enable access; see the
 [MCP setup and tool guide](docs/mcp.md).
 
+## External Task Sources
+
+FamilyOS can pull Tasks handed off from [Derupt](https://github.com/zulrang/derupt.app)
+and add each as an assigned Chore. Set `FAMILYOS_DERUPT_TOKEN` and choose a
+default member in admin; see [External Task Sources](docs/external-task-sources.md).
+
 ## Touchscreen
 
 The main UI is laid out for a **1080p landscape** capacitive panel, read from across a kitchen. Mouse/trackpad in a desktop browser is fine for development. The parent admin interface is designed for iPhones.
@@ -71,6 +77,7 @@ The intended wall stack is a Raspberry Pi 5 running [FullPageOS](https://github.
 - [docs/SSD.md](docs/SSD.md) — architecture, boundaries, and remaining gaps
 - [docs/kiosk.md](docs/kiosk.md) — FullPageOS Chromium, OSK extension, idle dim
 - [docs/admin.md](docs/admin.md) — parent admin setup, workflows, and mobile screenshots
+- [docs/external-task-sources.md](docs/external-task-sources.md) — receiving Tasks from Derupt
 - [docs/photos.md](docs/photos.md) — Google Photos setup and slideshow behavior
 - [docs/requirements.md](docs/requirements.md) — v1 scope
 - [docs/design/tasks-design-spec.md](docs/design/tasks-design-spec.md) — assigned Tasks and legacy compatibility

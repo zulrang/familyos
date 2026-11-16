@@ -98,6 +98,26 @@ BEGIN
   SELECT RAISE(ABORT, 'star_adjustments are append-only');
 END;
 
+CREATE TABLE IF NOT EXISTS external_task_requests (
+  source TEXT NOT NULL,
+  request TEXT NOT NULL,
+  task TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  PRIMARY KEY (source, request)
+);
+
+CREATE TRIGGER IF NOT EXISTS external_task_requests_no_update
+BEFORE UPDATE ON external_task_requests
+BEGIN
+  SELECT RAISE(ABORT, 'external_task_requests are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS external_task_requests_no_delete
+BEFORE DELETE ON external_task_requests
+BEGIN
+  SELECT RAISE(ABORT, 'external_task_requests are append-only');
+END;
+
 CREATE TRIGGER IF NOT EXISTS definitions_no_delete
 BEFORE DELETE ON definitions
 BEGIN

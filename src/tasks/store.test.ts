@@ -94,6 +94,7 @@ describe("tasks sqlite store", () => {
         "completion_credits",
         "definitions",
         "events",
+        "external_task_requests",
         "legacy_bounty_completion_carriers",
         "legacy_bounty_correction_receipts",
         "legacy_bounty_migrations",

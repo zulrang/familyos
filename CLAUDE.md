@@ -17,8 +17,9 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Settings: `src/settings/`
 - Displays / pairing UI + HTTP: `src/displays/` (session/auth in `src/shared/`)
 - Members: `src/members/`
+- External Task Sources (Derupt hand-offs → assigned Tasks; poller started in `src/instrumentation.ts`): `src/external-task-sources/`
 - Shared UI + infra: `src/shared/` (`shared/ui/` for design-system primitives)
-- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. `today` is the one composing slice: it may import `calendar` and `tasks`, and nothing imports it (ADR 0011). Display session/auth lives in `shared/` so APIs need not import `displays`. Enforced by `scripts/import-boundaries.ts`.
+- Import rule: slices → `shared` (and platform `members` / household `settings`); `shared` never imports a slice; feature slices do not import each other. `today` and `external-task-sources` are composing slices: they may import feature slices (Today: `calendar`, `tasks`; External Task Sources: `tasks`), and nothing imports them (ADR 0011, 0013). Display session/auth lives in `shared/` so APIs need not import `displays`. Enforced by `scripts/import-boundaries.ts`.
 
 ## Do Not Touch
 - The `nextjs-agent-rules` block in `AGENTS.md` (`next dev` rewrites it)
@@ -49,6 +50,7 @@ Component tests need `// @vitest-environment jsdom` (Vitest default env is `node
 - Design contracts: `.cursor/skills/familyos-design/readme.md`
 - Wall Pi / OSK: `docs/kiosk.md` · machine-local: `docs/kiosk.local.md` (gitignored)
 - Decision records: `docs/adr/`
+- External Task Sources (Derupt) setup and rules: `docs/external-task-sources.md`
 - Mobile browser previews or access from a remote PC: `docs/agents/mobile-preview.md`
 
 ## Agent skills

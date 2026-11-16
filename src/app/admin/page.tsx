@@ -95,6 +95,24 @@ export default function AdminHome() {
             </p>
           </div>
         </Link>
+        <Link
+          href="/admin/task-sources"
+          className={`${styles.card} ${styles.cardLink}`}
+        >
+          <span
+            aria-hidden="true"
+            className={styles.tile}
+            style={{ background: "#dfe7f3" }}
+          >
+            ⇣
+          </span>
+          <div>
+            <h2>Task sources</h2>
+            <p>
+              Choose who gets tasks sent from other apps, and check the link.
+            </p>
+          </div>
+        </Link>
       </div>
       <AdminUpdate />
       <p className={styles.muted} style={{ marginTop: 28 }}>
