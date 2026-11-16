@@ -107,6 +107,25 @@ load_node() {
   command -v pnpm >/dev/null || die "pnpm not found (corepack enable && corepack prepare pnpm@10.33.2 --activate)."
 }
 
+# /usr/bin/git is an xcrun shim that stops working whenever Xcode wants its
+# license accepted again (after Xcode and macOS updates), which used to stall
+# auto-deploy. Use the first git binary that actually runs.
+GIT_BIN=""
+git() {
+  if [[ -z "$GIT_BIN" ]]; then
+    local candidate
+    for candidate in /opt/homebrew/bin/git /usr/local/bin/git \
+      /Library/Developer/CommandLineTools/usr/bin/git /usr/bin/git; do
+      if [[ -x "$candidate" ]] && "$candidate" --version >/dev/null 2>&1; then
+        GIT_BIN=$candidate
+        break
+      fi
+    done
+    [[ -n "$GIT_BIN" ]] || die "No working git. Run: xcode-select --install (or brew install git)."
+  fi
+  command "$GIT_BIN" "$@"
+}
+
 xml_escape() {
   local s=$1
   s=${s//&/&amp;}
@@ -503,6 +522,10 @@ deploy_sha() {
 cmd_run() {
   load_node
   export FAMILYOS_DATA_DIR="${FAMILYOS_DATA_DIR:-$ROOT/data}"
+  # Serving must not need the internet. When the installed pnpm differs from
+  # package.json's packageManager, pnpm otherwise downloads that version from
+  # npm before running `start`, and the server crash-loops while offline.
+  export npm_config_manage_package_manager_versions=false
   if [[ -L "$CURRENT" ]]; then
     cd "$CURRENT/"
   elif [[ -f "$ROOT/.next/BUILD_ID" ]]; then
