@@ -1,6 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "./data-path";
+import { withFileQueue, writeAtomicJson } from "./json-file";
 
 export type Tokens = {
   access_token: string;
@@ -13,6 +14,11 @@ export type ProviderConnection = {
   tokens: Tokens | null;
   oauthState: string | null;
   providerConnectionId: string | null;
+};
+
+export type RefreshTarget = {
+  providerConnectionId: string | null;
+  refreshToken: string;
 };
 
 const EMPTY: ProviderConnection = {
@@ -47,7 +53,7 @@ async function scrubLegacyCredentials(): Promise<void> {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!("tokens" in parsed) && !("oauthState" in parsed)) return;
     const { tokens: _tokens, oauthState: _oauth, ...rest } = parsed;
-    await writeFile(legacyFile(), `${JSON.stringify(rest, null, 2)}\n`);
+    await writeAtomicJson(legacyFile(), rest, { pretty: true });
   } catch {
     /* no legacy file */
   }
@@ -67,16 +73,32 @@ async function migrateFromLegacy(): Promise<ProviderConnection | null> {
   }
 }
 
-export async function readProvider(): Promise<ProviderConnection> {
+async function readProviderFileUnlocked(): Promise<ProviderConnection> {
+  const raw = await readFile(providerFile(), "utf8");
+  return normalize(JSON.parse(raw) as Partial<ProviderConnection>);
+}
+
+async function readProviderUnlocked(): Promise<ProviderConnection> {
   try {
-    const raw = await readFile(providerFile(), "utf8");
-    return normalize(JSON.parse(raw) as Partial<ProviderConnection>);
+    return await readProviderFileUnlocked();
+  } catch {
+    return { ...EMPTY };
+  }
+}
+
+async function writeProviderUnlocked(next: ProviderConnection): Promise<void> {
+  await writeAtomicJson(providerFile(), next, { mode: 0o600, pretty: true });
+}
+
+async function migrateOrEmptyUnlocked(): Promise<ProviderConnection> {
+  try {
+    return await readProviderFileUnlocked();
   } catch {
     const legacy = await migrateFromLegacy();
     if (legacy) {
       // Persist first, then scrub — same order as establish/clear so a failed
       // write still leaves credentials recoverable from kiosk.json.
-      await writeProvider(legacy);
+      await writeProviderUnlocked(legacy);
       await scrubLegacyCredentials();
       return legacy;
     }
@@ -84,20 +106,27 @@ export async function readProvider(): Promise<ProviderConnection> {
   }
 }
 
-// ponytail: last-write-wins JSON; upgrade to a write queue if OAuth refresh races show up.
+export async function readProvider(): Promise<ProviderConnection> {
+  try {
+    return await readProviderFileUnlocked();
+  } catch {
+    return withFileQueue(providerFile(), migrateOrEmptyUnlocked);
+  }
+}
+
 export async function writeProvider(next: ProviderConnection): Promise<void> {
-  const file = providerFile();
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
+  return withFileQueue(providerFile(), () => writeProviderUnlocked(next));
 }
 
 export async function patchProvider(
   patch: Partial<ProviderConnection>,
 ): Promise<ProviderConnection> {
-  const cur = await readProvider();
-  const next = { ...cur, ...patch };
-  await writeProvider(next);
-  return next;
+  return withFileQueue(providerFile(), async () => {
+    const cur = await migrateOrEmptyUnlocked();
+    const next = { ...cur, ...patch };
+    await writeProviderUnlocked(next);
+    return next;
+  });
 }
 
 /** Bind tokens to a Google account identity (userinfo `sub`). */
@@ -105,24 +134,77 @@ export async function establishProviderConnection(
   accountId: string,
   tokens: Tokens,
 ): Promise<ProviderConnection> {
-  const next: ProviderConnection = {
-    tokens,
-    oauthState: null,
-    providerConnectionId: accountId,
-  };
-  await writeProvider(next);
-  await scrubLegacyCredentials();
-  return next;
+  return withFileQueue(providerFile(), async () => {
+    const next: ProviderConnection = {
+      tokens,
+      oauthState: null,
+      providerConnectionId: accountId,
+    };
+    await writeProviderUnlocked(next);
+    await scrubLegacyCredentials();
+    return next;
+  });
 }
 
-export async function clearProviderConnection(): Promise<ProviderConnection> {
-  const cur = await readProvider();
+async function clearProviderUnlocked(
+  cur: ProviderConnection,
+): Promise<ProviderConnection> {
   const next: ProviderConnection = {
     tokens: null,
     oauthState: null,
     providerConnectionId: cur.providerConnectionId,
   };
-  await writeProvider(next);
+  await writeProviderUnlocked(next);
   await scrubLegacyCredentials();
   return next;
+}
+
+export async function clearProviderConnection(): Promise<ProviderConnection> {
+  return withFileQueue(providerFile(), async () => {
+    const cur = await migrateOrEmptyUnlocked();
+    return clearProviderUnlocked(cur);
+  });
+}
+
+function matchesRefreshTarget(
+  cur: ProviderConnection,
+  expected: RefreshTarget,
+): boolean {
+  return (
+    cur.tokens !== null &&
+    cur.providerConnectionId === expected.providerConnectionId &&
+    cur.tokens.refresh_token === expected.refreshToken
+  );
+}
+
+/**
+ * Commit refreshed tokens only if the provider connection and refresh token
+ * still match the session that initiated the refresh (e.g., no concurrent logout
+ * or account switch).
+ */
+export async function commitRefreshedTokens(
+  expected: RefreshTarget,
+  next: Tokens,
+): Promise<boolean> {
+  return withFileQueue(providerFile(), async () => {
+    const cur = await readProviderUnlocked();
+    if (!matchesRefreshTarget(cur, expected)) return false;
+    await writeProviderUnlocked({ ...cur, tokens: next });
+    return true;
+  });
+}
+
+/**
+ * Clear tokens after `invalid_grant` only if the connection and refresh token
+ * still match the refresh that failed.
+ */
+export async function clearProviderConnectionIfMatching(
+  expected: RefreshTarget,
+): Promise<boolean> {
+  return withFileQueue(providerFile(), async () => {
+    const cur = await readProviderUnlocked();
+    if (!matchesRefreshTarget(cur, expected)) return false;
+    await clearProviderUnlocked(cur);
+    return true;
+  });
 }

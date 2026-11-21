@@ -788,4 +788,191 @@ describe("Household Calendar outage cache", () => {
       true,
     );
   });
+
+  test("calendar cache evicts oldest ranges beyond MAX_CACHED_RANGES", async () => {
+    await restoreLive();
+    const { MAX_CACHED_RANGES } = await import("./calendar-cache.ts");
+    const cacheDir = path.join(
+      dataRoot,
+      "cache",
+      "calendar",
+      "acct-a",
+      encodeURIComponent("cal-household"),
+    );
+    await rm(cacheDir, { recursive: true, force: true });
+
+    const ranges: Array<{ from: string; to: string }> = [];
+    for (let i = 1; i <= MAX_CACHED_RANGES + 4; i++) {
+      const day = String(i).padStart(2, "0");
+      const nextDay = String(i + 1).padStart(2, "0");
+      const range = {
+        from: new Date(fromDateOnly(`2026-09-${day}`, TZ)).toISOString(),
+        to: new Date(fromDateOnly(`2026-09-${nextDay}`, TZ)).toISOString(),
+      };
+      ranges.push(range);
+      const res = await handleListEvents(req(eventsUrl(range)), gateway);
+      assert.equal(res.status, 200);
+    }
+
+    const files = (await readdir(cacheDir)).filter((name) =>
+      name.endsWith(".json"),
+    );
+    assert.equal(files.length, MAX_CACHED_RANGES);
+
+    gateway.offline = true;
+    const firstRange = ranges[0];
+    const lastRange = ranges[ranges.length - 1];
+    assert.ok(firstRange);
+    assert.ok(lastRange);
+    const evicted = await handleListEvents(req(eventsUrl(firstRange)), gateway);
+    assert.equal(evicted.status, 503);
+
+    const retained = await handleListEvents(req(eventsUrl(lastRange)), gateway);
+    assert.equal(retained.status, 200);
+    assert.equal(((await retained.json()) as { stale: boolean }).stale, true);
+  });
+
+  test("event create, single-instance move, and single-instance delete refresh only affected cached ranges", async () => {
+    await restoreLive();
+    const cacheDir = path.join(
+      dataRoot,
+      "cache",
+      "calendar",
+      "acct-a",
+      encodeURIComponent("cal-household"),
+    );
+    await rm(cacheDir, { recursive: true, force: true });
+
+    const rangeA = {
+      from: new Date(fromDateOnly("2026-10-01", TZ)).toISOString(),
+      to: new Date(fromDateOnly("2026-10-05", TZ)).toISOString(),
+    };
+    const rangeB = {
+      from: new Date(fromDateOnly("2026-10-10", TZ)).toISOString(),
+      to: new Date(fromDateOnly("2026-10-15", TZ)).toISOString(),
+    };
+    const rangeC = {
+      from: new Date(fromDateOnly("2026-10-20", TZ)).toISOString(),
+      to: new Date(fromDateOnly("2026-10-25", TZ)).toISOString(),
+    };
+
+    const listCalls: Array<{ from: string; to: string }> = [];
+    const spyGateway: typeof gateway = {
+      get store() {
+        return gateway.store;
+      },
+      get offline() {
+        return gateway.offline;
+      },
+      set offline(value: boolean) {
+        gateway.offline = value;
+      },
+      async listEvents(calendarId, timeMin, timeMax, timeZone) {
+        listCalls.push({ from: timeMin, to: timeMax });
+        return gateway.listEvents(calendarId, timeMin, timeMax, timeZone);
+      },
+      insertEvent: (calendarId, w, timeZone) =>
+        gateway.insertEvent(calendarId, w, timeZone),
+      updateEvent: (calendarId, id, w, scope, timeZone, expectedVersion) =>
+        gateway.updateEvent(
+          calendarId,
+          id,
+          w,
+          scope,
+          timeZone,
+          expectedVersion,
+        ),
+      deleteEvent: (calendarId, id, scope, timeZone, expectedVersion) =>
+        gateway.deleteEvent(calendarId, id, scope, timeZone, expectedVersion),
+    };
+
+    for (const r of [rangeA, rangeB, rangeC]) {
+      assert.equal(
+        (await handleListEvents(req(eventsUrl(r)), spyGateway)).status,
+        200,
+      );
+    }
+
+    listCalls.length = 0;
+    const createRes = await handleCreateEvent(
+      req("http://familyos.test/api/events", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Scoped event",
+          allDay: true,
+          startMs: fromDateOnly("2026-10-02", TZ),
+          endMs: fromDateOnly("2026-10-03", TZ),
+          participantIds: [],
+        }),
+      }),
+      spyGateway,
+    );
+    assert.equal(createRes.status, 200);
+    const created = (await createRes.json()) as { event: CalEvent };
+    assert.deepEqual(listCalls, [rangeA]);
+
+    listCalls.length = 0;
+    const moveRes = await handleUpdateEvent(
+      req(`http://familyos.test/api/events/${created.event.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: "Moved event",
+          allDay: true,
+          startMs: fromDateOnly("2026-10-12", TZ),
+          endMs: fromDateOnly("2026-10-13", TZ),
+          participantIds: [],
+          scope: "this",
+          expectedVersion: created.event.expectedVersion,
+        }),
+      }),
+      created.event.id,
+      spyGateway,
+    );
+    assert.equal(moveRes.status, 200);
+    const moved = (await moveRes.json()) as { event: CalEvent };
+    assert.deepEqual(
+      listCalls.map((c) => c.from).sort(),
+      [rangeA.from, rangeB.from].sort(),
+    );
+
+    spyGateway.offline = true;
+    const staleA = (await (
+      await handleListEvents(req(eventsUrl(rangeA)), spyGateway)
+    ).json()) as { events: CalEvent[]; stale: boolean };
+    const staleB = (await (
+      await handleListEvents(req(eventsUrl(rangeB)), spyGateway)
+    ).json()) as { events: CalEvent[]; stale: boolean };
+    assert.equal(staleA.stale, true);
+    assert.equal(staleB.stale, true);
+    assert.equal(
+      staleA.events.some((e) => e.id === created.event.id),
+      false,
+    );
+    assert.equal(
+      staleB.events.some((e) => e.id === created.event.id),
+      true,
+    );
+
+    spyGateway.offline = false;
+    listCalls.length = 0;
+    const deleteRes = await handleDeleteEvent(
+      req(`http://familyos.test/api/events/${created.event.id}?scope=this`, {
+        method: "DELETE",
+        body: JSON.stringify({ expectedVersion: moved.event.expectedVersion }),
+      }),
+      created.event.id,
+      spyGateway,
+    );
+    assert.equal(deleteRes.status, 200);
+    assert.deepEqual(listCalls, [rangeB]);
+
+    spyGateway.offline = true;
+    const staleBAfterDelete = (await (
+      await handleListEvents(req(eventsUrl(rangeB)), spyGateway)
+    ).json()) as { events: CalEvent[]; stale: boolean };
+    assert.equal(
+      staleBAfterDelete.events.some((e) => e.id === created.event.id),
+      false,
+    );
+  });
 });

@@ -1,5 +1,5 @@
 import { AuthError } from "@/shared/auth-error";
-import { gfetch } from "@/shared/google";
+import { gfetch, GOOGLE_MEDIA_TIMEOUT_MS } from "@/shared/google";
 
 const API = "https://photospicker.googleapis.com/v1";
 
@@ -181,7 +181,9 @@ export async function listPickerPhotos(sessionId: string) {
 export async function fetchPhoto(baseUrl: string) {
   let response: Response;
   try {
-    response = await gfetch(`${baseUrl}=w1920-h1080`);
+    response = await gfetch(`${baseUrl}=w1920-h1080`, {
+      timeoutMs: GOOGLE_MEDIA_TIMEOUT_MS,
+    });
   } catch (error) {
     if (error instanceof AuthError) throw error;
     throw new PhotosError("google_transport", 502, transportCode(error));

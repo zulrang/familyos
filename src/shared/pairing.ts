@@ -1,5 +1,10 @@
-import { createHash, randomBytes, randomInt } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  createHash,
+  randomBytes,
+  randomInt,
+  timingSafeEqual,
+} from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { renderUnicodeCompact } from "uqr";
@@ -13,6 +18,7 @@ import {
 } from "@/shared/idle-dim";
 import { parseUiScale, type UiScale } from "@/shared/ui-scale";
 import { dataDir } from "./data-path";
+import { withFileQueue, writeAtomicJson } from "./json-file";
 import { formatStartupPairingAnnouncement, pairingUrl } from "./pairing-qr";
 
 export const DISPLAY_COOKIE = "fos_display";
@@ -84,7 +90,7 @@ function isDisplayRow(
   );
 }
 
-async function readStore(): Promise<PairingStore> {
+async function readStoreUnlocked(): Promise<PairingStore> {
   try {
     const raw = await readFile(storePath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<PairingStore>;
@@ -98,10 +104,8 @@ async function readStore(): Promise<PairingStore> {
   }
 }
 
-// ponytail: last-write-wins JSON; upgrade to a write queue if concurrent pair races show up.
-async function writeStore(store: PairingStore): Promise<void> {
-  await mkdir(path.dirname(storePath()), { recursive: true });
-  await writeFile(storePath(), `${JSON.stringify(store, null, 2)}\n`);
+async function writeStoreUnlocked(store: PairingStore): Promise<void> {
+  await writeAtomicJson(storePath(), store, { mode: 0o600, pretty: true });
 }
 
 function hashCredential(token: string): string {
@@ -143,10 +147,17 @@ export async function resolveTrustedDisplay(
   const dot = token.indexOf(".");
   if (dot <= 0) return null;
   const id = token.slice(0, dot);
-  const store = await readStore();
+  const store = await readStoreUnlocked();
   const row = store.displays.find((d) => d.id === id);
   if (!row || row.revokedAt != null) return null;
-  if (row.credentialHash !== hashCredential(token)) return null;
+  const expectedBuf = Buffer.from(row.credentialHash);
+  const actualBuf = Buffer.from(hashCredential(token));
+  if (
+    expectedBuf.length !== actualBuf.length ||
+    !timingSafeEqual(expectedBuf, actualBuf)
+  ) {
+    return null;
+  }
   return {
     id: row.id,
     createdAt: row.createdAt,
@@ -159,7 +170,7 @@ export async function resolveTrustedDisplay(
 
 /** Public Display records — never include credential material. */
 export async function listTrustedDisplays(): Promise<DisplaySummary[]> {
-  const store = await readStore();
+  const store = await readStoreUnlocked();
   return store.displays
     .filter((d) => d.revokedAt == null)
     .map(({ id, createdAt, revokedAt }) => ({ id, createdAt, revokedAt }));
@@ -169,12 +180,14 @@ export async function setDisplayUiScale(
   displayId: string,
   uiScale: UiScale,
 ): Promise<boolean> {
-  const store = await readStore();
-  const row = store.displays.find((d) => d.id === displayId);
-  if (!row || row.revokedAt != null) return false;
-  row.uiScale = uiScale;
-  await writeStore(store);
-  return true;
+  return withFileQueue(storePath(), async () => {
+    const store = await readStoreUnlocked();
+    const row = store.displays.find((d) => d.id === displayId);
+    if (!row || row.revokedAt != null) return false;
+    row.uiScale = uiScale;
+    await writeStoreUnlocked(store);
+    return true;
+  });
 }
 
 export async function setDisplayIdleDim(
@@ -182,32 +195,38 @@ export async function setDisplayIdleDim(
   idleDimAfterMs: IdleDimAfterMs,
   idleDimTo: IdleDimTo,
 ): Promise<boolean> {
-  const store = await readStore();
-  const row = store.displays.find((d) => d.id === displayId);
-  if (!row || row.revokedAt != null) return false;
-  row.idleDimAfterMs = idleDimAfterMs;
-  row.idleDimTo = idleDimTo;
-  await writeStore(store);
-  return true;
+  return withFileQueue(storePath(), async () => {
+    const store = await readStoreUnlocked();
+    const row = store.displays.find((d) => d.id === displayId);
+    if (!row || row.revokedAt != null) return false;
+    row.idleDimAfterMs = idleDimAfterMs;
+    row.idleDimTo = idleDimTo;
+    await writeStoreUnlocked(store);
+    return true;
+  });
 }
 
 /** Emit one short-lived pairing code when no Trusted Display exists yet. */
 export async function emitStartupPairingCode(
   now = Date.now(),
 ): Promise<string | null> {
-  const store = await readStore();
-  const hasTrusted = store.displays.some((d) => d.revokedAt == null);
-  if (hasTrusted) return null;
-  return mintPendingCode(store, now);
+  return withFileQueue(storePath(), async () => {
+    const store = await readStoreUnlocked();
+    const hasTrusted = store.displays.some((d) => d.revokedAt == null);
+    if (hasTrusted) return null;
+    return mintPendingCode(store, now);
+  });
 }
 
 /** Any Trusted Display may mint a short-lived code to pair another Display. */
 export async function createPairingCode(
   now = Date.now(),
 ): Promise<{ code: string; expiresAt: number }> {
-  const store = await readStore();
-  const code = await mintPendingCode(store, now);
-  return { code, expiresAt: now + PAIRING_CODE_TTL_MS };
+  return withFileQueue(storePath(), async () => {
+    const store = await readStoreUnlocked();
+    const code = await mintPendingCode(store, now);
+    return { code, expiresAt: now + PAIRING_CODE_TTL_MS };
+  });
 }
 
 async function mintPendingCode(
@@ -220,7 +239,7 @@ async function mintPendingCode(
     expiresAt: now + PAIRING_CODE_TTL_MS,
     consumedAt: null,
   };
-  await writeStore(store);
+  await writeStoreUnlocked(store);
   const origin = guessedPairingOrigin();
   console.log(
     formatStartupPairingAnnouncement(
@@ -258,46 +277,48 @@ export async function pairWithCode(
   const trimmed = code.trim().toUpperCase();
   if (!trimmed) return { ok: false, reason: "missing" };
 
-  const store = await readStore();
-  const pending = store.pendingCode;
-  if (!pending || pending.code !== trimmed) {
-    return { ok: false, reason: "invalid" };
-  }
-  if (pending.consumedAt != null) {
-    return { ok: false, reason: "reused" };
-  }
-  if (pending.expiresAt <= now) {
-    return { ok: false, reason: "expired" };
-  }
+  return withFileQueue(storePath(), async () => {
+    const store = await readStoreUnlocked();
+    const pending = store.pendingCode;
+    if (!pending || pending.code !== trimmed) {
+      return { ok: false, reason: "invalid" };
+    }
+    if (pending.consumedAt != null) {
+      return { ok: false, reason: "reused" };
+    }
+    if (pending.expiresAt <= now) {
+      return { ok: false, reason: "expired" };
+    }
 
-  const id = newDisplayId();
-  const token = newCredentialToken(id);
-  const display: StoredDisplay = {
-    id,
-    credentialHash: hashCredential(token),
-    createdAt: now,
-    revokedAt: null,
-    uiScale: 1,
-    idleDimAfterMs: IDLE_DIM_DEFAULT_AFTER_MS,
-    idleDimTo: IDLE_DIM_DEFAULT_TO,
-  };
-  pending.consumedAt = now;
-  store.pendingCode = pending;
-  store.displays.push(display);
-  await writeStore(store);
-
-  return {
-    ok: true,
-    token,
-    display: {
+    const id = newDisplayId();
+    const token = newCredentialToken(id);
+    const display: StoredDisplay = {
       id,
-      createdAt: display.createdAt,
+      credentialHash: hashCredential(token),
+      createdAt: now,
       revokedAt: null,
-      uiScale: display.uiScale,
-      idleDimAfterMs: display.idleDimAfterMs,
-      idleDimTo: display.idleDimTo,
-    },
-  };
+      uiScale: 1,
+      idleDimAfterMs: IDLE_DIM_DEFAULT_AFTER_MS,
+      idleDimTo: IDLE_DIM_DEFAULT_TO,
+    };
+    pending.consumedAt = now;
+    store.pendingCode = pending;
+    store.displays.push(display);
+    await writeStoreUnlocked(store);
+
+    return {
+      ok: true,
+      token,
+      display: {
+        id,
+        createdAt: display.createdAt,
+        revokedAt: null,
+        uiScale: display.uiScale,
+        idleDimAfterMs: display.idleDimAfterMs,
+        idleDimTo: display.idleDimTo,
+      },
+    };
+  });
 }
 
 export type RevokeResult =
@@ -308,11 +329,13 @@ export async function revokeDisplay(
   displayId: string,
   now = Date.now(),
 ): Promise<RevokeResult> {
-  const store = await readStore();
-  const row = store.displays.find((d) => d.id === displayId);
-  if (!row) return { ok: false, reason: "missing" };
-  if (row.revokedAt != null) return { ok: false, reason: "already_revoked" };
-  row.revokedAt = now;
-  await writeStore(store);
-  return { ok: true };
+  return withFileQueue(storePath(), async () => {
+    const store = await readStoreUnlocked();
+    const row = store.displays.find((d) => d.id === displayId);
+    if (!row) return { ok: false, reason: "missing" };
+    if (row.revokedAt != null) return { ok: false, reason: "already_revoked" };
+    row.revokedAt = now;
+    await writeStoreUnlocked(store);
+    return { ok: true };
+  });
 }

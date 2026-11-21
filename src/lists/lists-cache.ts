@@ -1,7 +1,8 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { HouseholdList, ListItem } from "@/lists/types";
 import { dataDir } from "@/shared/data-path";
+import { writeAtomicJson } from "@/shared/json-file";
 
 function cacheRoot(): string {
   return path.join(dataDir(), "cache", "lists");
@@ -61,10 +62,7 @@ export async function putHouseholdListCache(
   connectionId: string,
   list: HouseholdList,
 ): Promise<void> {
-  const file = listFile(connectionId, list.id);
-  await mkdir(path.dirname(file), { recursive: true });
-  // ponytail: last-write-wins JSON; upgrade if cache writes start racing.
-  await writeFile(file, `${JSON.stringify(list)}\n`);
+  await writeAtomicJson(listFile(connectionId, list.id), list);
 }
 
 async function getHouseholdListCache(

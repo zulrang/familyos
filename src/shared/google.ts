@@ -1,12 +1,20 @@
+import path from "node:path";
 import { AuthError } from "@/shared/auth-error";
+import { dataDir } from "@/shared/data-path";
 import { googleClient } from "@/shared/google-env";
 import {
-  clearProviderConnection,
+  clearProviderConnectionIfMatching,
+  commitRefreshedTokens,
   establishProviderConnection,
-  patchProvider,
+  type RefreshTarget,
   readProvider,
   type Tokens,
 } from "@/shared/provider";
+
+export const GOOGLE_API_TIMEOUT_MS = 10_000;
+export const GOOGLE_MEDIA_TIMEOUT_MS = 30_000;
+
+export type GoogleFetchInit = RequestInit & { timeoutMs?: number };
 
 const SCOPES = [
   "openid",
@@ -29,7 +37,10 @@ export function authUrl(state: string, redirect: string): string {
   return u.toString();
 }
 
-async function tokenRequest(body: Record<string, string>): Promise<
+async function tokenRequest(
+  body: Record<string, string>,
+  timeoutMs = GOOGLE_API_TIMEOUT_MS,
+): Promise<
   | {
       ok: true;
       access_token: string;
@@ -42,6 +53,7 @@ async function tokenRequest(body: Record<string, string>): Promise<
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     const text = (await res.text()).slice(0, 400);
@@ -68,9 +80,13 @@ function isInvalidGrant(body: string): boolean {
   }
 }
 
-async function googleAccountId(accessToken: string): Promise<string> {
+async function googleAccountId(
+  accessToken: string,
+  timeoutMs = GOOGLE_API_TIMEOUT_MS,
+): Promise<string> {
   const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`userinfo ${res.status}`);
   const data = (await res.json()) as { sub?: string };
@@ -101,47 +117,83 @@ export async function exchangeCode(
   await establishProviderConnection(accountId, tokens);
 }
 
-async function accessToken(): Promise<string> {
-  const s = await readProvider();
-  if (!s.tokens?.access_token) throw new AuthError();
-  if (s.tokens.expiry - 60_000 > Date.now()) return s.tokens.access_token;
-  if (!s.tokens.refresh_token) throw new AuthError();
+const inFlightRefreshes = new Map<string, Promise<string>>();
+
+async function refreshAccessToken(
+  expected: RefreshTarget,
+  timeoutMs: number,
+): Promise<string> {
   const { id, secret } = googleClient();
-  const tok = await tokenRequest({
-    refresh_token: s.tokens.refresh_token,
-    client_id: id,
-    client_secret: secret,
-    grant_type: "refresh_token",
-  });
+  const tok = await tokenRequest(
+    {
+      refresh_token: expected.refreshToken,
+      client_id: id,
+      client_secret: secret,
+      grant_type: "refresh_token",
+    },
+    timeoutMs,
+  );
   if (!tok.ok) {
     if (tok.status === 400 && isInvalidGrant(tok.body)) {
-      await clearProviderConnection();
+      await clearProviderConnectionIfMatching(expected);
       throw new AuthError();
     }
     throw tokenError(tok.status, tok.body);
   }
   const next: Tokens = {
     access_token: tok.access_token,
-    refresh_token: tok.refresh_token ?? s.tokens.refresh_token,
+    refresh_token: tok.refresh_token ?? expected.refreshToken,
     expiry: Date.now() + tok.expires_in * 1000,
   };
-  await patchProvider({ tokens: next });
+  const committed = await commitRefreshedTokens(expected, next);
+  if (!committed) throw new AuthError();
   return next.access_token;
+}
+
+async function accessToken(timeoutMs = GOOGLE_API_TIMEOUT_MS): Promise<string> {
+  const s = await readProvider();
+  if (!s.tokens?.access_token) throw new AuthError();
+  if (s.tokens.expiry - 60_000 > Date.now()) return s.tokens.access_token;
+  if (!s.tokens.refresh_token) throw new AuthError();
+  const expected: RefreshTarget = {
+    providerConnectionId: s.providerConnectionId,
+    refreshToken: s.tokens.refresh_token,
+  };
+  const key = `${path.resolve(dataDir())}\0${s.providerConnectionId ?? ""}\0${s.tokens.refresh_token}`;
+  const existing = inFlightRefreshes.get(key);
+  if (existing) return existing;
+  const promise = refreshAccessToken(
+    expected,
+    Math.min(timeoutMs, GOOGLE_API_TIMEOUT_MS),
+  ).finally(() => {
+    if (inFlightRefreshes.get(key) === promise) {
+      inFlightRefreshes.delete(key);
+    }
+  });
+  inFlightRefreshes.set(key, promise);
+  return promise;
 }
 
 export { AuthError } from "@/shared/auth-error";
 
 export async function gfetch(
   url: string,
-  init?: RequestInit,
+  init?: GoogleFetchInit,
 ): Promise<Response> {
-  const token = await accessToken();
+  const { timeoutMs = GOOGLE_API_TIMEOUT_MS, signal, ...rest } = init ?? {};
+  if (signal?.aborted) throw signal.reason;
+  const token = await accessToken(timeoutMs);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
   const res = await fetch(url, {
-    ...init,
+    ...rest,
+    signal: combinedSignal,
     headers: {
       Authorization: `Bearer ${token}`,
-      ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      ...init?.headers,
+      ...(rest.body ? { "Content-Type": "application/json" } : {}),
+      ...rest.headers,
     },
   });
   if (res.status === 401) throw new AuthError();
