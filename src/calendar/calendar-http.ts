@@ -2,7 +2,7 @@ import { legacyTonesForParticipants } from "@/calendar/calendar";
 import type { EventWrite } from "@/calendar/google-events";
 import { normalizeParticipantIds } from "@/calendar/participants";
 import { parseScope } from "@/calendar/recurrence";
-import type { CalendarRead, SeriesScope } from "@/calendar/types";
+import type { CalEvent, CalendarRead, SeriesScope } from "@/calendar/types";
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { AuthError } from "@/shared/google";
@@ -10,6 +10,7 @@ import { readProvider } from "@/shared/provider";
 import {
   getCalendarEventsCache,
   listCalendarCacheRanges,
+  pruneCalendarCache,
   putCalendarEventsCache,
 } from "./calendar-cache";
 import { calendarError, ProviderUnavailableError } from "./calendar-error";
@@ -112,33 +113,106 @@ async function cachedEvents(
   return getCalendarEventsCache(connectionId, calendarId, from, to);
 }
 
+type CacheRefreshTarget =
+  | { kind: "create"; event: CalEvent }
+  | { kind: "update"; eventId: string; event: CalEvent; scope: SeriesScope }
+  | { kind: "delete"; eventId: string; scope: SeriesScope };
+
+function rangeOverlapsEvent(
+  range: { from: string; to: string },
+  event: Pick<CalEvent, "startMs" | "endMs">,
+): boolean {
+  const fromMs = Date.parse(range.from);
+  const toMs = Date.parse(range.to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return true;
+  if (event.endMs <= event.startMs) {
+    return event.startMs >= fromMs && event.startMs < toMs;
+  }
+  return fromMs < event.endMs && toMs > event.startMs;
+}
+
+async function cachedRangeContainsEvent(
+  connectionId: string,
+  calendarId: string,
+  range: { from: string; to: string },
+  eventId: string,
+): Promise<boolean> {
+  const cached = await getCalendarEventsCache(
+    connectionId,
+    calendarId,
+    range.from,
+    range.to,
+  );
+  if (!cached) return true;
+  return cached.some((e) => e.id === eventId);
+}
+
+async function shouldRefreshRange(
+  connectionId: string,
+  calendarId: string,
+  range: { from: string; to: string },
+  target: CacheRefreshTarget,
+): Promise<boolean> {
+  switch (target.kind) {
+    case "create":
+      return rangeOverlapsEvent(range, target.event);
+    case "update":
+      if (target.scope !== "this") return true;
+      if (rangeOverlapsEvent(range, target.event)) return true;
+      return cachedRangeContainsEvent(
+        connectionId,
+        calendarId,
+        range,
+        target.eventId,
+      );
+    case "delete":
+      if (target.scope !== "this") return true;
+      return cachedRangeContainsEvent(
+        connectionId,
+        calendarId,
+        range,
+        target.eventId,
+      );
+  }
+}
+
 async function bestEffortRefreshNamespaceCache(
   gw: CalendarGateway,
   calendarId: string,
   timeZone: string,
+  target: CacheRefreshTarget,
 ): Promise<void> {
   const { providerConnectionId } = await readProvider();
   if (!providerConnectionId) return;
   try {
+    await pruneCalendarCache(providerConnectionId, calendarId);
     const ranges = await listCalendarCacheRanges(
       providerConnectionId,
       calendarId,
     );
-    for (const range of ranges) {
-      const events = await gw.listEvents(
-        calendarId,
-        range.from,
-        range.to,
-        timeZone,
-      );
-      await putCalendarEventsCache(
-        providerConnectionId,
-        calendarId,
-        range.from,
-        range.to,
-        events,
-      );
-    }
+    const flags = await Promise.all(
+      ranges.map((range) =>
+        shouldRefreshRange(providerConnectionId, calendarId, range, target),
+      ),
+    );
+    const affected = ranges.filter((_, i) => flags[i]);
+    await Promise.allSettled(
+      affected.map(async (range) => {
+        const events = await gw.listEvents(
+          calendarId,
+          range.from,
+          range.to,
+          timeZone,
+        );
+        await putCalendarEventsCache(
+          providerConnectionId,
+          calendarId,
+          range.from,
+          range.to,
+          events,
+        );
+      }),
+    );
   } catch {
     /* live write already succeeded */
   }
@@ -227,7 +301,10 @@ export async function handleCreateEvent(
       },
       gate.timeZone,
     );
-    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
+    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone, {
+      kind: "create",
+      event,
+    });
     return Response.json({ event });
   } catch (e) {
     return calendarError(e);
@@ -267,7 +344,12 @@ export async function handleUpdateEvent(
       gate.timeZone,
       expectedVersion,
     );
-    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
+    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone, {
+      kind: "update",
+      eventId: id,
+      event,
+      scope: body.scope,
+    });
     return Response.json({ event });
   } catch (e) {
     return calendarError(e);
@@ -284,6 +366,7 @@ export async function handleDeleteEvent(
   const deniedWrite = await rejectIfReadOnly(gate.calendarId);
   if (deniedWrite) return deniedWrite;
   const url = new URL(request.url);
+  const scope = parseScope(url.searchParams.get("scope"));
   const expectedVersion = parseExpectedVersion(await readJson(request));
   if (!expectedVersion) return jsonError("expectedVersion required", 400);
   try {
@@ -291,11 +374,15 @@ export async function handleDeleteEvent(
     await gw.deleteEvent(
       gate.calendarId,
       id,
-      parseScope(url.searchParams.get("scope")),
+      scope,
       gate.timeZone,
       expectedVersion,
     );
-    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone);
+    await bestEffortRefreshNamespaceCache(gw, gate.calendarId, gate.timeZone, {
+      kind: "delete",
+      eventId: id,
+      scope,
+    });
     return Response.json({ ok: true });
   } catch (e) {
     return calendarError(e);

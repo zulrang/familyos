@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { RosterError } from "@/members/members";
 import {
@@ -9,6 +8,7 @@ import {
 } from "@/members/members";
 import type { HouseholdListId } from "@/settings/types";
 import { dataDir } from "@/shared/data-path";
+import { withFileQueue, writeAtomicJson } from "@/shared/json-file";
 import { fallbackTimeZone, isIanaTimeZone, parseTimeZone } from "@/shared/time";
 
 export type HouseholdConfig = {
@@ -134,11 +134,7 @@ export async function readHousehold(): Promise<HouseholdConfig> {
 
 // Replace atomically so readers never observe a partially written roster.
 export async function writeHousehold(next: HouseholdConfig): Promise<void> {
-  const file = householdFile();
-  await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(normalize(next), null, 2)}\n`);
-  await rename(temporary, file);
+  await writeAtomicJson(householdFile(), normalize(next), { pretty: true });
 }
 
 export type HouseholdUpdateResult =
@@ -208,13 +204,9 @@ async function updateHouseholdUnlocked(
   return { ok: true, config: next };
 }
 
-let householdUpdates: Promise<unknown> = Promise.resolve();
-
 /** Serialize version checks and writes across the wall and parent phones. */
 export function updateHousehold(
   ...args: Parameters<typeof updateHouseholdUnlocked>
 ): Promise<HouseholdUpdateResult> {
-  const result = householdUpdates.then(() => updateHouseholdUnlocked(...args));
-  householdUpdates = result.catch(() => undefined);
-  return result;
+  return withFileQueue(householdFile(), () => updateHouseholdUnlocked(...args));
 }

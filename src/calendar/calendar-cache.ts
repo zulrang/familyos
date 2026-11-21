@@ -1,7 +1,13 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { CalEvent } from "@/calendar/types";
 import { dataDir } from "@/shared/data-path";
+import { writeAtomicJson } from "@/shared/json-file";
+
+export const MAX_CACHED_RANGES = 8;
+
+let touchCounter = 0;
+const touchedOrder = new Map<string, number>();
 
 function cacheRoot(): string {
   return path.join(dataDir(), "cache", "calendar");
@@ -77,17 +83,66 @@ async function readJson(file: string): Promise<unknown> {
   }
 }
 
+export async function pruneCalendarCache(
+  connectionId: string,
+  calendarId: string,
+  maxRanges = MAX_CACHED_RANGES,
+  keepFileName?: string,
+): Promise<void> {
+  const dir = namespaceDir(connectionId, calendarId);
+  let names: string[];
+  try {
+    names = (await readdir(dir)).filter((n) => n.endsWith(".json"));
+  } catch {
+    return;
+  }
+  if (names.length <= maxRanges) return;
+  const entries = await Promise.all(
+    names.map(async (name) => {
+      const full = path.join(dir, name);
+      const info = await stat(full).catch(() => null);
+      return {
+        name,
+        full,
+        mtimeMs: info?.mtimeMs ?? 0,
+        order: touchedOrder.get(full) ?? 0,
+      };
+    }),
+  );
+  entries.sort((a, b) => {
+    if (keepFileName) {
+      if (a.name === keepFileName && b.name !== keepFileName) return -1;
+      if (b.name === keepFileName && a.name !== keepFileName) return 1;
+    }
+    if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+    if (b.order !== a.order) return b.order - a.order;
+    return b.name.localeCompare(a.name);
+  });
+  await Promise.all(
+    entries.slice(maxRanges).map(async (entry) => {
+      touchedOrder.delete(entry.full);
+      await unlink(entry.full).catch(() => undefined);
+    }),
+  );
+}
+
 export async function putCalendarEventsCache(
   connectionId: string,
   calendarId: string,
   from: string,
   to: string,
   events: CalEvent[],
+  maxRanges = MAX_CACHED_RANGES,
 ): Promise<void> {
   const file = eventsFile(connectionId, calendarId, from, to);
-  await mkdir(path.dirname(file), { recursive: true });
-  // ponytail: last-write-wins JSON; upgrade if cache writes start racing.
-  await writeFile(file, `${JSON.stringify(events)}\n`);
+  await writeAtomicJson(file, events);
+  touchedOrder.set(file, ++touchCounter);
+  await pruneCalendarCache(
+    connectionId,
+    calendarId,
+    maxRanges,
+    path.basename(file),
+  );
 }
 
 export async function getCalendarEventsCache(

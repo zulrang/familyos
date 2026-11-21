@@ -1,4 +1,9 @@
-import { gfetch, throwIfGoogleFailed } from "@/shared/google";
+import { AuthError } from "@/shared/auth-error";
+import {
+  GOOGLE_MEDIA_TIMEOUT_MS,
+  gfetch,
+  throwIfGoogleFailed,
+} from "@/shared/google";
 
 const API = "https://photospicker.googleapis.com/v1";
 
@@ -19,10 +24,10 @@ async function pickerFetch(
   try {
     response = await gfetch(`${API}/${path}`, init);
   } catch (error) {
-    throw new PhotosError(
-      error instanceof Error ? error.message : "google_auth",
-      401,
-    );
+    if (error instanceof AuthError) {
+      throw new PhotosError(error.message || "google_auth", 401);
+    }
+    throw new PhotosError("google_unavailable", 502);
   }
   if (!response.ok) {
     const text = (await response.text()).slice(0, 400);
@@ -147,7 +152,9 @@ export async function listPickerPhotos(sessionId: string) {
   return photos;
 }
 export async function fetchPhoto(baseUrl: string) {
-  const response = await gfetch(`${baseUrl}=w1920-h1080`);
+  const response = await gfetch(`${baseUrl}=w1920-h1080`, {
+    timeoutMs: GOOGLE_MEDIA_TIMEOUT_MS,
+  });
   await throwIfGoogleFailed(response, "Google Photos image");
   return response;
 }

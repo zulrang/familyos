@@ -4,7 +4,14 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
@@ -12,6 +19,8 @@ import { afterAll, beforeAll, describe, test } from "vitest";
 describe("Provider Connection", () => {
   let dataRoot: string;
   let clearProviderConnection: typeof import("@/shared/provider").clearProviderConnection;
+  let clearProviderConnectionIfMatching: typeof import("@/shared/provider").clearProviderConnectionIfMatching;
+  let commitRefreshedTokens: typeof import("@/shared/provider").commitRefreshedTokens;
   let establishProviderConnection: typeof import("@/shared/provider").establishProviderConnection;
   let readProvider: typeof import("@/shared/provider").readProvider;
   let writeProvider: typeof import("@/shared/provider").writeProvider;
@@ -35,6 +44,8 @@ describe("Provider Connection", () => {
 
     ({
       clearProviderConnection,
+      clearProviderConnectionIfMatching,
+      commitRefreshedTokens,
       establishProviderConnection,
       readProvider,
       writeProvider,
@@ -159,5 +170,72 @@ describe("Provider Connection", () => {
     await rm(path.join(dataRoot, "provider.json"), { force: true });
     const again = await readProvider();
     assert.equal(again.tokens, null);
+  });
+
+  test("provider.json is written with mode 0o600", async () => {
+    await establishProviderConnection("google-sub-perms", tokensA);
+    const info = await stat(path.join(dataRoot, "provider.json"));
+    assert.equal(info.mode & 0o777, 0o600);
+  });
+
+  test("commitRefreshedTokens refuses to resurrect cleared tokens or overwrite a switched account", async () => {
+    await establishProviderConnection("acct-1", {
+      access_token: "a1",
+      refresh_token: "r1",
+      expiry: 1000,
+    });
+    await clearProviderConnection();
+
+    const afterLogout = await commitRefreshedTokens(
+      { providerConnectionId: "acct-1", refreshToken: "r1" },
+      { access_token: "stale", refresh_token: "r1", expiry: 9999 },
+    );
+    assert.equal(afterLogout, false);
+    assert.equal((await readProvider()).tokens, null);
+
+    await establishProviderConnection("acct-2", {
+      access_token: "a2",
+      refresh_token: "r2",
+      expiry: 1000,
+    });
+    const afterSwitch = await commitRefreshedTokens(
+      { providerConnectionId: "acct-1", refreshToken: "r1" },
+      { access_token: "stale", refresh_token: "r1", expiry: 9999 },
+    );
+    assert.equal(afterSwitch, false);
+    assert.equal((await readProvider()).tokens?.access_token, "a2");
+  });
+
+  test("clearProviderConnectionIfMatching only clears matching connection and refresh token", async () => {
+    await establishProviderConnection("acct-2", {
+      access_token: "a2",
+      refresh_token: "r2",
+      expiry: 1000,
+    });
+
+    assert.equal(
+      await clearProviderConnectionIfMatching({
+        providerConnectionId: "acct-1",
+        refreshToken: "r1",
+      }),
+      false,
+    );
+    assert.equal(
+      await clearProviderConnectionIfMatching({
+        providerConnectionId: "acct-2",
+        refreshToken: "r-other",
+      }),
+      false,
+    );
+    assert.equal((await readProvider()).tokens?.access_token, "a2");
+
+    assert.equal(
+      await clearProviderConnectionIfMatching({
+        providerConnectionId: "acct-2",
+        refreshToken: "r2",
+      }),
+      true,
+    );
+    assert.equal((await readProvider()).tokens, null);
   });
 });
