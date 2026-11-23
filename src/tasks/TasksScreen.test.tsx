@@ -2331,4 +2331,78 @@ describe("daily completion celebration", () => {
     await user.click(release);
     await waitFor(() => expect(patchCount).toBe(2));
   });
+
+  test("a stale poll resolving after task completion does not revert the done state", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const initial = emptyView();
+    const occ: Occurrence = {
+      state: "pending",
+      task: "task-poll-race" as Occurrence["task"],
+      window: initial.today,
+      title: "Make bed" as Occurrence["title"],
+      type: "chore",
+      lineage: "lin-poll-race" as Occurrence["lineage"],
+      time: null,
+      assignee: "dad",
+    };
+    initial.occurrences = [occ];
+    initial.progress = initial.progress.map((row) =>
+      row.member === "dad" ? { ...row, total: 1 } : row,
+    );
+    const staleSnapshot = structuredClone(initial);
+    const store = structuredClone(initial);
+
+    let holdNextPoll = false;
+    const hungPolls: Array<(res: Response) => void> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/tasks")) {
+          if (holdNextPoll) {
+            return new Promise<Response>((resolve) => {
+              hungPolls.push(resolve);
+            });
+          }
+          return json(store);
+        }
+        if (method === "POST" && url.endsWith("/api/tasks/events")) {
+          const next = markDone(store, occ, "dad");
+          store.occurrences = next.occurrences;
+          store.progress = next.progress;
+          return json({ receipts: [{ status: "inserted" }] });
+        }
+        throw new Error(`Unexpected ${method} ${url}`);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<TasksScreen />);
+
+    const checkbox = await screen.findByRole("checkbox", { name: "Make bed" });
+    expect(checkbox).not.toBeChecked();
+
+    holdNextPoll = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(hungPolls.length).toBeGreaterThan(0);
+
+    holdNextPoll = false;
+    await user.click(checkbox);
+    await waitFor(() => {
+      expect(screen.getByRole("checkbox", { name: "Make bed" })).toBeChecked();
+    });
+
+    await act(async () => {
+      for (const resolve of hungPolls) {
+        resolve(json(staleSnapshot));
+      }
+    });
+
+    expect(screen.getByRole("checkbox", { name: "Make bed" })).toBeChecked();
+  });
 });

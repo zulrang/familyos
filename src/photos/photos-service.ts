@@ -189,19 +189,22 @@ export function pollPhotos() {
         overdueMs: startedAt - connection.nextMediaPollAt,
         photoCount: connection.photos.length,
       });
-      connection.nextMediaPollAt = Date.now() + MEDIA_INTERVAL;
-      await writePhotosConnection(connection);
       try {
         connection.photos = await listPickerPhotos(connection.sessionId);
-        connection.mediaExpiresAt = Date.now() + MEDIA_INTERVAL;
+        const refreshedAt = Date.now();
+        connection.nextPollAt = refreshedAt + MEDIA_INTERVAL;
+        connection.nextMediaPollAt = refreshedAt + MEDIA_INTERVAL;
+        connection.mediaExpiresAt = refreshedAt + MEDIA_INTERVAL;
         await writePhotosConnection(connection);
         diagnostic({
           event: "media_refresh_succeeded",
-          durationMs: Date.now() - startedAt,
+          durationMs: refreshedAt - startedAt,
           photoCount: connection.photos.length,
         });
       } catch (error) {
-        connection.nextMediaPollAt = Date.now() + MEDIA_RETRY_INTERVAL;
+        const retryAt = Date.now() + MEDIA_RETRY_INTERVAL;
+        connection.nextPollAt = retryAt;
+        connection.nextMediaPollAt = retryAt;
         await writePhotosConnection(connection);
         diagnostic({
           event: "media_refresh_failed",
@@ -249,10 +252,10 @@ export function readPhoto(id: string) {
           },
           DIAGNOSTIC_INTERVAL,
         );
-      throw new Error("photo_unavailable");
+      throw new PhotosError("photo_unavailable", 404);
     }
     const photo = connection.photos.find((p) => p.id === id);
-    if (!photo) throw new Error("photo_unavailable");
+    if (!photo) throw new PhotosError("photo_unavailable", 404);
     try {
       const response = await fetchPhoto(photo.baseUrl);
       const mime = response.headers.get("content-type")?.split(";")[0];
@@ -261,7 +264,7 @@ export function readPhoto(id: string) {
         !mime?.startsWith("image/") ||
         mime === "image/svg+xml"
       )
-        throw new Error("photo_unavailable");
+        throw new PhotosError("photo_unavailable", 502);
       return new Response(response.body, {
         headers: {
           "Content-Type": mime,
@@ -277,7 +280,7 @@ export function readPhoto(id: string) {
         DIAGNOSTIC_INTERVAL,
       );
       if (error instanceof AuthError) throw error;
-      throw new Error("photo_unavailable");
+      throw new PhotosError("photo_unavailable", 502);
     }
   })();
 }

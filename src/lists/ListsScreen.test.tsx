@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -589,5 +590,87 @@ describe("ListsScreen outage cache", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Milk" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add list" })).toBeNull();
+  });
+
+  test("a stale poll resolving after a toggle does not revert the item state", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let holdNextPoll = false;
+    const hungPolls: Array<(res: Response) => void> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/lists")) {
+          if (holdNextPoll) {
+            return new Promise<Response>((resolve) => {
+              hungPolls.push(resolve);
+            });
+          }
+          return json({ lists: [grocery], stale: false });
+        }
+        if (method === "PATCH") {
+          return json({
+            item: {
+              id: "i1",
+              title: "Milk",
+              done: true,
+              expectedVersion: "v2",
+            },
+          });
+        }
+        return json({ error: "unhandled" }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ListsScreen />);
+    await screen.findByRole("button", { name: "Milk" });
+
+    holdNextPoll = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(hungPolls.length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "Milk" }));
+    expect(screen.getByText("Milk")).toHaveStyle({
+      textDecoration: "line-through",
+    });
+
+    await act(async () => {
+      for (const resolve of hungPolls) {
+        resolve(json({ lists: [grocery], stale: false }));
+      }
+    });
+
+    expect(screen.getByText("Milk")).toHaveStyle({
+      textDecoration: "line-through",
+    });
+  });
+
+  test("network rejection when adding an item shows an error without clearing the draft", async () => {
+    const user = userEvent.setup();
+    const { fetchMock } = installFetch([grocery]);
+    render(<ListsScreen />);
+    await screen.findByRole("button", { name: "Milk" });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = urlOf(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && url.endsWith("/items")) {
+        throw new TypeError("Failed to fetch");
+      }
+      return json({ error: "unhandled" }, 500);
+    });
+
+    const input = screen.getByPlaceholderText("Add item");
+    await user.type(input, "Butter");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Could not add item.")).toBeInTheDocument();
+    expect(input).toHaveValue("Butter");
   });
 });

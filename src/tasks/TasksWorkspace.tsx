@@ -304,27 +304,60 @@ export function useTasksWorkspace(): TasksWorkspace {
   const [mutatingBountyOfferings, setMutatingBountyOfferings] = useState<
     ReadonlySet<OfferingId>
   >(new Set());
+  const loadGeneration = useRef(0);
+  const inFlightLoad = useRef<AbortController | null>(null);
   const dismissCelebration = useCallback(() => setCelebration(null), []);
 
+  const invalidatePendingLoad = useCallback(() => {
+    loadGeneration.current += 1;
+    inFlightLoad.current?.abort();
+    inFlightLoad.current = null;
+  }, []);
+
   const load = useCallback(async () => {
-    const sRes = await fetch("/api/settings");
-    if (await redirectIfPairingRequired(sRes)) return;
-    if (!sRes.ok) {
-      setError("Could not load tasks.");
-      return;
+    const gen = ++loadGeneration.current;
+    inFlightLoad.current?.abort();
+    const ac = new AbortController();
+    inFlightLoad.current = ac;
+    const staleLoad = () => ac.signal.aborted || gen !== loadGeneration.current;
+    try {
+      const sRes = await fetch("/api/settings", { signal: ac.signal });
+      if (staleLoad()) return;
+      if (await redirectIfPairingRequired(sRes)) return;
+      if (staleLoad()) return;
+      if (!sRes.ok) {
+        setError("Could not load tasks.");
+        return;
+      }
+      const s = (await sRes.json()) as PublicSettings;
+      if (staleLoad()) return;
+      setSettings(s);
+      const res = await fetch("/api/tasks", { signal: ac.signal });
+      if (staleLoad()) return;
+      if (await redirectIfPairingRequired(res)) return;
+      if (staleLoad()) return;
+      if (!res.ok) {
+        setError("Could not load tasks.");
+        return;
+      }
+      const view = (await res.json()) as TasksViewRead;
+      if (staleLoad()) return;
+      setTasks(view);
+      setError(null);
+      return view;
+    } catch (err) {
+      if (
+        staleLoad() ||
+        (err instanceof DOMException && err.name === "AbortError")
+      ) {
+        return;
+      }
+      throw err;
+    } finally {
+      if (inFlightLoad.current === ac) {
+        inFlightLoad.current = null;
+      }
     }
-    const s = (await sRes.json()) as PublicSettings;
-    setSettings(s);
-    const res = await fetch("/api/tasks");
-    if (await redirectIfPairingRequired(res)) return;
-    if (!res.ok) {
-      setError("Could not load tasks.");
-      return;
-    }
-    const view = (await res.json()) as TasksViewRead;
-    setTasks(view);
-    setError(null);
-    return view;
   }, []);
 
   useEffect(() => {
@@ -334,10 +367,11 @@ export function useTasksWorkspace(): TasksWorkspace {
     }, 60_000);
     const clock = setInterval(() => setNow(new Date()), 60_000);
     return () => {
+      invalidatePendingLoad();
       clearInterval(poll);
       clearInterval(clock);
     };
-  }, [load]);
+  }, [load, invalidatePendingLoad]);
 
   const members = settings ? activeMembers(settings.members) : [];
   function beginBountyMutation(claim: ClaimId): boolean {
@@ -397,6 +431,7 @@ export function useTasksWorkspace(): TasksWorkspace {
 
   async function complete(occ: Occurrence, member = occ.assignee) {
     if (!member) return;
+    invalidatePendingLoad();
     setTasks((cur) => markDone(cur, occ, member));
     try {
       const res = await fetch("/api/tasks/events", {
@@ -436,7 +471,7 @@ export function useTasksWorkspace(): TasksWorkspace {
       );
     } catch {
       setError("Could not complete task.");
-      await load();
+      await load().catch(() => undefined);
     }
   }
 
@@ -446,6 +481,7 @@ export function useTasksWorkspace(): TasksWorkspace {
       return;
     }
     if (!beginBountyClaim(bounty.id)) return;
+    invalidatePendingLoad();
     try {
       const res = await fetch("/api/tasks", {
         method: "PATCH",
@@ -473,6 +509,7 @@ export function useTasksWorkspace(): TasksWorkspace {
   async function completeBountyClaim(row: ClaimedBounty) {
     if (!isUnfinishedBountyClaim(row)) return;
     if (!beginBountyMutation(row.claim.id)) return;
+    invalidatePendingLoad();
     try {
       const res = await fetch("/api/tasks", {
         method: "PATCH",
@@ -511,6 +548,7 @@ export function useTasksWorkspace(): TasksWorkspace {
   async function releaseBountyClaim(row: ClaimedBounty) {
     if (!isUnfinishedBountyClaim(row)) return;
     if (!beginBountyMutation(row.claim.id)) return;
+    invalidatePendingLoad();
     try {
       const res = await fetch("/api/tasks", {
         method: "PATCH",
@@ -535,6 +573,7 @@ export function useTasksWorkspace(): TasksWorkspace {
   }
 
   async function skip(occ: Occurrence, reason: string | null) {
+    invalidatePendingLoad();
     setSkipping(null);
     setSkipNote("");
     setTasks((cur) => skipOccurrence(cur, occ, reason));
@@ -560,7 +599,7 @@ export function useTasksWorkspace(): TasksWorkspace {
       await load();
     } catch {
       setError("Could not skip task.");
-      await load();
+      await load().catch(() => undefined);
     }
   }
 
@@ -580,6 +619,7 @@ export function useTasksWorkspace(): TasksWorkspace {
     ) {
       return;
     }
+    invalidatePendingLoad();
     setBusy(true);
     try {
       const res = await fetch("/api/tasks", {
@@ -604,6 +644,8 @@ export function useTasksWorkspace(): TasksWorkspace {
       }
       setEditor(null);
       await load();
+    } catch {
+      setError(sheet.task ? "Could not save task." : "Could not create task.");
     } finally {
       setBusy(false);
     }

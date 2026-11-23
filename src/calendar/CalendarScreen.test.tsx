@@ -434,7 +434,7 @@ describe("CalendarScreen stale writes", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-19T15:00:00.000Z"));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, "confirm");
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = urlOf(input);
@@ -456,12 +456,22 @@ describe("CalendarScreen stale writes", () => {
 
     await user.click(await screen.findByRole("button", { name: "Practice" }));
     await user.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init?.method ?? "GET").toUpperCase() === "DELETE",
+      ),
+    ).toHaveLength(0);
+    await user.click(
+      screen.getByRole("button", { name: "Delete this event?" }),
+    );
+    expect(confirmSpy).not.toHaveBeenCalled();
 
     expect(
       await screen.findByRole("button", { name: "Recital" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Event" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Title")).toHaveValue("Recital");
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(
       screen.getByText(
         "This event changed on another Display. Reloaded — try again.",

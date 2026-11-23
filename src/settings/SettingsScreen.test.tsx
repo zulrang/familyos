@@ -307,3 +307,110 @@ describe("Settings Idle Dim", () => {
     expect(await screen.findByRole("button", { name: "Saved" })).toBeTruthy();
   });
 });
+
+describe("Settings Trusted Display revocation", () => {
+  test("requires inline confirmation without calling window.confirm and supports cancel", async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm");
+    const settings = publicSettings([ada]);
+    let displays = [
+      { id: "d1", createdAt: 1_700_000_000_000, revokedAt: null },
+      { id: "d2", createdAt: 1_700_000_100_000, revokedAt: null },
+    ];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/displays")) {
+          return json({ displays, currentDisplayId: "d1" });
+        }
+        if (method === "DELETE" && url.endsWith("/api/displays/d2")) {
+          displays = displays.filter((d) => d.id !== "d2");
+          return json({ ok: true });
+        }
+        return json({ error: `unhandled ${method} ${url}` }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SettingsScreen />);
+
+    const revokeButtons = await screen.findAllByRole("button", {
+      name: "Revoke",
+    });
+    expect(revokeButtons).toHaveLength(2);
+
+    await user.click(revokeButtons[0]);
+    expect(
+      screen.getByRole("button", { name: "Revoke this Display?" }),
+    ).toBeInTheDocument();
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.queryByRole("button", { name: "Revoke this Display?" }),
+    ).toBeNull();
+
+    await user.click(screen.getAllByRole("button", { name: "Revoke" })[1]);
+    expect(
+      screen.getByRole("button", { name: "Revoke Trusted Display?" }),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init?.method ?? "GET").toUpperCase() === "DELETE",
+      ),
+    ).toHaveLength(0);
+
+    await user.click(
+      screen.getByRole("button", { name: "Revoke Trusted Display?" }),
+    );
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1);
+    });
+    expect(
+      screen.queryByText("Trusted Display", { selector: "div" }),
+    ).toBeNull();
+  });
+
+  test("failed self-revoke shows an error and clears inline confirmation", async () => {
+    const user = userEvent.setup();
+    const settings = publicSettings([ada]);
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = urlOf(input);
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (method === "GET" && url.endsWith("/api/settings")) {
+          return json(settings);
+        }
+        if (method === "GET" && url.endsWith("/api/displays")) {
+          return json({
+            displays: [
+              { id: "d1", createdAt: 1_700_000_000_000, revokedAt: null },
+            ],
+            currentDisplayId: "d1",
+          });
+        }
+        if (method === "DELETE" && url.endsWith("/api/displays/d1")) {
+          return json({ error: "failed" }, 500);
+        }
+        return json({ error: `unhandled ${method} ${url}` }, 500);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SettingsScreen />);
+
+    await user.click(await screen.findByRole("button", { name: "Revoke" }));
+    await user.click(
+      screen.getByRole("button", { name: "Revoke this Display?" }),
+    );
+
+    expect(
+      await screen.findByText("Could not revoke that Display."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument();
+  });
+});

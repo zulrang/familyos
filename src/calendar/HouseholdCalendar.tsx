@@ -229,13 +229,6 @@ export function useHouseholdCalendar(
   async function remove(draft: EventDraft) {
     if (!draft.id) return;
     const scope = draft.recurringEventId ? draft.scope : "this";
-    const msg =
-      scope === "all"
-        ? "Delete all events in this series?"
-        : scope === "following"
-          ? "Delete this and following events?"
-          : "Delete this event?";
-    if (!confirm(msg)) return;
     setBusy(true);
     try {
       const q = scope === "this" ? "" : `?scope=${scope}`;

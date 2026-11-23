@@ -2,7 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { handlePair } from "@/displays/pairing-http";
+import { DISPLAY_COOKIE, emitStartupPairingCode } from "@/shared/pairing";
 import { readProvider, writeProvider } from "@/shared/provider";
+import { PhotosError } from "./google-photos";
+import { handlePhotoImage } from "./photos-http";
 import {
   connectPhotos,
   disconnectPhotos,
@@ -295,5 +299,117 @@ describe("Photos Picker connection", () => {
     expect(diagnostics).toContain('"status":429');
     expect(diagnostics).not.toContain("secret body");
     expect(diagnostics).not.toContain("private-photo");
+  });
+
+  test("failed media refresh backs off briefly instead of waiting 50 minutes, then recovers", async () => {
+    await writePhotosConnection({
+      state: "ready",
+      sessionId: "session",
+      pickerUrl: "https://photos.google.com/picker",
+      nextPollAt: Date.now() - 1,
+      expiresAt: Date.now() + 60 * 60_000,
+      nextMediaPollAt: Date.now() - 1,
+      mediaExpiresAt: Date.now() - 1,
+      photos: [{ id: "one", baseUrl: "https://lh3.googleusercontent.com/one" }],
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response("unavailable", { status: 503 }),
+    );
+    await expect(pollPhotos()).rejects.toThrow();
+
+    const backoffStatus = await getPhotosStatus();
+    expect(backoffStatus.state).toBe("ready");
+    if (backoffStatus.state !== "ready") return;
+    expect(backoffStatus.pollAfterMs).toBeLessThan(2 * 60_000);
+
+    const connection = await readPhotosConnection();
+    if (connection.state === "ready") {
+      connection.nextMediaPollAt = 0;
+      connection.nextPollAt = 0;
+      await writePhotosConnection(connection);
+    }
+
+    vi.stubGlobal("fetch", async () =>
+      Response.json({
+        mediaItems: [
+          {
+            id: "two",
+            mediaFile: {
+              mimeType: "image/jpeg",
+              baseUrl: "https://lh3.googleusercontent.com/two",
+            },
+          },
+        ],
+      }),
+    );
+
+    const recovered = await pollPhotos();
+    expect(recovered).toMatchObject({
+      state: "ready",
+      photos: [{ id: "two" }],
+    });
+    if (recovered.state === "ready") {
+      expect(recovered.pollAfterMs).toBeGreaterThan(45 * 60_000);
+    }
+  });
+
+  test("unavailable photos return PhotosError and friendly photo_unavailable HTTP error", async () => {
+    const code = await emitStartupPairingCode();
+    expect(code).toBeTruthy();
+    const pairRes = await handlePair(
+      new Request("http://familyos.test/api/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      }),
+    );
+    const cookie = pairRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+    expect(cookie.startsWith(`${DISPLAY_COOKIE}=`)).toBe(true);
+
+    await expect(readPhoto("missing")).rejects.toMatchObject({
+      name: "Error",
+      code: "photo_unavailable",
+      status: 404,
+    });
+    await expect(readPhoto("missing")).rejects.toBeInstanceOf(PhotosError);
+
+    const missingRes = await handlePhotoImage(
+      new Request("http://familyos.test/api/photos/image?id=missing", {
+        headers: { cookie },
+      }),
+    );
+    expect(missingRes.status).toBe(404);
+    expect(await missingRes.json()).toEqual({
+      error:
+        "This photo is unavailable. The slideshow will refresh automatically.",
+    });
+
+    await writePhotosConnection({
+      state: "ready",
+      sessionId: "session",
+      pickerUrl: "https://photos.google.com/picker",
+      nextPollAt: Date.now() + 600_000,
+      expiresAt: Date.now() + 600_000,
+      nextMediaPollAt: Date.now() + 600_000,
+      mediaExpiresAt: Date.now() + 600_000,
+      photos: [{ id: "one", baseUrl: "https://lh3.googleusercontent.com/one" }],
+    });
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response("upstream error", { status: 500 }),
+    );
+
+    const upstreamRes = await handlePhotoImage(
+      new Request("http://familyos.test/api/photos/image?id=one", {
+        headers: { cookie },
+      }),
+    );
+    expect(upstreamRes.status).toBe(502);
+    expect(await upstreamRes.json()).toEqual({
+      error:
+        "This photo is unavailable. The slideshow will refresh automatically.",
+    });
   });
 });

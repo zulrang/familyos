@@ -1,5 +1,5 @@
 import { AuthError } from "@/shared/auth-error";
-import { gfetch, GOOGLE_MEDIA_TIMEOUT_MS } from "@/shared/google";
+import { GOOGLE_MEDIA_TIMEOUT_MS, gfetch } from "@/shared/google";
 
 const API = "https://photospicker.googleapis.com/v1";
 

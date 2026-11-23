@@ -96,14 +96,14 @@ async function getTaskListMeta(
 export async function listSelectedListsWithItems(
   listIds: string[],
 ): Promise<HouseholdList[]> {
-  // ponytail: N+1 fan-out, fine at household scale
-  const lists: HouseholdList[] = [];
-  for (const id of listIds) {
-    const meta = await getTaskListMeta(id);
-    if (!meta) continue;
-    lists.push({ ...meta, items: await listTasks(meta.id) });
-  }
-  return lists;
+  const resolved = await Promise.all(
+    listIds.map(async (id): Promise<HouseholdList | null> => {
+      const meta = await getTaskListMeta(id);
+      if (!meta) return null;
+      return { ...meta, items: await listTasks(meta.id) };
+    }),
+  );
+  return resolved.filter((list): list is HouseholdList => list !== null);
 }
 
 export async function insertTaskList(title: string): Promise<HouseholdList> {

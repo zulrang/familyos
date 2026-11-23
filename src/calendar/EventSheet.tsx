@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { SeriesScope } from "@/calendar/types";
 import {
   LEGACY_TONE_COLORS,
@@ -53,6 +54,18 @@ export function EventSheet({
   const historical = members.filter(
     (m) => m.status === "retired" && draft.memberIds.includes(m.id),
   );
+  const deleteScope: SeriesScope = draft.recurringEventId
+    ? draft.scope
+    : "this";
+  const confirmKey = `${draft.id ?? ""}:${draft.expectedVersion ?? ""}:${deleteScope}`;
+  const [confirmedKey, setConfirmedKey] = useState<string | null>(null);
+  const confirmingDelete = confirmedKey === confirmKey;
+  const confirmDeleteLabel =
+    deleteScope === "all"
+      ? "Delete all events in this series?"
+      : deleteScope === "following"
+        ? "Delete this and following events?"
+        : "Delete this event?";
   return (
     <div
       style={{
@@ -263,14 +276,27 @@ export function EventSheet({
           }}
         >
           {onDelete ? (
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={onDelete}
-              style={{ marginRight: "auto" }}
-            >
-              Delete
-            </Button>
+            confirmingDelete ? (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  setConfirmedKey(null);
+                  onDelete();
+                }}
+                style={{ marginRight: "auto" }}
+              >
+                {confirmDeleteLabel}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setConfirmedKey(confirmKey)}
+                style={{ marginRight: "auto" }}
+              >
+                Delete
+              </Button>
+            )
           ) : null}
           <Button disabled={busy} onClick={onClose}>
             Cancel

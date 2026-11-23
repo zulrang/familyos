@@ -58,6 +58,14 @@ export function ListsScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsReauth, setNeedsReauth] = useState(false);
+  const loadGeneration = useRef(0);
+  const inFlightLoad = useRef<AbortController | null>(null);
+
+  function invalidatePendingLoad() {
+    loadGeneration.current += 1;
+    inFlightLoad.current?.abort();
+    inFlightLoad.current = null;
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fetch once, then poll
   useEffect(() => {
@@ -67,36 +75,62 @@ export function ListsScreen() {
     }, 60_000);
     const clock = setInterval(() => setNow(new Date()), 60_000);
     return () => {
+      invalidatePendingLoad();
       clearInterval(poll);
       clearInterval(clock);
     };
   }, []);
 
   async function load() {
-    const sRes = await fetch("/api/settings");
-    if (await redirectIfPairingRequired(sRes)) return;
-    const s = (await sRes.json()) as PublicSettings;
-    setSettings(s);
-    setConfigVersion(s.configVersion);
-    const res = await fetch("/api/lists");
-    if (await redirectIfPairingRequired(res)) return;
-    if (res.status === 401) {
-      setListsRead({ lists: [], stale: false });
-      setNeedsReauth(true);
-      return;
+    const gen = ++loadGeneration.current;
+    inFlightLoad.current?.abort();
+    const ac = new AbortController();
+    inFlightLoad.current = ac;
+    const staleLoad = () => ac.signal.aborted || gen !== loadGeneration.current;
+    try {
+      const sRes = await fetch("/api/settings", { signal: ac.signal });
+      if (staleLoad()) return;
+      if (await redirectIfPairingRequired(sRes)) return;
+      if (staleLoad()) return;
+      const s = (await sRes.json()) as PublicSettings;
+      if (staleLoad()) return;
+      setSettings(s);
+      setConfigVersion(s.configVersion);
+      const res = await fetch("/api/lists", { signal: ac.signal });
+      if (staleLoad()) return;
+      if (await redirectIfPairingRequired(res)) return;
+      if (staleLoad()) return;
+      if (res.status === 401) {
+        setListsRead({ lists: [], stale: false });
+        setNeedsReauth(true);
+        return;
+      }
+      if (!res.ok) {
+        setListsRead((cur) => ({ ...cur, stale: true }));
+        setError("Could not load lists.");
+        return;
+      }
+      const data = (await res.json()) as ListsRead;
+      if (staleLoad()) return;
+      setListsRead({
+        lists: Array.isArray(data.lists) ? data.lists : [],
+        stale: data.stale === true,
+      });
+      setNeedsReauth(false);
+      setError(null);
+    } catch (err) {
+      if (
+        staleLoad() ||
+        (err instanceof DOMException && err.name === "AbortError")
+      ) {
+        return;
+      }
+      throw err;
+    } finally {
+      if (inFlightLoad.current === ac) {
+        inFlightLoad.current = null;
+      }
     }
-    if (!res.ok) {
-      setListsRead((cur) => ({ ...cur, stale: true }));
-      setError("Could not load lists.");
-      return;
-    }
-    const data = (await res.json()) as ListsRead;
-    setListsRead({
-      lists: Array.isArray(data.lists) ? data.lists : [],
-      stale: data.stale === true,
-    });
-    setNeedsReauth(false);
-    setError(null);
   }
 
   const lists = listsRead.lists;
@@ -173,6 +207,7 @@ export function ListsScreen() {
   }
 
   async function toggle(listId: string, item: ListItem) {
+    invalidatePendingLoad();
     const done = !item.done;
     patchItem(listId, item.id, { done });
     try {
@@ -211,55 +246,72 @@ export function ListsScreen() {
   async function addItem(listId: string) {
     const title = (drafts[listId] ?? "").trim();
     if (!title) return;
-    const res = await fetch(`/api/lists/${encodeURIComponent(listId)}/items`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
-    });
-    if (await redirectIfPairingRequired(res)) return;
-    if (res.status === 401) {
-      setNeedsReauth(true);
-      return;
-    }
-    if (!res.ok) {
+    invalidatePendingLoad();
+    try {
+      const res = await fetch(
+        `/api/lists/${encodeURIComponent(listId)}/items`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        },
+      );
+      if (await redirectIfPairingRequired(res)) return;
+      if (res.status === 401) {
+        setNeedsReauth(true);
+        return;
+      }
+      if (!res.ok) {
+        setError("Could not add item.");
+        return;
+      }
+      const data = (await res.json()) as { item: ListItem };
+      setDrafts((d) => ({ ...d, [listId]: "" }));
+      setListsRead((cur) => ({
+        ...cur,
+        lists: cur.lists.map((l) =>
+          l.id !== listId ? l : { ...l, items: [data.item, ...l.items] },
+        ),
+      }));
+    } catch {
       setError("Could not add item.");
-      return;
     }
-    const data = (await res.json()) as { item: ListItem };
-    setDrafts((d) => ({ ...d, [listId]: "" }));
-    setListsRead((cur) => ({
-      ...cur,
-      lists: cur.lists.map((l) =>
-        l.id !== listId ? l : { ...l, items: [data.item, ...l.items] },
-      ),
-    }));
   }
 
   async function clearChecked(listId: string) {
-    const res = await fetch(`/api/lists/${encodeURIComponent(listId)}/clear`, {
-      method: "POST",
-    });
-    if (await redirectIfPairingRequired(res)) return;
-    if (res.status === 401) {
-      setNeedsReauth(true);
-      return;
-    }
-    if (!res.ok) {
+    invalidatePendingLoad();
+    try {
+      const res = await fetch(
+        `/api/lists/${encodeURIComponent(listId)}/clear`,
+        {
+          method: "POST",
+        },
+      );
+      if (await redirectIfPairingRequired(res)) return;
+      if (res.status === 401) {
+        setNeedsReauth(true);
+        return;
+      }
+      if (!res.ok) {
+        setError("Could not clear checked items.");
+        return;
+      }
+      setListsRead((cur) => ({
+        ...cur,
+        lists: cur.lists.map((l) =>
+          l.id !== listId ? l : { ...l, items: l.items.filter((i) => !i.done) },
+        ),
+      }));
+    } catch {
       setError("Could not clear checked items.");
-      return;
     }
-    setListsRead((cur) => ({
-      ...cur,
-      lists: cur.lists.map((l) =>
-        l.id !== listId ? l : { ...l, items: l.items.filter((i) => !i.done) },
-      ),
-    }));
   }
 
   async function saveSheet() {
     if (!sheet) return;
     const title = sheet.title.trim();
     if (!title) return;
+    invalidatePendingLoad();
     setBusy(true);
     try {
       if (sheet.kind === "create") {
@@ -321,12 +373,21 @@ export function ListsScreen() {
       }
       setSheet(null);
       await load();
+    } catch {
+      setError(
+        sheet.kind === "create"
+          ? "Could not create list."
+          : sheet.kind === "edit-item"
+            ? "Could not rename List Item."
+            : "Could not rename list.",
+      );
     } finally {
       setBusy(false);
     }
   }
 
   async function removeItem(listId: string, itemId: string) {
+    invalidatePendingLoad();
     setBusy(true);
     try {
       const res = await fetch(
@@ -361,12 +422,15 @@ export function ListsScreen() {
         ),
       }));
       setSheet(null);
+    } catch {
+      setError("Could not delete List Item.");
     } finally {
       setBusy(false);
     }
   }
 
   async function removeList(id: string) {
+    invalidatePendingLoad();
     setBusy(true);
     try {
       const res = await fetch(`/api/lists/${encodeURIComponent(id)}`, {
@@ -391,6 +455,8 @@ export function ListsScreen() {
       }
       setSheet(null);
       await load();
+    } catch {
+      setError("Could not remove list.");
     } finally {
       setBusy(false);
     }

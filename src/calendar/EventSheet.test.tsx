@@ -3,12 +3,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Member } from "@/members/members";
 import { type EventDraft, EventSheet } from "./EventSheet";
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 const roster: Member[] = [
@@ -96,5 +97,89 @@ describe("EventSheet Who", () => {
     await user.click(chip("Dad"));
     expect(retired).toHaveAttribute("aria-pressed", "true");
     expect(chip("Dad")).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("EventSheet inline delete confirmation", () => {
+  test("requires a second tap on the inline confirm button without calling window.confirm", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm");
+    function DeleteHarness() {
+      const [sheet, setSheet] = useState<EventDraft>(() => ({
+        ...draft(),
+        id: "ev-1",
+        expectedVersion: "v1",
+      }));
+      return (
+        <EventSheet
+          draft={sheet}
+          members={roster}
+          busy={false}
+          onChange={setSheet}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={onDelete}
+        />
+      );
+    }
+
+    render(<DeleteHarness />);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: "Delete this event?" }),
+    );
+    expect(onDelete).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  test("changing recurring scope resets confirmation and updates the confirm label", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    function SeriesHarness() {
+      const [sheet, setSheet] = useState<EventDraft>(() => ({
+        ...draft(),
+        id: "ev-2",
+        expectedVersion: "v1",
+        recurringEventId: "series-1",
+      }));
+      return (
+        <EventSheet
+          draft={sheet}
+          members={roster}
+          busy={false}
+          onChange={setSheet}
+          onClose={() => {}}
+          onSave={() => {}}
+          onDelete={onDelete}
+        />
+      );
+    }
+
+    render(<SeriesHarness />);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(
+      screen.getByRole("button", { name: "Delete this event?" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("This and following events"));
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(
+      screen.getByRole("button", { name: "Delete this and following events?" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("All events"));
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(
+      screen.getByRole("button", { name: "Delete all events in this series?" }),
+    );
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 });

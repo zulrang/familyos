@@ -94,6 +94,8 @@ export function SettingsScreen() {
   const [idleDimTo, setIdleDimTo] = useState<IdleDimTo>(10);
   const [displays, setDisplays] = useState<DisplayRecord[]>([]);
   const [currentDisplayId, setCurrentDisplayId] = useState<string | null>(null);
+  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingExpiresAt, setPairingExpiresAt] = useState<number | null>(null);
   const [saved, setSaved] = useState(false);
@@ -258,26 +260,28 @@ export function SettingsScreen() {
   async function revoke(displayId: string) {
     setError(null);
     const self = displayId === currentDisplayId;
-    if (
-      !window.confirm(
-        self
-          ? "Revoke this Display? It will return to pairing immediately."
-          : "Revoke this Trusted Display? It will lose household access immediately.",
-      )
-    ) {
-      return;
-    }
-    const res = await fetch(`/api/displays/${displayId}`, { method: "DELETE" });
-    if (self) {
-      window.location.assign("/");
-      return;
-    }
-    if (await redirectIfPairingRequired(res)) return;
-    if (!res.ok) {
+    setRevokingId(displayId);
+    try {
+      const res = await fetch(
+        `/api/displays/${encodeURIComponent(displayId)}`,
+        { method: "DELETE" },
+      );
+      if (await redirectIfPairingRequired(res)) return;
+      if (!res.ok) {
+        setError("Could not revoke that Display.");
+        return;
+      }
+      if (self) {
+        window.location.assign("/");
+        return;
+      }
+      await loadDisplays();
+    } catch {
       setError("Could not revoke that Display.");
-      return;
+    } finally {
+      setRevokingId(null);
+      setConfirmRevokeId((cur) => (cur === displayId ? null : cur));
     }
-    await loadDisplays();
   }
 
   async function kickUpdate() {
@@ -477,9 +481,33 @@ export function SettingsScreen() {
                     {timeZone ? formatPairedAt(d.createdAt, timeZone) : ""}
                   </div>
                 </div>
-                <Button variant="ghost" onClick={() => void revoke(d.id)}>
-                  Revoke
-                </Button>
+                {confirmRevokeId === d.id ? (
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <Button
+                      variant="ghost"
+                      disabled={revokingId !== null}
+                      onClick={() => setConfirmRevokeId(null)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={revokingId !== null}
+                      onClick={() => void revoke(d.id)}
+                    >
+                      {isCurrent
+                        ? "Revoke this Display?"
+                        : "Revoke Trusted Display?"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    disabled={revokingId !== null}
+                    onClick={() => setConfirmRevokeId(d.id)}
+                  >
+                    Revoke
+                  </Button>
+                )}
               </div>
             );
           })}
