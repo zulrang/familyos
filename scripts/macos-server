@@ -224,8 +224,9 @@ start_agent() {
   domain=$(launchd_domain)
   stop_agent
   wait_unloaded "$domain" || die "Could not unload ${LABEL}. Try: launchctl bootout ${domain}/${LABEL}"
-  if ! launchctl bootstrap "$domain" "$PLIST"; then
-    st=$?
+  st=0
+  launchctl bootstrap "$domain" "$PLIST" || st=$?
+  if [[ $st -ne 0 ]]; then
     # 5 = already loaded (bootout lost the race)
     if [[ $st -eq 5 ]]; then
       launchctl kickstart -k "${domain}/${LABEL}"
@@ -248,12 +249,12 @@ bootstrap_user_job() {
     launchctl print "$target" >/dev/null 2>&1 || break
     sleep 0.25
   done
-  if ! launchctl bootstrap "$domain" "$plist"; then
-    st=$?
-    # 5 = already loaded (bootout lost the race)
-    if [[ $st -ne 5 ]]; then
-      die "Could not bootstrap ${label} into ${domain} (exit ${st})."
-    fi
+  st=0
+  launchctl bootstrap "$domain" "$plist" || st=$?
+  # 5 = already loaded (bootout lost the race)
+  if [[ $st -ne 0 && $st -ne 5 ]]; then
+    printf 'Could not bootstrap %s into %s (exit %s).\n' "$label" "$domain" "$st" >&2
+    exit "$st"
   fi
   launchctl enable "$target" 2>/dev/null || true
 }
