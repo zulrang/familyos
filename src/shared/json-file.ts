@@ -21,10 +21,6 @@ function fileQueues(): FileQueues {
   return created;
 }
 
-/**
- * Serialize async read-modify-write operations on the same file path so
- * concurrent requests in one server process cannot clobber each other.
- */
 export async function withFileQueue<T>(
   filePath: string,
   operation: () => Promise<T>,
@@ -41,10 +37,6 @@ export async function withFileQueue<T>(
   }
 }
 
-/**
- * Write JSON via a sibling temp file and atomic rename so readers never observe
- * a truncated file. Cleans up the temp file if writing or renaming fails.
- */
 export async function writeAtomicJson(
   filePath: string,
   data: unknown,

@@ -1,17 +1,9 @@
-/** Event Participants: stable Household Member IDs only (ADR 0002). */
-
 import type { MemberId } from "@/members/members";
 
-/** Google Calendar private property key for participant IDs. */
 export const PARTICIPANTS_PROP = "familyosParticipants";
 
-/**
- * Ordered unique Household Member IDs on an event.
- * Empty means Household Event (no Event Participants).
- */
 export type ParticipantIds = MemberId[];
 
-/** Parse private-property payload. Missing/empty → Household Event. */
 export function parseParticipantIds(
   stored: string | null | undefined,
 ): ParticipantIds {
@@ -27,7 +19,6 @@ export function parseParticipantIds(
   return out;
 }
 
-/** Serialize for Google private props. Empty string clears prior IDs. */
 export function serializeParticipantIds(ids: ParticipantIds): string {
   const out: MemberId[] = [];
   const seen = new Set<string>();
@@ -40,7 +31,6 @@ export function serializeParticipantIds(ids: ParticipantIds): string {
   return out.join(",");
 }
 
-/** Normalize a list of IDs (API / write path). */
 export function normalizeParticipantIds(
   ids: readonly string[],
 ): ParticipantIds {

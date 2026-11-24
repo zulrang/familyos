@@ -9,7 +9,6 @@ import {
 } from "./types";
 
 export class RewardConflict extends Error {}
-/** The route supplies the household task database so Spend and its balance change commit together. */
 export function rewardsStore(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS rewards (
@@ -94,6 +93,25 @@ export function rewardsStore(db: DatabaseSync) {
         })),
     };
   }
+  function resolveIdempotentEditReceipt(
+    command: Extract<RewardAdminCommand, { kind: "edit" }>,
+  ): boolean {
+    const previous = db
+      .prepare("SELECT * FROM reward_edits WHERE reward=? AND revision=?")
+      .get(command.id, command.revision);
+    if (!previous) return false;
+    if (
+      previous.name !== command.draft.name ||
+      previous.description !== command.draft.description ||
+      previous.cost !== command.draft.cost ||
+      previous.icon !== command.draft.icon
+    ) {
+      throw new RewardConflict(
+        "This revision was already used for a different edit. Refresh before editing again.",
+      );
+    }
+    return true;
+  }
   function administer(command: RewardAdminCommand) {
     return transaction(() => {
       if (command.kind === "create") {
@@ -121,26 +139,9 @@ export function rewardsStore(db: DatabaseSync) {
         );
         return;
       }
-      // A reward revision can be edited successfully only once. Check its
-      // immutable receipt before current state so a lost response can be retried
-      // even after later edits or retirement, without replaying the mutation.
-      if (command.kind === "edit") {
-        const previous = db
-          .prepare("SELECT * FROM reward_edits WHERE reward=? AND revision=?")
-          .get(command.id, command.revision);
-        if (previous) {
-          if (
-            previous.name !== command.draft.name ||
-            previous.description !== command.draft.description ||
-            previous.cost !== command.draft.cost ||
-            previous.icon !== command.draft.icon
-          ) {
-            throw new RewardConflict(
-              "This revision was already used for a different edit. Refresh before editing again.",
-            );
-          }
-          return;
-        }
+      // Check immutable edit receipt before current state so lost-response retries survive later edits or retirement.
+      if (command.kind === "edit" && resolveIdempotentEditReceipt(command)) {
+        return;
       }
       active(command.id, command.revision);
       if (command.kind === "edit") {
@@ -221,7 +222,6 @@ export function rewardsStore(db: DatabaseSync) {
         cost: reward.cost,
         at: new Date().toISOString(),
       };
-      // Existing star_adjustments trigger applies the negative delta exactly once.
       db.prepare(
         "INSERT INTO star_adjustments (id,member,delta,reason,at) VALUES (?,?,?,?,?)",
       ).run(spend.id, spend.member, -spend.cost, spend.name, spend.at);

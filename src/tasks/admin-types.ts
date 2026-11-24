@@ -134,7 +134,7 @@ export type CompletionCorrection = {
   id: string;
   task: TaskId;
   window: LocalDate;
-  by: string | null; // null retracts the completion; an ID restores/reassigns it.
+  by: string | null;
   reason: string;
   at: Instant;
   previous: string | null;

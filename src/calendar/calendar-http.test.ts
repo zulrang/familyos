@@ -1,8 +1,3 @@
-/**
- * HTTP acceptance seam for Calendar events and account-bound outage cache
- * (#12). Uses shared Calendar Fake — no live Google.
- */
-
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

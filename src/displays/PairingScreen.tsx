@@ -1,17 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { pairingCodeFromSearch } from "@/shared/pairing-qr";
 import { Button } from "@/shared/ui/Button";
 
 const QR_PAIR_ATTEMPT_KEY = "fos_qr_pair";
+const attemptedPairingCodes = new Set<string>();
 
 export function PairingScreen() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function pairWith(nextCode: string) {
+  const pairWith = useCallback(async (nextCode: string) => {
     setError(null);
     setBusy(true);
     try {
@@ -40,21 +41,20 @@ export function PairingScreen() {
     } finally {
       setBusy(false);
     }
-  }
+  }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: auto-pair once from the scanned URL
   useEffect(() => {
     const scanned = pairingCodeFromSearch(window.location.search);
     if (!scanned) return;
     setCode(scanned);
+    if (attemptedPairingCodes.has(scanned)) return;
+    attemptedPairingCodes.add(scanned);
     try {
       if (sessionStorage.getItem(QR_PAIR_ATTEMPT_KEY) === scanned) return;
       sessionStorage.setItem(QR_PAIR_ATTEMPT_KEY, scanned);
-    } catch {
-      /* ponytail: private-mode sessionStorage; a StrictMode double POST is the ceiling */
-    }
+    } catch {}
     void pairWith(scanned);
-  }, []);
+  }, [pairWith]);
 
   return (
     <main

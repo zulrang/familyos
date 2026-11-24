@@ -2,11 +2,11 @@ import { describe, expect, test } from "vitest";
 import type { CalEvent } from "@/calendar/types";
 import type { ActiveMember } from "@/members/members";
 import {
+  activeEventParticipants,
   allDayEvents,
   dayLanes,
   dayRange,
   eventBox,
-  eventOwners,
   hourAt,
   hourHeight,
   memberDayLane,
@@ -14,7 +14,13 @@ import {
 } from "./today";
 
 const ZONE = "America/New_York";
-const DAY = new Date("2026-10-08T16:00:00.000Z"); // Thu Oct 8, noon EDT
+const OCT_8_EDT_UTC_OFFSET_HOURS = 4;
+
+function oct8EdtMs(hour: number, minute = 0): number {
+  return Date.UTC(2026, 9, 8, hour + OCT_8_EDT_UTC_OFFSET_HOURS, minute);
+}
+
+const DAY = new Date(oct8EdtMs(12));
 
 const dad: ActiveMember = {
   id: "dad",
@@ -30,11 +36,6 @@ const ellie: ActiveMember = {
 };
 const members = [dad, ellie];
 
-/** Local wall-clock hours on Oct 8 (EDT is UTC-4). */
-function at(hour: number, minute = 0): number {
-  return Date.UTC(2026, 9, 8, hour + 4, minute);
-}
-
 function event(
   id: string,
   startHour: number,
@@ -45,8 +46,8 @@ function event(
     id,
     title: id,
     allDay: false,
-    startMs: at(startHour),
-    endMs: at(endHour),
+    startMs: oct8EdtMs(startHour),
+    endMs: oct8EdtMs(endHour),
     participantIds,
     expectedVersion: "v1",
   };
@@ -57,8 +58,8 @@ function allDay(id: string, participantIds: string[] = []): CalEvent {
     id,
     title: id,
     allDay: true,
-    startMs: at(0),
-    endMs: at(24),
+    startMs: oct8EdtMs(0),
+    endMs: oct8EdtMs(24),
     participantIds,
     expectedVersion: "v1",
   };
@@ -75,13 +76,15 @@ describe("Today day range", () => {
   });
 });
 
-describe("event owners", () => {
+describe("active event participants", () => {
   test("are the Active participants; none means everyone", () => {
-    expect(eventOwners(event("a", 9, 10, ["ellie", "gone"]), members)).toEqual([
-      "ellie",
-    ]);
-    expect(eventOwners(event("b", 9, 10), members)).toEqual([]);
-    expect(eventOwners(event("c", 9, 10, ["gone"]), members)).toEqual([]);
+    expect(
+      activeEventParticipants(event("a", 9, 10, ["ellie", "gone"]), members),
+    ).toEqual(["ellie"]);
+    expect(activeEventParticipants(event("b", 9, 10), members)).toEqual([]);
+    expect(
+      activeEventParticipants(event("c", 9, 10, ["gone"]), members),
+    ).toEqual([]);
   });
 });
 
@@ -102,7 +105,7 @@ describe("Everyone lanes", () => {
     expect(lanes.bands).toEqual([]);
   });
 
-  test("an event for everyone that clashes with nobody is one band", () => {
+  test("a Household Event that clashes with nobody spans all lanes", () => {
     const lanes = dayLanes(
       [event("dentist", 9, 10, ["dad"]), event("dinner", 18, 19)],
       members,
@@ -206,18 +209,18 @@ describe("day grid", () => {
       top: 804,
       height: 36,
     });
-    const overnight = { startMs: at(-3), endMs: at(8) };
+    const overnight = { startMs: oct8EdtMs(-3), endMs: oct8EdtMs(8) };
     expect(eventBox(overnight, DAY, ZONE, 60)).toEqual({ top: 0, height: 60 });
   });
 
   test("the now-line shows only inside the window", () => {
-    expect(nowOffset(new Date(at(15, 30)), ZONE, 60)).toBe(510);
-    expect(nowOffset(new Date(at(6)), ZONE, 60)).toBeNull();
-    expect(nowOffset(new Date(at(21)), ZONE, 60)).toBeNull();
+    expect(nowOffset(new Date(oct8EdtMs(15, 30)), ZONE, 60)).toBe(510);
+    expect(nowOffset(new Date(oct8EdtMs(6)), ZONE, 60)).toBeNull();
+    expect(nowOffset(new Date(oct8EdtMs(21)), ZONE, 60)).toBeNull();
   });
 
   test("a tap picks the hour it lands in", () => {
-    expect(hourAt(DAY, 130, ZONE, 60)?.getTime()).toBe(at(9));
+    expect(hourAt(DAY, 130, ZONE, 60)?.getTime()).toBe(oct8EdtMs(9));
     expect(hourAt(DAY, -1, ZONE, 60)).toBeNull();
     expect(hourAt(DAY, 840, ZONE, 60)).toBeNull();
   });

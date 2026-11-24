@@ -1,4 +1,4 @@
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 import { GOOGLE_MEDIA_TIMEOUT_MS, gfetch } from "@/shared/google";
 
 const API = "https://photospicker.googleapis.com/v1";
@@ -53,7 +53,7 @@ async function pickerFetch(
   try {
     response = await gfetch(`${API}/${path}`, init);
   } catch (error) {
-    if (error instanceof AuthError) throw error;
+    if (error instanceof ProviderAuthError) throw error;
     throw new PhotosError("google_transport", 502, transportCode(error));
   }
   if (!response.ok) {
@@ -63,9 +63,7 @@ async function pickerFetch(
       code =
         (JSON.parse(text) as { error?: { status?: string } }).error?.status ??
         code;
-    } catch {
-      /* generic */
-    }
+    } catch {}
     throw new PhotosError(code, response.status);
   }
   if (response.status === 204) return {};
@@ -185,11 +183,10 @@ export async function fetchPhoto(baseUrl: string) {
       timeoutMs: GOOGLE_MEDIA_TIMEOUT_MS,
     });
   } catch (error) {
-    if (error instanceof AuthError) throw error;
+    if (error instanceof ProviderAuthError) throw error;
     throw new PhotosError("google_transport", 502, transportCode(error));
   }
   if (!response.ok) {
-    // Body release is best effort; retain the upstream HTTP status on failure.
     await response.body?.cancel().catch(() => {});
     throw new PhotosError("image_http", response.status);
   }

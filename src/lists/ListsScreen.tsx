@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { splitLeadingEmoji } from "@/lists/list-text";
 import type { ListItem, ListsRead } from "@/lists/types";
 import type { PublicSettings } from "@/settings/types";
@@ -61,27 +61,13 @@ export function ListsScreen() {
   const loadGeneration = useRef(0);
   const inFlightLoad = useRef<AbortController | null>(null);
 
-  function invalidatePendingLoad() {
+  const invalidatePendingLoad = useCallback(() => {
     loadGeneration.current += 1;
     inFlightLoad.current?.abort();
     inFlightLoad.current = null;
-  }
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fetch once, then poll
-  useEffect(() => {
-    load().catch(() => setError("Could not load lists."));
-    const poll = setInterval(() => {
-      load().catch(() => {});
-    }, 60_000);
-    const clock = setInterval(() => setNow(new Date()), 60_000);
-    return () => {
-      invalidatePendingLoad();
-      clearInterval(poll);
-      clearInterval(clock);
-    };
   }, []);
 
-  async function load() {
+  const load = useCallback(async () => {
     const gen = ++loadGeneration.current;
     inFlightLoad.current?.abort();
     const ac = new AbortController();
@@ -131,7 +117,20 @@ export function ListsScreen() {
         inFlightLoad.current = null;
       }
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    load().catch(() => setError("Could not load lists."));
+    const poll = setInterval(() => {
+      load().catch(() => {});
+    }, 60_000);
+    const clock = setInterval(() => setNow(new Date()), 60_000);
+    return () => {
+      invalidatePendingLoad();
+      clearInterval(poll);
+      clearInterval(clock);
+    };
+  }, [load, invalidatePendingLoad]);
 
   const lists = listsRead.lists;
   const stale = listsRead.stale;
@@ -180,15 +179,15 @@ export function ListsScreen() {
     }));
   }
 
-  /** `undefined` means the 409 body had no `item` — do not treat that as deleted. */
   async function reloadConflictingItem(
     res: Response,
     listId: string,
     itemId: string,
-  ): Promise<ListItem | null | undefined> {
+  ): Promise<{ kind: "missing" } | { kind: "item"; item: ListItem | null }> {
     const body = (await res.json()) as { item?: ListItem | null };
-    if (!("item" in body)) return undefined;
-    applyCurrentItem(listId, itemId, body.item ?? null);
+    if (!("item" in body)) return { kind: "missing" };
+    const item = body.item ?? null;
+    applyCurrentItem(listId, itemId, item);
     setSheet((s) => {
       if (
         s?.kind !== "edit-item" ||
@@ -197,13 +196,13 @@ export function ListsScreen() {
       ) {
         return s;
       }
-      if (!body.item) return null;
-      return { ...s, title: body.item.title, confirmDelete: false };
+      if (!item) return null;
+      return { ...s, title: item.title, confirmDelete: false };
     });
     setError(
       "This List Item changed on another Display. Reloaded — try again.",
     );
-    return body.item ?? null;
+    return { kind: "item", item };
   }
 
   async function toggle(listId: string, item: ListItem) {
@@ -226,8 +225,8 @@ export function ListsScreen() {
         return;
       }
       if (res.status === 409) {
-        const current = await reloadConflictingItem(res, listId, item.id);
-        if (current === undefined) {
+        const reloaded = await reloadConflictingItem(res, listId, item.id);
+        if (reloaded.kind === "missing") {
           patchItem(listId, item.id, { done: item.done });
         }
         return;

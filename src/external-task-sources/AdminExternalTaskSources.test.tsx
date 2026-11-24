@@ -45,7 +45,6 @@ function household(
   };
 }
 
-/** A stateful stand-in for the admin endpoint that records saves. */
 function serve(initial: AdminTaskSourcesRead) {
   let current = initial;
   const saves: unknown[] = [];

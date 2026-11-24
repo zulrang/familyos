@@ -6,10 +6,10 @@ vi.mock("@/shared/display-auth", () => ({
   isUnauthorized: (value: unknown) => value instanceof Response,
 }));
 vi.mock("./photos-service", async () => {
-  const { AuthError } = await import("@/shared/auth-error");
+  const { ProviderAuthError } = await import("@/shared/auth-error");
   return {
     pollPhotos: async () => {
-      throw new AuthError();
+      throw new ProviderAuthError();
     },
     logPhotosRequestFailure: () => {},
   };

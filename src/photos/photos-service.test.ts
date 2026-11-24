@@ -16,7 +16,7 @@ import {
 } from "./photos-service";
 import {
   readPhotosConnection,
-  withPhotosConnection,
+  withPhotosConnectionWriteLock,
   writePhotosConnection,
 } from "./photos-store";
 
@@ -138,8 +138,7 @@ describe("Photos Picker connection", () => {
       mediaExpiresAt: Date.now() + 600_000,
       photos: [{ id: "one", baseUrl: "https://lh3.googleusercontent.com/one" }],
     });
-    // A permanently pending operation occupies the queue for this test.
-    void withPhotosConnection(() => new Promise(() => {}));
+    void withPhotosConnectionWriteLock(() => new Promise(() => {}));
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -152,8 +151,6 @@ describe("Photos Picker connection", () => {
     );
     const response = await readPhoto("one");
     expect(response.headers.get("Cache-Control")).toBe("private, max-age=3000");
-    // If readPhoto were still serialized behind the queue, this await would
-    // hang until the test timeout: the queued operation never resolves.
     expect(await response.text()).toBe("jpeg");
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(
       "https://lh3.googleusercontent.com/one=w1920-h1080",

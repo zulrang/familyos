@@ -2,7 +2,6 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 export class AgentInputError extends Error {}
 
-/** Only explicitly safe domain errors reach the agent. */
 export async function toolResult(
   action: () => unknown | Promise<unknown>,
 ): Promise<CallToolResult> {

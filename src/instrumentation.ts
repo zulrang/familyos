@@ -4,7 +4,6 @@ export async function register() {
   await emitStartupPairingCode();
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   try {
-    // Polls in the background; disabled without FAMILYOS_DERUPT_TOKEN.
     const { startExternalTaskSources } = await import(
       "@/external-task-sources/poller"
     );

@@ -10,10 +10,6 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-/**
- * Shared CalendarGateway contract: Fake (unit lane) and Google adapter
- * (contract lane / recorded Calendar HTTP) must both pass.
- */
 export async function assertCalendarGatewayContract(
   gateway: CalendarGateway,
 ): Promise<void> {

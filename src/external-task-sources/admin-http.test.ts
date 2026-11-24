@@ -8,7 +8,10 @@ import {
   type AdminTaskSourcesRead,
   handleAdminTaskSources,
 } from "./admin-http";
-import { resetExternalTaskSources, setSourceStatus } from "./source-status";
+import {
+  resetExternalTaskSourcesForTests,
+  setSourceStatus,
+} from "./source-status";
 
 let dir: string;
 let cookie: string;
@@ -35,7 +38,7 @@ beforeEach(async () => {
   vi.stubEnv("FAMILYOS_DATA_DIR", dir);
   vi.stubEnv("FAMILYOS_ADMIN_PIN", "123456");
   vi.stubEnv("FAMILYOS_DERUPT_TOKEN", "");
-  resetExternalTaskSources();
+  resetExternalTaskSourcesForTests();
   await writeHousehold({
     familyName: "Family",
     members: [
@@ -67,7 +70,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  resetExternalTaskSources();
+  resetExternalTaskSourcesForTests();
   vi.unstubAllEnvs();
   await rm(dir, { recursive: true, force: true });
 });

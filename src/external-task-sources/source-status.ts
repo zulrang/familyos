@@ -1,11 +1,3 @@
-/**
- * What parents see about each External Task Source: whether it runs, when it
- * last reached its source, and the last problem's code. Never request text.
- *
- * The status lives on `globalThis` because Next.js bundles instrumentation
- * (which runs the poller) separately from route handlers (which read the
- * status); module-level state would not be shared between them.
- */
 export type SourceProblem = Readonly<{ code: string; at: string }>;
 
 export type SourceStatus =
@@ -33,6 +25,11 @@ type Registry = {
   statuses: Map<ExternalTaskSourceId, SourceStatus>;
 };
 
+/**
+ * The status lives on `globalThis` because Next.js bundles instrumentation
+ * (which runs the poller) separately from route handlers (which read the
+ * status); module-level state would not be shared between them.
+ */
 const REGISTRY_KEY = "__familyosExternalTaskSources";
 
 function registry(): Registry {
@@ -43,7 +40,6 @@ function registry(): Registry {
   return global[REGISTRY_KEY];
 }
 
-/** True the first time only: one poller per server process. */
 export function claimPollerStart(): boolean {
   const current = registry();
   if (current.started) return false;
@@ -62,8 +58,7 @@ export function setSourceStatus(
   registry().statuses.set(id, status);
 }
 
-/** Forget every source and allow a new start (tests only). */
-export function resetExternalTaskSources(): void {
+export function resetExternalTaskSourcesForTests(): void {
   const current = registry();
   current.started = false;
   current.statuses.clear();

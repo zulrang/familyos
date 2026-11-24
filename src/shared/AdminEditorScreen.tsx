@@ -42,8 +42,10 @@ export function AdminEditorScreen({
     try {
       await animation.finished;
       if (screen.isConnected) onBack();
-    } catch {
-      // Unmounting (for example, session expiry) cancels the animation.
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        throw error;
+      }
     }
   }
 

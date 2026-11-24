@@ -1,4 +1,4 @@
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { publicOrigin } from "@/shared/google-env";
 import { PhotosError } from "./google-photos";
@@ -33,7 +33,7 @@ const MESSAGES: Record<string, string> = {
 
 function failure(error: unknown) {
   const code =
-    error instanceof AuthError
+    error instanceof ProviderAuthError
       ? "invalid_grant"
       : error instanceof PhotosError
         ? error.code
@@ -45,7 +45,7 @@ function failure(error: unknown) {
     },
     {
       status:
-        error instanceof AuthError
+        error instanceof ProviderAuthError
           ? 401
           : error instanceof PhotosError &&
               error.status >= 400 &&

@@ -21,14 +21,8 @@ export const POLL_INTERVAL_MS = 60_000;
 export const MAX_BACKOFF_MS = 15 * 60_000;
 const FIRST_POLL_DELAY_MS = 5_000;
 const BUSY_POLL_DELAY_MS = 1_000;
-/** A guard against a source that never answers no_work. */
 export const MAX_CLAIMS_PER_POLL = 100;
 
-/**
- * drained: the queue reported no_work. busy: the claim limit was reached.
- * backoff: the source or the Task store is unavailable. halted: the token was
- * rejected or the connection removed; polling stops until restart.
- */
 export type PollOutcome = "drained" | "busy" | "backoff" | "halted";
 
 export type DeruptPollerDeps = Readonly<{
@@ -58,7 +52,6 @@ function problem(deps: DeruptPollerDeps, code: string, work?: string) {
   deps.log(`Derupt ${work ? `work ${work}` : "poll"}: ${code}`);
 }
 
-/** Send a message that ends this attempt; a refused one just ends it. */
 async function finish(
   deps: DeruptPollerDeps,
   work: string,
@@ -101,7 +94,6 @@ async function handle(
     return fail(deps, work.lease.workId, work.lease, "invalid_hand_off", false);
   }
   if (work.kind === "stop") {
-    // A Task already created stays: parents can retire it in admin.
     return finish(deps, work.id, {
       type: "confirm_cancellation",
       lease: work.lease,
@@ -137,7 +129,6 @@ async function handle(
   return finish(deps, work.id, { type: "acknowledge", lease: work.lease });
 }
 
-/** Claim and handle work until Derupt reports no_work, or a stop condition. */
 export async function pollDerupt(deps: DeruptPollerDeps): Promise<PollOutcome> {
   for (let claims = 0; claims < MAX_CLAIMS_PER_POLL; claims++) {
     const exchange = await deps.send(CLAIM);
@@ -167,7 +158,6 @@ export async function pollDerupt(deps: DeruptPollerDeps): Promise<PollOutcome> {
   return "busy";
 }
 
-/** Delay before the next poll; null stops polling. */
 export function nextPollDelay(
   outcome: PollOutcome,
   consecutiveFailures: number,
@@ -191,10 +181,6 @@ function log(line: string) {
   console.info(`[external-task-sources] ${line}`);
 }
 
-/**
- * Start polling every configured External Task Source, once per process. It
- * never throws and never blocks startup: the first poll runs after a delay.
- */
 export function startExternalTaskSources(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): void {

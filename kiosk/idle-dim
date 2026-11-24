@@ -1,13 +1,8 @@
 #!/bin/bash
-# Dim the panel backlight after idle. DPMS stays off (start_gui).
-# Needs: xprintidle, ddcutil, i2c-dev, pi in group i2c.
-# DDC buses are HDMI-port specific; DDC_BUS may pin one for non-reference hardware.
-# ponytail: try both Pi 5 HDMI ports; add discovery only if another display needs it.
-# Trusted Display applies Idle Dim over loopback http://127.0.0.1:7380/idle-dim
 
 IDLE_MS="${IDLE_MS:-300000}"
 DIM="${DIM:-10}"
-BUSES="${DDC_BUS:-11 12}"
+PI5_HDMI_DDC_BUSES="${DDC_BUS:-11 12}"
 POLL_BRIGHT=5
 POLL_DIM=1
 LISTEN_PORT=7380
@@ -18,7 +13,7 @@ STATE="$RUNTIME/familyos-idle-dim.saved"
 CFG="$RUNTIME/familyos-idle-dim.cfg"
 
 brightness() {
-  for bus in $BUSES; do
+  for bus in $PI5_HDMI_DDC_BUSES; do
     cur=$(ddcutil --bus "$bus" getvcp 10 -t 2>/dev/null |
       awk '$1 == "VCP" && $2 == "10" && $3 == "C" && $4 ~ /^[0-9]+$/ { print $4; exit }')
     numeric "$cur" && {
@@ -30,7 +25,7 @@ brightness() {
 }
 
 set_brightness() {
-  for bus in $BUSES; do
+  for bus in $PI5_HDMI_DDC_BUSES; do
     ddcutil --bus "$bus" setvcp 10 "$1" >/dev/null 2>&1 && return 0
   done
   return 1
@@ -68,8 +63,6 @@ trap '' HUP
 mkdir -p "$RUNTIME"
 LOCK="$RUNTIME/familyos-idle-dim.lock"
 exec 9>"$LOCK"
-# util-linux flock is on FullPageOS; mac CI has none. The open fd still
-# lets fuser -k find this process (and SIGKILL still drops the lock).
 if command -v flock >/dev/null 2>&1; then
   flock -n 9 || exit 0
 fi
@@ -97,7 +90,7 @@ trap 'exit 130' INT
 
 # Close fd 9 in the child so flock dies with this process; _lock is a
 # separate open for fuser -k.
-python3 - "$CFG" "$STATE" "$BUSES" "$LISTEN_PORT" "$LOCK" 9>&- <<'PY' &
+python3 - "$CFG" "$STATE" "$PI5_HDMI_DDC_BUSES" "$LISTEN_PORT" "$LOCK" 9>&- <<'PY' &
 import json
 import os
 import subprocess
@@ -111,7 +104,7 @@ CFG, STATE, BUSES, PORT, LOCK = (
     int(sys.argv[4]),
     sys.argv[5],
 )
-_lock = open(LOCK, "a")  # so fuser -k on the lock also stops the listener
+_lock = open(LOCK, "a")
 AFTER = {30000, 60000, 120000, 300000, 600000}
 TO = {1, 10, 20, 30, 40, 50, 60, 70, 80}
 
@@ -178,12 +171,11 @@ ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 PY
 LISTEN_PID=$!
 
-# ponytail: wait for i2c only on hardware that has i2c-dev; CI has none.
 if [ -d /sys/class/i2c-dev ]; then
   sudo -n modprobe i2c-dev 2>/dev/null || true
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     ready=0
-    for bus in $BUSES; do
+    for bus in $PI5_HDMI_DDC_BUSES; do
       [ -e "/dev/i2c-$bus" ] && ready=1
     done
     [ "$ready" -eq 1 ] && break

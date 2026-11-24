@@ -45,7 +45,6 @@ function request(body: unknown, headers: Record<string, string> = {}) {
 }
 async function call(name: string, args: Record<string, unknown> = {}) {
   const result = await client.callTool({ name, arguments: args });
-  // Validate the wire response instead of asserting SDK result types.
   const content = result.content;
   if (!Array.isArray(content) || content[0]?.type !== "text")
     throw new Error("Missing MCP text result");

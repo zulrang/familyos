@@ -1,11 +1,5 @@
-/**
- * HTTP acceptance seam for selected Household Lists (#8), List Item
- * mutations (#9), and account-bound outage cache (#13). Uses shared
- * Lists Fake — no live Google.
- */
-
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, test } from "vitest";
@@ -267,7 +261,6 @@ describe("Household Lists HTTP", () => {
     const uncheckedItem = ((await uncheck.json()) as { item: ListItem }).item;
     assert.equal(uncheckedItem.done, false);
 
-    // mark done again then clear
     await handlePatchItem(
       req(`http://familyos.test/api/lists/tl-selected/items/${added.item.id}`, {
         method: "PATCH",
@@ -512,7 +505,7 @@ describe("Household Lists HTTP", () => {
     };
     assert.equal(body.listIds.includes(target), false);
     assert.equal(body.configVersion, before.configVersion + 1);
-    assert.ok(store.has(target)); // provider data retained
+    assert.ok(store.has(target));
     assert.equal(
       (await handleGetLists(req("http://familyos.test/api/lists"), gateway))
         .status,
@@ -999,10 +992,7 @@ describe("Household Lists outage cache", () => {
     assert.ok(chores);
     chores.title = "Errands";
     const cacheDir = path.join(dataRoot, "cache", "lists", "acct-a");
-    const cached = await readdir(cacheDir);
-    for (const name of cached) {
-      await chmod(path.join(cacheDir, name), 0o444);
-    }
+    await chmod(cacheDir, 0o555);
     try {
       const live = await handleGetLists(
         req("http://familyos.test/api/lists"),
@@ -1019,10 +1009,7 @@ describe("Household Lists outage cache", () => {
         "Errands",
       );
     } finally {
-      const cached = await readdir(cacheDir);
-      for (const name of cached) {
-        await chmod(path.join(cacheDir, name), 0o644);
-      }
+      await chmod(cacheDir, 0o755);
       chores.title = "Chores";
     }
   });

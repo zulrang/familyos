@@ -20,6 +20,19 @@ type Gate =
   | { status: "checking" }
   | { status: "error"; error: string };
 
+const LOCK_PENDING_KEY = "admin-lock-pending-revocation";
+
+async function revokeServerSessionBestEffort(): Promise<void> {
+  try {
+    await adminRequest("session", undefined, "DELETE");
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof Error) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export function AdminShell({ children }: { children: ReactNode }) {
   const [gate, setGate] = useState<Gate>({ status: "checking" });
   const [suspended, setSuspended] = useState(false);
@@ -34,7 +47,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   const checkSession = useCallback(async () => {
     try {
-      if (sessionStorage.getItem("admin-locked") === "yes") {
+      if (sessionStorage.getItem(LOCK_PENDING_KEY) === "yes") {
         await adminRequest("session", undefined, "DELETE");
         setGate({ status: "locked" });
       } else {
@@ -49,14 +62,10 @@ export function AdminShell({ children }: { children: ReactNode }) {
   }, []);
 
   const lock = useCallback(async () => {
-    sessionStorage.setItem("admin-locked", "yes");
+    sessionStorage.setItem(LOCK_PENDING_KEY, "yes");
     setGate({ status: "locked" });
     setPin("");
-    try {
-      await adminRequest("session", undefined, "DELETE");
-    } catch {
-      /* The local lock remains set; reconnecting retries server revocation. */
-    }
+    await revokeServerSessionBestEffort();
   }, []);
 
   useEffect(() => {
@@ -97,7 +106,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
         lastSentActivity.current = sent;
         setGate((current) => (current.status === "unlocked" ? next : current));
       } catch {
-        /* Keep the last server expiry; offline use never extends a session. */
       } finally {
         sending = false;
       }
@@ -131,7 +139,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
     setLogin({ status: "saving" });
     try {
       const next = await adminRequest<Session>("session", { pin });
-      sessionStorage.removeItem("admin-locked");
+      sessionStorage.removeItem(LOCK_PENDING_KEY);
       lastActivity.current = Date.now();
       lastSentActivity.current = lastActivity.current;
       setGate(next);

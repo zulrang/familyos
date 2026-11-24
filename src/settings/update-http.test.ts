@@ -7,6 +7,7 @@ import { handleAdminUpdate, handleAdminUpdateCheck } from "./update-http";
 
 let dir: string;
 let cookie: string;
+let serverPath: string;
 
 function request(origin = "http://familyos.test", credentials = cookie) {
   return new Request("http://familyos.test/admin/api/update", {
@@ -23,9 +24,9 @@ beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), "familyos-update-"));
   vi.stubEnv("FAMILYOS_DATA_DIR", dir);
   vi.stubEnv("FAMILYOS_ADMIN_PIN", "123456");
-  vi.stubEnv("FAMILYOS_MACOS_SERVER", path.join(dir, "server"));
+  serverPath = path.join(dir, "server");
   await writeFile(
-    path.join(dir, "server"),
+    serverPath,
     '#!/bin/sh\nprintf "%s" "$1" > "$FAMILYOS_DATA_DIR/receipt"\n',
     { mode: 0o700 },
   );
@@ -48,7 +49,7 @@ afterEach(async () => {
 });
 
 test("an authenticated admin launches the independent update job", async () => {
-  const response = await handleAdminUpdate(request());
+  const response = await handleAdminUpdate(request(), { serverPath });
   expect(response.status).toBe(202);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await readFile(path.join(dir, "receipt"), "utf8")).toBe("kick-update");
@@ -56,17 +57,22 @@ test("an authenticated admin launches the independent update job", async () => {
 
 test("unauthenticated and cross-origin requests cannot launch an update", async () => {
   expect(
-    (await handleAdminUpdate(request("http://familyos.test", ""))).status,
+    (
+      await handleAdminUpdate(request("http://familyos.test", ""), {
+        serverPath,
+      })
+    ).status,
   ).toBe(401);
-  expect((await handleAdminUpdate(request("http://other.test"))).status).toBe(
-    403,
-  );
+  expect(
+    (await handleAdminUpdate(request("http://other.test"), { serverPath }))
+      .status,
+  ).toBe(403);
   await expect(readFile(path.join(dir, "receipt"))).rejects.toThrow();
 });
 
 test("launch failures return an error without claiming the update started", async () => {
-  await writeFile(path.join(dir, "server"), "#!/bin/sh\nexit 1\n");
-  const response = await handleAdminUpdate(request());
+  await writeFile(serverPath, "#!/bin/sh\nexit 1\n");
+  const response = await handleAdminUpdate(request(), { serverPath });
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ error: "Could not start update." });
   expect(response.headers.get("cache-control")).toBe("no-store");
@@ -83,19 +89,21 @@ test.each([
   false,
 ])("reports update availability: %s", async (available) => {
   await writeFile(
-    path.join(dir, "server"),
+    serverPath,
     `#!/bin/sh
 echo '{"available":${available}}'
 `,
   );
-  const response = await handleAdminUpdateCheck(checkRequest());
+  const response = await handleAdminUpdateCheck(checkRequest(), { serverPath });
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(await response.json()).toEqual({ available });
 });
 
 test("requires an admin session before checking the remote", async () => {
-  expect((await handleAdminUpdateCheck(checkRequest(""))).status).toBe(401);
+  expect(
+    (await handleAdminUpdateCheck(checkRequest(""), { serverPath })).status,
+  ).toBe(401);
   await expect(readFile(path.join(dir, "receipt"))).rejects.toThrow();
 });
 
@@ -106,12 +114,14 @@ test("a failed or invalid check is not reported as up to date", async () => {
     `echo '{"available":"false"}'`,
   ]) {
     await writeFile(
-      path.join(dir, "server"),
+      serverPath,
       `#!/bin/sh
 ${body}
 `,
     );
-    const response = await handleAdminUpdateCheck(checkRequest());
+    const response = await handleAdminUpdateCheck(checkRequest(), {
+      serverPath,
+    });
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error: "Could not check for updates.",

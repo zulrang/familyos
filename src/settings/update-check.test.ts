@@ -56,7 +56,6 @@ test("checks actual remote history without changing the checkout", async () => {
       "preview",
     );
     expect((await git(local, "status", "--porcelain")).stdout).toBe(before);
-    // Local main catches up, while the checked-out preview branch stays behind.
     await git(local, "branch", "-f", "main", "origin/main");
     expect(await check()).toEqual({ available: false });
     await git(

@@ -16,16 +16,13 @@ import {
   zonedHourMinute,
 } from "@/shared/time";
 
-/** Whose day the Today screen shows. */
 export type TodayFilter =
   | { kind: "everyone" }
   | { kind: "member"; member: MemberId };
 
 export type DayLane = { member: ActiveMember; events: LaidOut<CalEvent>[] };
 
-/** One day's timed events arranged as a lane per Active Member. */
 export type DayLanes = {
-  /** Events for everyone that clash with nobody's own event: drawn once across all lanes. */
   bands: LaidOut<CalEvent>[];
   lanes: DayLane[];
 };
@@ -33,10 +30,8 @@ export type DayLanes = {
 const VISIBLE_HOURS = DAY_END_HOUR - DAY_START_HOUR;
 const MIN_HOUR_PX = 48;
 const MIN_BLOCK_PX = 36;
-/** Until the grid has been measured, and wherever layout is unavailable. */
 export const DEFAULT_HOUR_PX = 60;
 
-/** The instants of `day` in the Household Time Zone, as an event read range. */
 export function dayRange(
   day: Date,
   timeZone: string,
@@ -48,11 +43,7 @@ export function dayRange(
   };
 }
 
-/**
- * The Active Members an event belongs to. None means it is for everyone: a
- * Household Event, or one whose participants are all retired or unknown.
- */
-export function eventOwners(
+export function activeEventParticipants(
   event: CalEvent,
   members: readonly ActiveMember[],
 ): MemberId[] {
@@ -74,26 +65,31 @@ export function dayLanes(
   const timed = events.filter(
     (event) => !event.allDay && coversDay(event, day, timeZone),
   );
-  const owned = timed.filter((event) => eventOwners(event, members).length > 0);
-  const forEveryone = timed.filter(
-    (event) => eventOwners(event, members).length === 0,
+  const withParticipants = timed.filter(
+    (event) => activeEventParticipants(event, members).length > 0,
   );
-  const isBand = (event: CalEvent) =>
-    !owned.some((other) => overlaps(event, other));
-  const crowded = forEveryone.filter((event) => !isBand(event));
+  const forEveryone = timed.filter(
+    (event) => activeEventParticipants(event, members).length === 0,
+  );
+  const spansAllLanes = (event: CalEvent) =>
+    !withParticipants.some((other) => overlaps(event, other));
+  const overlappingForEveryone = forEveryone.filter(
+    (event) => !spansAllLanes(event),
+  );
   return {
-    bands: layoutColumns(forEveryone.filter(isBand)),
+    bands: layoutColumns(forEveryone.filter(spansAllLanes)),
     lanes: members.map((member) => ({
       member,
       events: layoutColumns([
-        ...owned.filter((event) => event.participantIds.includes(member.id)),
-        ...crowded,
+        ...withParticipants.filter((event) =>
+          event.participantIds.includes(member.id),
+        ),
+        ...overlappingForEveryone,
       ]),
     })),
   };
 }
 
-/** One member's day: their own events and everything that is for everyone. */
 export function memberDayLane(
   events: readonly CalEvent[],
   member: ActiveMember,
@@ -104,13 +100,12 @@ export function memberDayLane(
   return layoutColumns(
     events.filter((event) => {
       if (event.allDay || !coversDay(event, day, timeZone)) return false;
-      const owners = eventOwners(event, members);
-      return owners.length === 0 || owners.includes(member.id);
+      const participants = activeEventParticipants(event, members);
+      return participants.length === 0 || participants.includes(member.id);
     }),
   );
 }
 
-/** All-day events on `day`, everyone's first. */
 export function allDayEvents(
   events: readonly CalEvent[],
   members: readonly ActiveMember[],
@@ -121,21 +116,21 @@ export function allDayEvents(
   return events
     .filter((event) => {
       if (!event.allDay || !coversDay(event, day, timeZone)) return false;
-      const owners = eventOwners(event, members);
+      const participants = activeEventParticipants(event, members);
       return (
         filter.kind === "everyone" ||
-        owners.length === 0 ||
-        owners.includes(filter.member)
+        participants.length === 0 ||
+        participants.includes(filter.member)
       );
     })
     .sort(
       (a, b) =>
-        eventOwners(a, members).length - eventOwners(b, members).length ||
+        activeEventParticipants(a, members).length -
+          activeEventParticipants(b, members).length ||
         a.title.localeCompare(b.title),
     );
 }
 
-/** Hour height that shows the whole day window in `viewportPx` when it can. */
 export function hourHeight(viewportPx: number): number {
   if (viewportPx <= 0) return DEFAULT_HOUR_PX;
   return Math.min(
@@ -148,8 +143,7 @@ export function gridHeight(hourPx: number): number {
   return VISIBLE_HOURS * hourPx;
 }
 
-/** Minutes into the visible window, with instants outside `day` or the window pinned to its edges. */
-function windowMinutes(ms: number, day: Date, timeZone: string): number {
+function clampedWindowMinutes(ms: number, day: Date, timeZone: string): number {
   const dayStart = startOfDay(day, timeZone).getTime();
   const dayEnd = addDays(new Date(dayStart), 1, timeZone).getTime();
   const { hour, minute } = zonedHourMinute(ms, timeZone);
@@ -158,20 +152,19 @@ function windowMinutes(ms: number, day: Date, timeZone: string): number {
   return Math.min(VISIBLE_HOURS * 60, Math.max(0, ofDay - DAY_START_HOUR * 60));
 }
 
-/** Where an event sits in the grid. Events outside the window stay visible at its edge. */
 export function eventBox(
   event: { startMs: number; endMs: number },
   day: Date,
   timeZone: string,
   hourPx: number,
 ): { top: number; height: number } {
-  const start = (windowMinutes(event.startMs, day, timeZone) / 60) * hourPx;
-  const end = (windowMinutes(event.endMs, day, timeZone) / 60) * hourPx;
+  const start =
+    (clampedWindowMinutes(event.startMs, day, timeZone) / 60) * hourPx;
+  const end = (clampedWindowMinutes(event.endMs, day, timeZone) / 60) * hourPx;
   const height = Math.max(MIN_BLOCK_PX, end - start);
   return { top: Math.min(start, gridHeight(hourPx) - height), height };
 }
 
-/** The now-line offset, or null when now is outside the visible window. */
 export function nowOffset(
   now: Date,
   timeZone: string,
@@ -182,7 +175,6 @@ export function nowOffset(
   return ((hour - DAY_START_HOUR) * 60 + minute) * (hourPx / 60);
 }
 
-/** The hour a tap at `y` falls in, or null outside the window. */
 export function hourAt(
   day: Date,
   y: number,

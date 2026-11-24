@@ -186,11 +186,6 @@ function sortOccurrences(
   return rows.slice().sort((a, b) => compareOccurrences(a, b, order));
 }
 
-/**
- * Remaining Occurrences first (timed, then untimed), then completed in that
- * same order. Current position is the creation-order fallback, so an
- * optimistic complete matches the projection before reload.
- */
 export function occurrencesForColumn(
   rows: readonly Occurrence[],
 ): Occurrence[] {

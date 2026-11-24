@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-# Run on the Pi as root with observe.py and the unit beside this script.
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 install -d -m 755 /usr/local/lib/familyos
 install -m 755 "$source_dir/observe.py" /usr/local/lib/familyos/observe.py

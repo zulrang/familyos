@@ -6,7 +6,6 @@ function digest(value: string) {
   return createHash("sha256").update(value).digest();
 }
 
-/** Agent credentials are accepted only here, never by browser or admin APIs. */
 export async function handleMcp(
   request: Request,
   createServer: () => McpServer,
@@ -18,8 +17,6 @@ export async function handleMcp(
       { error: "Agent access is not configured on this server." },
       { status: 503, headers },
     );
-  // This endpoint serves non-browser clients. Reject every browser Origin,
-  // including null; do not trust Host or forwarded headers for this decision.
   if (request.headers.has("origin"))
     return Response.json(
       { error: "Browser origins are not allowed on this endpoint." },

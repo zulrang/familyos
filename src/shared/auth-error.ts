@@ -1,5 +1,4 @@
-/** Provider / Google auth failure (not Display pairing). */
-export class AuthError extends Error {
+export class ProviderAuthError extends Error {
   constructor() {
     super("not signed in");
   }

@@ -65,7 +65,6 @@ type LegacyBountyCompletionCorrectionFields = Readonly<{
   at: Instant;
 }>;
 
-/** Restore is historical import data only; no new Restore command exists. */
 export type LegacyBountyCompletionCorrection =
   LegacyBountyCompletionCorrectionFields &
     (
@@ -85,7 +84,6 @@ type LegacyBountyCompletionCarrierFields = Readonly<{
   sourceWindow: LocalDate;
   definition: TaskId;
   offering: LegacyOfferingKey;
-  /** Current display title of the mapped Bounty Definition. */
   title: TaskTitle;
   revision: LegacyBountyCarrierRevision;
   history: readonly LegacyBountyCompletionCorrection[];

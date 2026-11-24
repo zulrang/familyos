@@ -263,7 +263,6 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
 
   useEffect(() => {
     if (!ready || count < 2) return;
-    // Warm the browser cache for the next slide so the 15s swap is instant.
     const next = new Image();
     next.src = ready.photos[(index + 1) % count].src;
   }, [ready, index, count]);
@@ -471,7 +470,6 @@ export function PhotosScreen(props: PhotosPresentation = {}) {
           <div className={styles.viewer}>
             {photo ? (
               <>
-                {/* Google media is served through the paired-display endpoint; it must not enter Next's public image cache. */}
                 {/* biome-ignore lint/performance/noImgElement: private authenticated photo stream */}
                 <img
                   key={photo.src}

@@ -1,6 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
 
-/** ADR 0007: stored balances start at zero; historical completions are not backfilled. */
 export function migrateTaskAdministration(db: DatabaseSync) {
   const hasBalances = db
     .prepare(

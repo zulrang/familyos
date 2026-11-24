@@ -46,20 +46,42 @@ export function Checkbox({
     );
   }
   return (
-    // biome-ignore lint/a11y/useSemanticElements: custom tone fill; native checkbox cannot
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
+    <span
       style={{
+        position: "relative",
         ...box,
         cursor: "pointer",
         transition: "background var(--dur-fast) var(--ease-standard)",
       }}
     >
-      {mark}
-    </button>
+      <input
+        type="checkbox"
+        checked={checked}
+        aria-label={label}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{
+          appearance: "none",
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          margin: 0,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+        }}
+      />
+      {mark ? (
+        <span
+          style={{
+            position: "relative",
+            pointerEvents: "none",
+            display: "inline-flex",
+          }}
+        >
+          {mark}
+        </span>
+      ) : null}
+    </span>
   );
 }

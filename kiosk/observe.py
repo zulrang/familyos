@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Private, bounded diagnostics for the wall kiosk. No browser credentials are read."""
 
 import argparse
 import base64
@@ -41,7 +40,6 @@ def remaining(deadline):
 
 
 def route_bucket(url, page_origin):
-    """Only static API family names are retained; all path values and queries disappear."""
     if origin(url) != page_origin:
         return "other"
     path = urlsplit(url).path
@@ -378,8 +376,7 @@ class PageProbe:
                     result = inner.get("value") if isinstance(inner, dict) else None
                     return "healthy" if result == 2 else "unavailable"
                 self.event(message)
-            self.close()  # A stale reply must never make a later probe appear healthy.
-            return "timeout"
+            raise TimeoutError()
         except (TimeoutError, socket.timeout):
             self.close()
             return "timeout"
@@ -407,7 +404,6 @@ def cpu_ticks(stat):
 
 
 def process_metrics():
-    """Bounded /proc sample. Command lines are inspected for role only, never logged."""
     processes = []
     if not Path("/proc").exists():
         return []
@@ -444,7 +440,6 @@ def available_memory_kib():
 
 
 def touch_status(path, wall_now):
-    """Reads the touch guard's counters. Only states and counts are retained, never touch data."""
     empty = {"touch_idle_s": None, "touch_fallback_reports": None, "touch_rebinds": None}
     try:
         data = json.loads(Path(path).read_text()[:4096])

@@ -33,7 +33,6 @@ export type TrustedDisplay = {
   idleDimTo: IdleDimTo;
 };
 
-/** Public list row — scale is per-session, not shared roster data. */
 export type DisplaySummary = {
   id: string;
   createdAt: number;
@@ -168,7 +167,6 @@ export async function resolveTrustedDisplay(
   };
 }
 
-/** Public Display records — never include credential material. */
 export async function listTrustedDisplays(): Promise<DisplaySummary[]> {
   const store = await readStoreUnlocked();
   return store.displays
@@ -206,7 +204,6 @@ export async function setDisplayIdleDim(
   });
 }
 
-/** Emit one short-lived pairing code when no Trusted Display exists yet. */
 export async function emitStartupPairingCode(
   now = Date.now(),
 ): Promise<string | null> {
@@ -218,7 +215,6 @@ export async function emitStartupPairingCode(
   });
 }
 
-/** Any Trusted Display may mint a short-lived code to pair another Display. */
 export async function createPairingCode(
   now = Date.now(),
 ): Promise<{ code: string; expiresAt: number }> {
