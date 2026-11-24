@@ -1,9 +1,7 @@
 import type { MemberPastel } from "@/shared/member-pastel";
 
-/** Rail section colour: a design-skill pastel tone, or neutral grey. Not Member Color. */
 export type NavTone = MemberPastel | "neutral";
 
-/** The section the wall opens to, served at `/`. */
 export const HOME_SECTION = "today";
 
 export const FAMILYOS_NAV = [

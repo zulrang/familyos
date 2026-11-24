@@ -1,4 +1,3 @@
-/** Client: pairing-gate 401 vs Google AuthError 401. */
 export async function redirectIfPairingRequired(
   res: Response,
 ): Promise<boolean> {

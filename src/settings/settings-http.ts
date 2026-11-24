@@ -166,16 +166,12 @@ export async function handlePatchSettings(request: Request): Promise<Response> {
       body.calendarId === undefined ? current.calendarId : body.calendarId;
     if (calendarId && calendarId !== current.calendarId && provider.tokens) {
       try {
-        // DESIGN-DEVIATION: settings applies Household calendarId and needs the
-        // provider timezone; calendar owns listCalendars. Extract a shared
-        // calendar-meta port if a third caller appears.
+        // DESIGN-DEVIATION: settings dynamically imports listCalendars until a third caller warrants a shared port.
         const { listCalendars } = await import("@/calendar/google-events");
         const list = await listCalendars();
         calendarTimeZone =
           list.find((c) => c.id === calendarId)?.timeZone ?? calendarTimeZone;
-      } catch {
-        /* keep existing tz */
-      }
+      } catch {}
     }
     const result = await updateHousehold(body.expectedVersion, {
       familyName: body.familyName,

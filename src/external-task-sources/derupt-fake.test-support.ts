@@ -1,11 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-/**
- * An in-memory Derupt processor endpoint for tests: a queue of hand-offs,
- * leases with generations, and strict decoding of what FamilyOS sends. Its
- * reply shapes follow the recorded examples pinned in derupt.contract.test.ts.
- */
 export type FakeHandOff = {
   id: string;
   kind?: "idea" | "research" | "purchase" | "task";
@@ -83,12 +78,9 @@ export class FakeDerupt {
   readonly outcomes = new Map<string, FakeOutcome[]>();
   readonly received: Record<string, unknown>[] = [];
   readonly strictViolations: string[] = [];
-  /** Answer the next requests with HTTP 500. */
-  serverErrors = 0;
-  /** The connection was removed: claims are rejected not_authorized. */
+  remainingServerErrorResponses = 0;
   revoked = false;
-  /** Per-message override, consumed in order, for lease messages. */
-  readonly interceptions: ((
+  readonly queuedLeaseReplyOverrides: ((
     message: Record<string, unknown>,
   ) => Reply | null)[] = [];
   private readonly generations = new Map<string, number>();
@@ -136,8 +128,8 @@ export class FakeDerupt {
       unknown
     >;
     this.received.push(message);
-    if (this.serverErrors > 0) {
-      this.serverErrors -= 1;
+    if (this.remainingServerErrorResponses > 0) {
+      this.remainingServerErrorResponses -= 1;
       return { status: 500, body: { error: "internal_error" } };
     }
     const type = String(message.type);
@@ -159,8 +151,9 @@ export class FakeDerupt {
       return rejected("invalid_value");
     }
     if (type === "claim") return this.claim();
-    const intercepted = this.interceptions.shift()?.(message) ?? null;
-    if (intercepted) return intercepted;
+    const replyOverride =
+      this.queuedLeaseReplyOverrides.shift()?.(message) ?? null;
+    if (replyOverride) return replyOverride;
     const workId = String(lease?.workId);
     const generation = Number(lease?.generation);
     if (this.leased.get(workId) !== generation) return rejected("stale_lease");

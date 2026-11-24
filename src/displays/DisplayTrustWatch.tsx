@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import { displayWatchAction, parseReadySnapshot } from "./display-watch";
 
-/** Drop to pairing when revoked. Reload when the server build changes. */
 export function DisplayTrustWatch() {
   useEffect(() => {
     let cancelled = false;
@@ -24,9 +23,7 @@ export function DisplayTrustWatch() {
           return;
         }
         knownBuildId = action.buildId;
-      } catch {
-        /* transient network; try again next tick */
-      }
+      } catch {}
     }
 
     void check();

@@ -28,7 +28,6 @@ export type HouseholdConfig = {
   configVersion: number;
 };
 
-/** A configuration to store; settings added later default when omitted. */
 export type HouseholdConfigInput = Omit<
   HouseholdConfig,
   "externalTaskDefaultMember"
@@ -152,7 +151,6 @@ export async function readHousehold(): Promise<HouseholdConfig> {
   }
 }
 
-// Replace atomically so readers never observe a partially written roster.
 export async function writeHousehold(
   next: HouseholdConfigInput,
 ): Promise<void> {
@@ -170,12 +168,6 @@ export type HouseholdUpdateResult =
       config: HouseholdConfig;
     };
 
-/**
- * Apply a household patch when expectedVersion matches.
- * On mismatch (or non-integer expectedVersion), leave storage unchanged.
- * Member roster patches are validated through parseRoster.
- * listIds patches are normalized through parseListIds.
- */
 async function updateHouseholdUnlocked(
   expectedVersion: unknown,
   patch: Partial<

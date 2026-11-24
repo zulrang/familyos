@@ -2,7 +2,6 @@ import type { HouseholdList, ListItem } from "@/lists/types";
 import { rethrowAsUnavailable } from "./lists-error";
 import * as tasks from "./tasks";
 
-/** Port for Household Lists provider operations (Google Tasks adapter / Fake). */
 export type ListsGateway = {
   listSelected: (listIds: string[]) => Promise<HouseholdList[]>;
   createList: (title: string) => Promise<HouseholdList>;
@@ -37,7 +36,6 @@ function live<Args extends unknown[], Result>(
   };
 }
 
-/** Real Google Tasks adapter behind the ListsGateway port. */
 export function googleListsGateway(): ListsGateway {
   return {
     listSelected: live(tasks.listSelectedListsWithItems),

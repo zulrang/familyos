@@ -9,7 +9,6 @@ export type Tokens = {
   expiry: number;
 };
 
-/** Server-local Provider Connection — credentials + identity for cache isolation. */
 export type ProviderConnection = {
   tokens: Tokens | null;
   oauthState: string | null;
@@ -46,7 +45,6 @@ function normalize(raw: Partial<ProviderConnection>): ProviderConnection {
   };
 }
 
-/** Drop OAuth secrets from pre-split kiosk.json so logout/migrate cannot revive them. */
 async function scrubLegacyCredentials(): Promise<void> {
   try {
     const raw = await readFile(legacyFile(), "utf8");
@@ -54,9 +52,7 @@ async function scrubLegacyCredentials(): Promise<void> {
     if (!("tokens" in parsed) && !("oauthState" in parsed)) return;
     const { tokens: _tokens, oauthState: _oauth, ...rest } = parsed;
     await writeAtomicJson(legacyFile(), rest, { pretty: true });
-  } catch {
-    /* no legacy file */
-  }
+  } catch {}
 }
 
 async function migrateFromLegacy(): Promise<ProviderConnection | null> {
@@ -96,8 +92,6 @@ async function migrateOrEmptyUnlocked(): Promise<ProviderConnection> {
   } catch {
     const legacy = await migrateFromLegacy();
     if (legacy) {
-      // Persist first, then scrub — same order as establish/clear so a failed
-      // write still leaves credentials recoverable from kiosk.json.
       await writeProviderUnlocked(legacy);
       await scrubLegacyCredentials();
       return legacy;
@@ -129,7 +123,6 @@ export async function patchProvider(
   });
 }
 
-/** Bind tokens to a Google account identity (userinfo `sub`). */
 export async function establishProviderConnection(
   accountId: string,
   tokens: Tokens,
@@ -177,11 +170,6 @@ function matchesRefreshTarget(
   );
 }
 
-/**
- * Commit refreshed tokens only if the provider connection and refresh token
- * still match the session that initiated the refresh (e.g., no concurrent logout
- * or account switch).
- */
 export async function commitRefreshedTokens(
   expected: RefreshTarget,
   next: Tokens,
@@ -194,10 +182,6 @@ export async function commitRefreshedTokens(
   });
 }
 
-/**
- * Clear tokens after `invalid_grant` only if the connection and refresh token
- * still match the refresh that failed.
- */
 export async function clearProviderConnectionIfMatching(
   expected: RefreshTarget,
 ): Promise<boolean> {

@@ -50,7 +50,6 @@ function cookieValue(request: Request, name: string) {
 }
 
 function cookie(name: string, value: string, maxAge: number) {
-  // The household explicitly uses HTTP. HttpOnly keeps credentials out of JS.
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
 }
 
@@ -84,7 +83,6 @@ function session(request: Request, now: number) {
   return row ? { token: digest(token), lastSeen: Number(row.last_seen) } : null;
 }
 
-/** Every admin data endpoint checks the server-side expiry, including reads. */
 export function requireAdmin(request: Request): Response | null {
   if (request.method !== "GET" && !adminWriteAllowed(request)) {
     return adminJson(
@@ -163,7 +161,6 @@ export async function handleAdminSession(
       adminJson({ status: "unlocked", expiresAt: now + ADMIN_IDLE_MS }),
     );
   }
-  // Both counts are persisted; clearing a device cookie cannot bypass the global limit.
   const failures = db
     .prepare("SELECT device, at FROM failures ORDER BY at")
     .all();

@@ -1492,11 +1492,15 @@ export function releaseBounty(input: {
   }
 }
 
-/** Runs inside the caller's task transaction and is safe to repeat. */
 export function releaseBountiesForRetiredMembers(
   db: DatabaseSync,
   retiredMembers: ReadonlySet<MemberId>,
 ): void {
+  if (!db.isTransaction) {
+    throw new Error(
+      "releaseBountiesForRetiredMembers requires an active transaction",
+    );
+  }
   if (retiredMembers.size === 0) return;
   const claims = db
     .prepare(

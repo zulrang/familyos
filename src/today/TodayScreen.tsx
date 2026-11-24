@@ -39,12 +39,12 @@ import { MemberTasks } from "@/tasks/TasksBoard";
 import { useTasksWorkspace } from "@/tasks/TasksWorkspace";
 import styles from "./TodayScreen.module.css";
 import {
+  activeEventParticipants,
   allDayEvents,
   DEFAULT_HOUR_PX,
   dayLanes,
   dayRange,
   eventBox,
-  eventOwners,
   gridHeight,
   hourAt,
   hourHeight,
@@ -54,9 +54,7 @@ import {
 } from "./today";
 
 const EVERYONE: TodayFilter = { kind: "everyone" };
-/** Vertical padding of the scrolling grid; keep in step with `.grid > .columns`. */
-const GRID_PAD_PX = 24;
-/** Below this height an event shows its title and time on one line. */
+const COLUMNS_VERTICAL_PADDING_PX = 24;
 const ONE_LINE_PX = 58;
 
 function laneStyle(member: ActiveMember): CSSProperties {
@@ -95,15 +93,16 @@ function DayEvent({
 }: {
   event: LaidOut<CalEvent>;
   view: DayView;
-  /** The lane this copy is drawn in; absent for a band across every lane. */
   lane?: ActiveMember;
   wide?: boolean;
 }) {
   const { day, timeZone, hourPx, members, calendar } = view;
-  const owners = eventOwners(event, members);
+  const participants = activeEventParticipants(event, members);
   const people = peopleOf(calendar.members, event);
   const paint =
-    owners.length === 0 ? null : eventPaint(lane && !wide ? [lane] : people);
+    participants.length === 0
+      ? null
+      : eventPaint(lane && !wide ? [lane] : people);
   const others = people.filter((person) => person.id !== lane?.id);
   const box = eventBox(event, day, timeZone, hourPx);
   const width = `calc((100% - 12px) / ${event.cols})`;
@@ -112,7 +111,7 @@ function DayEvent({
       type="button"
       className={styles.event}
       data-layout={wide || box.height < ONE_LINE_PX ? "line" : "stack"}
-      data-everyone={owners.length === 0}
+      data-everyone={participants.length === 0}
       disabled={!calendar.canMutate}
       onClick={() => calendar.editEvent(event)}
       style={{
@@ -129,7 +128,7 @@ function DayEvent({
       <span className={styles.eventTime}>
         {formatTimeRange(event.startMs, event.endMs, timeZone)}
       </span>
-      {owners.length === 0 ? (
+      {participants.length === 0 ? (
         wide || !lane ? (
           <span className={styles.eventWho}>
             <Icon name="home" size={18} /> Everyone
@@ -224,6 +223,7 @@ export function TodayScreen() {
   const [chosen, setChosen] = useState<MemberId | null>(null);
   const [hourPx, setHourPx] = useState(DEFAULT_HOUR_PX);
   const gridRef = useRef<HTMLDivElement>(null);
+  const didScrollNowRef = useRef(false);
 
   const settings = calendar.settings ?? tasks.settings;
   const timeZone = settings?.timeZone;
@@ -235,22 +235,23 @@ export function TodayScreen() {
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
-    if (!grid) return;
-    const fit = () => setHourPx(hourHeight(grid.clientHeight - GRID_PAD_PX));
+    if (!timeZone || !grid) return;
+    const fit = () =>
+      setHourPx(hourHeight(grid.clientHeight - COLUMNS_VERTICAL_PADDING_PX));
     fit();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(fit);
     observer.observe(grid);
     return () => observer.disconnect();
-  }, []);
+  }, [timeZone]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: bring now into view once, when the grid first has a time zone
   useEffect(() => {
     const grid = gridRef.current;
-    if (!grid || !timeZone) return;
+    if (!grid || !timeZone || didScrollNowRef.current) return;
     const top = nowOffset(new Date(), timeZone, hourPx);
     if (top !== null) grid.scrollTop = Math.max(0, top - grid.clientHeight / 2);
-  }, [timeZone]);
+    didScrollNowRef.current = true;
+  }, [timeZone, hourPx]);
 
   const view: DayView | null = timeZone
     ? { day: now, timeZone, hourPx, members, calendar }
@@ -452,20 +453,20 @@ function AllDay({ view, filter }: { view: DayView; filter: TodayFilter }) {
       <span className={styles.allDayLabel}>All day</span>
       <div className={styles.allDayBars}>
         {events.map((event) => {
-          const owners = eventOwners(event, members);
+          const participants = activeEventParticipants(event, members);
           const people = peopleOf(calendar.members, event);
-          const paint = owners.length === 0 ? null : eventPaint(people);
+          const paint = participants.length === 0 ? null : eventPaint(people);
           return (
             <button
               key={event.id}
               type="button"
               className={styles.allDayBar}
-              data-everyone={owners.length === 0}
+              data-everyone={participants.length === 0}
               disabled={!calendar.canMutate}
               onClick={() => calendar.editEvent(event)}
               style={{ background: paint?.soft }}
             >
-              {owners.length === 0 ? (
+              {participants.length === 0 ? (
                 <Icon name="home" size={18} />
               ) : (
                 <AvatarStack

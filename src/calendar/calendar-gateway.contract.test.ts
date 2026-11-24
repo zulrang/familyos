@@ -1,8 +1,4 @@
-/**
- * CalendarGateway Google adapter half of the shared contract (#40).
- * DESIGN-DEVIATION: see calendar-gateway.recorded.ts — hand-authored Calendar HTTP,
- * not live Google / captured cassettes.
- */
+/** DESIGN-DEVIATION: see calendar-gateway.recorded.ts. */
 
 import { test, vi } from "vitest";
 import { assertCalendarGatewayContract } from "./calendar-gateway.contract";

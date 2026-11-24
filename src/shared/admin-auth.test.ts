@@ -141,7 +141,6 @@ describe("parent PIN sessions", () => {
       expect(
         (await call("POST", { pin: "000000" }, now + i * 30_000)).status,
       ).toBe(401);
-    // The oldest failure has expired, but the cooldown has not.
     const blocked = await call("POST", { pin: "123456" }, now + 310_000);
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);

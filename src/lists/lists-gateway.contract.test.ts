@@ -1,8 +1,4 @@
-/**
- * ListsGateway Google adapter half of the shared contract (#27).
- * DESIGN-DEVIATION: see lists-gateway.recorded.ts — hand-authored Tasks HTTP,
- * not live Google / captured cassettes.
- */
+// DESIGN-DEVIATION: see lists-gateway.recorded.ts.
 
 import { test, vi } from "vitest";
 import { assertListsGatewayContract } from "./lists-gateway.contract";
@@ -23,7 +19,7 @@ const recorded = vi.hoisted(() => {
 recorded.install(createRecordedTasksGfetch());
 
 vi.mock("@/shared/google", () => ({
-  AuthError: class AuthError extends Error {},
+  ProviderAuthError: class ProviderAuthError extends Error {},
   gfetch: recorded.gfetch,
   throwIfGoogleFailed: async (response: Response) => {
     if (!response.ok)

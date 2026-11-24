@@ -1,12 +1,15 @@
 import { describe, expect, test } from "vitest";
 import type { HouseholdMember } from "@/members/members";
-import { type LocalDate, parseLocalDate } from "@/tasks/types";
+import {
+  type LocalDate,
+  parseLocalDate,
+  TASK_TITLE_MAX_LENGTH,
+} from "@/tasks/types";
 import {
   type ExternalTaskRequest,
   externalTaskTitle,
   type IntakeHousehold,
   planExternalTask,
-  TASK_TITLE_LIMIT,
 } from "./intake";
 
 function date(value: string): LocalDate {
@@ -245,7 +248,7 @@ describe("title", () => {
 
   test("a long title is cut to the limit with an ellipsis", () => {
     const title = externalTaskTitle(request({ transcript: "a".repeat(600) }));
-    expect(title).toHaveLength(TASK_TITLE_LIMIT);
+    expect(title).toHaveLength(TASK_TITLE_MAX_LENGTH);
     expect(title.endsWith("a…")).toBe(true);
   });
 

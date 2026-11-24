@@ -91,11 +91,10 @@ function toCalEvent(g: GEvent, timeZone: string): CalEvent | null {
     allDay: start.allDay,
     startMs: start.ms,
     endMs: end.ms,
-    // Identity from private IDs only — never colorId or attendees.
     participantIds: parseParticipantIds(
       stored === undefined || stored === null ? undefined : stored,
     ),
-    expectedVersion: g.etag ?? "", // DESIGN-DEVIATION: live Google may omit etag; empty cannot mutate (HTTP requires a token)
+    expectedVersion: g.etag ?? "", // DESIGN-DEVIATION: empty expectedVersion renders missing Google etag read-only.
     recurringEventId: g.recurringEventId,
     originalStartMs: original?.ms,
   };
@@ -141,7 +140,6 @@ export type EventWrite = {
   startMs: number;
   endMs: number;
   participantIds: string[];
-  /** Google colorId only — never Event Participant identity. */
   legacyTones?: LegacyTone[];
 };
 
@@ -182,7 +180,6 @@ function gBody(
   if (colorId) body.colorId = colorId;
   else if (mode === "update") body.colorId = null;
   // ponytail: Google 400s on null private props ("Required"); "" clears prior lists.
-  // Also wipe legacy familyosTones so tone-as-identity can't linger beside IDs.
   const privateProps: Record<string, string> = {
     [PARTICIPANTS_PROP]: serializeParticipantIds(participantIds),
   };
@@ -413,6 +410,43 @@ async function updateFollowing(
   }
 }
 
+type MasterContext =
+  | { kind: "standalone" }
+  | {
+      kind: "recurring";
+      instance: GEvent;
+      masterId: string;
+      master: GEvent;
+      masterVersion: string;
+      orig: { ms: number; allDay: boolean } | null;
+      mStart: { ms: number; allDay: boolean } | null;
+    };
+
+async function verifyInstanceAndFetchMaster(
+  calendarId: string,
+  eventId: string,
+  expectedVersion: string,
+  timeZone: string,
+): Promise<MasterContext> {
+  const instance = await getGEvent(calendarId, eventId);
+  if ((instance.etag ?? "") !== expectedVersion) {
+    throw new EventConflictError(toCalEvent(instance, timeZone));
+  }
+  const masterId = instance.recurringEventId;
+  if (!masterId) return { kind: "standalone" };
+  const master = await getGEvent(calendarId, masterId);
+  return {
+    kind: "recurring",
+    instance,
+    masterId,
+    master,
+    // Series writes If-Match the master's etag; instance etag was checked above so stale Displays still 409.
+    masterVersion: master.etag ?? "",
+    orig: parseGDate(instance.originalStartTime ?? instance.start, timeZone),
+    mStart: parseGDate(master.start, timeZone),
+  };
+}
+
 export async function updateEvent(
   calendarId: string,
   eventId: string,
@@ -431,33 +465,13 @@ export async function updateEvent(
       eventId,
     );
   }
-  const instance = await getGEvent(calendarId, eventId);
-  if ((instance.etag ?? "") !== expectedVersion) {
-    throw new EventConflictError(toCalEvent(instance, timeZone));
-  }
-  const masterId = instance.recurringEventId;
-  if (!masterId) {
-    return calFromPatch(
-      calendarId,
-      eventId,
-      gBody(w, "update", timeZone),
-      timeZone,
-      expectedVersion,
-      eventId,
-    );
-  }
-  const master = await getGEvent(calendarId, masterId);
-  const orig = parseGDate(
-    instance.originalStartTime ?? instance.start,
+  const context = await verifyInstanceAndFetchMaster(
+    calendarId,
+    eventId,
+    expectedVersion,
     timeZone,
   );
-  const mStart = parseGDate(master.start, timeZone);
-  // ponytail: series writes If-Match the master's current etag (an instance
-  // token cannot If-Match a different resource). The instance token is checked
-  // above so a stale Display still 409s; concurrent master writes 412 on this
-  // GET-then-PATCH. Upgrade: persist series etag on listed instances.
-  const masterVersion = master.etag ?? "";
-  if (!orig || !mStart) {
+  if (context.kind === "standalone" || !context.orig || !context.mStart) {
     return calFromPatch(
       calendarId,
       eventId,
@@ -467,6 +481,7 @@ export async function updateEvent(
       eventId,
     );
   }
+  const { instance, masterId, master, masterVersion, orig, mStart } = context;
   const head = isSeriesHead(orig.ms, mStart.ms);
   if (scope === "all" || head) {
     const shifted = writeForMaster(master, instance, w, timeZone);
@@ -487,7 +502,6 @@ export async function updateEvent(
       eventId,
     );
   }
-  // ponytail: no RRULE to split; later exceptions are not copied onto the new series.
   if (!master.recurrence?.length) {
     return calFromPatch(
       calendarId,
@@ -529,23 +543,18 @@ export async function deleteEvent(
     await del(eventId, expectedVersion);
     return;
   }
-  const instance = await getGEvent(calendarId, eventId);
-  if ((instance.etag ?? "") !== expectedVersion) {
-    throw new EventConflictError(toCalEvent(instance, timeZone));
-  }
-  const masterId = instance.recurringEventId;
-  if (!masterId) {
+  const context = await verifyInstanceAndFetchMaster(
+    calendarId,
+    eventId,
+    expectedVersion,
+    timeZone,
+  );
+  if (context.kind === "standalone") {
     await del(eventId, expectedVersion);
     return;
   }
-  const master = await getGEvent(calendarId, masterId);
-  const orig = parseGDate(
-    instance.originalStartTime ?? instance.start,
-    timeZone,
-  );
-  const mStart = parseGDate(master.start, timeZone);
+  const { masterId, master, masterVersion, orig, mStart } = context;
   const head = orig && mStart ? isSeriesHead(orig.ms, mStart.ms) : false;
-  const masterVersion = master.etag ?? "";
   if (scope === "all" || head || !orig || !master.recurrence?.length) {
     await del(masterId, masterVersion);
     return;

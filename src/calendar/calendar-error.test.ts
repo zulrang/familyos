@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 import {
   EventConflictError,
   ProviderUnavailableError,
@@ -30,7 +30,7 @@ test("a Google outage is logged with the original error before becoming unavaila
 
 test("auth failures are not wrapped or logged as unavailable", () => {
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const auth = new AuthError();
+  const auth = new ProviderAuthError();
   try {
     rethrowAsUnavailable(auth);
     assert.fail("expected throw");

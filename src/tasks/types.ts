@@ -92,7 +92,6 @@ export type OfferingKey =
       intervalStart: LocalDate;
     }>;
 
-/** An imported reservation keeps its source occurrence without becoming claimable. */
 export type LegacyOfferingKey = Readonly<{
   kind: "legacy";
   definition: TaskId;
@@ -590,7 +589,8 @@ const CREATE_KEYS = new Set([
   "stars",
 ]);
 
-/** Every create field except assignment, which each caller parses itself. */
+export const TASK_TITLE_MAX_LENGTH = 500;
+
 function parseCreateTaskFields(
   raw: unknown,
 ): Omit<CreateTaskDraft, "assignment"> | null {
@@ -619,11 +619,6 @@ export function parseCreateTaskDraft(raw: unknown): CreateTaskDraft | null {
   return fields && assignment ? { ...fields, assignment } : null;
 }
 
-/**
- * A request to create the same Task once for each chosen member: one
- * independent fixed-assignment Task per member, written together. "each" is a
- * create-time instruction only; it is never stored as an AssignmentPolicy.
- */
 export type EachMemberTaskDraft = { kind: "each-member" } & Omit<
   AssignedTaskDraft,
   "assignment"
@@ -644,7 +639,6 @@ export function parseEachMemberTaskDraft(
     : null;
 }
 
-/** The fixed-assignment Task drafts an each-member request creates, in member order. */
 export function eachMemberDrafts(
   draft: EachMemberTaskDraft,
 ): NonEmpty<AssignedTaskDraft> {

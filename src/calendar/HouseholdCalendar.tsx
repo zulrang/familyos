@@ -1,6 +1,12 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   addDays,
   fromDateAndTime,
@@ -27,7 +33,6 @@ function toDraft(ev: CalEvent, timeZone: string): EventDraft {
     endDate: msToDateInput(endInclusive, timeZone),
     startTime: msToTimeInput(ev.startMs, timeZone),
     endTime: msToTimeInput(ev.endMs, timeZone),
-    // Round-trip stored IDs even if some no longer resolve on the roster.
     memberIds: [...ev.participantIds],
     recurringEventId: ev.recurringEventId,
     expectedVersion: ev.expectedVersion,
@@ -60,14 +65,11 @@ function createDraft(seed: NewEventSeed, timeZone: string): EventDraft {
 /** Half-open instant range of events to read, as ISO strings. */
 export type EventRange = { from: string; to: string };
 
-/** The Household Calendar as one screen reads and edits it. */
 export type HouseholdCalendar = {
   settings: PublicSettings | null;
   members: Member[];
   events: CalEvent[];
-  /** A live, signed-in read: events may be created and changed. */
   canMutate: boolean;
-  /** Why the calendar is empty or read-only, or the last failure. */
   notice: string | null;
   editEvent: (event: CalEvent) => void;
   newEvent: (seed?: NewEventSeed) => void;
@@ -79,6 +81,8 @@ export type HouseholdCalendar = {
 export function useHouseholdCalendar(
   rangeFor: (timeZone: string) => EventRange,
 ): HouseholdCalendar {
+  const rangeForRef = useRef(rangeFor);
+  rangeForRef.current = rangeFor;
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [calendarRead, setCalendarRead] = useState<CalendarRead>({
     events: [],
@@ -95,52 +99,62 @@ export function useHouseholdCalendar(
   const from = bounds?.from;
   const to = bounds?.to;
 
-  async function load(signal?: AbortSignal) {
-    const req = signal ? { signal } : undefined;
-    const sRes = await fetch("/api/settings", req);
-    if (signal?.aborted) return;
-    if (await redirectIfPairingRequired(sRes)) return;
-    const s = (await sRes.json()) as PublicSettings;
-    if (signal?.aborted) return;
-    setSettings(s);
-    if (!s.calendarId) {
-      setCalendarRead({ events: [], stale: false });
-      return;
-    }
-    const range = rangeFor(s.timeZone);
-    const eRes = await fetch(
-      `/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
-      req,
-    );
-    if (signal?.aborted) return;
-    if (await redirectIfPairingRequired(eRes)) return;
-    if (eRes.status === 401) {
-      setCalendarRead({ events: [], stale: false });
-      setSettings({ ...s, signedIn: false });
-      return;
-    }
-    if (!eRes.ok) {
-      setCalendarRead((cur) => ({ ...cur, stale: true }));
-      setError("Could not load events.");
-      return;
-    }
-    const data = (await eRes.json()) as CalendarRead;
-    if (signal?.aborted) return;
-    setCalendarRead({
-      events: Array.isArray(data.events) ? data.events : [],
-      stale: data.stale === true,
-    });
-    setError(null);
-  }
+  const load = useCallback(
+    async (
+      signal?: AbortSignal,
+      knownRange?: { timeZone: string; range: EventRange },
+    ) => {
+      const req = signal ? { signal } : undefined;
+      const sRes = await fetch("/api/settings", req);
+      if (signal?.aborted) return;
+      if (await redirectIfPairingRequired(sRes)) return;
+      const s = (await sRes.json()) as PublicSettings;
+      if (signal?.aborted) return;
+      setSettings(s);
+      if (!s.calendarId) {
+        setCalendarRead({ events: [], stale: false });
+        return;
+      }
+      const range =
+        knownRange && knownRange.timeZone === s.timeZone
+          ? knownRange.range
+          : rangeForRef.current(s.timeZone);
+      const eRes = await fetch(
+        `/api/events?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+        req,
+      );
+      if (signal?.aborted) return;
+      if (await redirectIfPairingRequired(eRes)) return;
+      if (eRes.status === 401) {
+        setCalendarRead({ events: [], stale: false });
+        setSettings({ ...s, signedIn: false });
+        return;
+      }
+      if (!eRes.ok) {
+        setCalendarRead((cur) => ({ ...cur, stale: true }));
+        setError("Could not load events.");
+        return;
+      }
+      const data = (await eRes.json()) as CalendarRead;
+      if (signal?.aborted) return;
+      setCalendarRead({
+        events: Array.isArray(data.events) ? data.events : [],
+        stale: data.stale === true,
+      });
+      setError(null);
+    },
+    [],
+  );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the visible range bounds change
   useEffect(() => {
     let inFlight: AbortController | null = null;
+    const knownRange =
+      timeZone && from && to ? { timeZone, range: { from, to } } : undefined;
     const run = () => {
       inFlight?.abort();
       const ac = new AbortController();
       inFlight = ac;
-      return load(ac.signal).catch((err: unknown) => {
+      return load(ac.signal, knownRange).catch((err: unknown) => {
         if (ac.signal.aborted) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
         setError("Could not load calendar.");
@@ -152,7 +166,7 @@ export function useHouseholdCalendar(
       inFlight?.abort();
       clearInterval(poll);
     };
-  }, [from, to]);
+  }, [from, to, timeZone, load]);
 
   function applyCurrentEvent(eventId: string, current: CalEvent | null) {
     setCalendarRead((cur) => ({
@@ -163,7 +177,6 @@ export function useHouseholdCalendar(
     }));
   }
 
-  /** Keep the open editor when a 409 includes `event`; a missing key is not a delete. */
   async function reloadConflictingEvent(res: Response, eventId: string) {
     const body = (await res.json()) as { event?: CalEvent | null };
     if ("event" in body) {

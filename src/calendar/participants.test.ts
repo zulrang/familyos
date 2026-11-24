@@ -1,8 +1,3 @@
-/**
- * Event Participant identity seam (#7).
- * IDs in Google private props — never color or attendee email.
- */
-
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {

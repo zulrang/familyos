@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, test, vi } from "vitest";
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CALENDAR_URL =
@@ -86,7 +86,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
 
-  test("invalid_grant on refresh signs out and throws AuthError", async () => {
+  test("invalid_grant on refresh signs out and throws ProviderAuthError", async () => {
     await seedExpiredTokens();
     globalThis.fetch = async (input) => {
       const url = String(input);
@@ -98,7 +98,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       return new Response("{}", { status: 200 });
     };
 
-    await assert.rejects(() => gfetch(CALENDAR_URL), AuthError);
+    await assert.rejects(() => gfetch(CALENDAR_URL), ProviderAuthError);
     const provider = await readProvider();
     assert.equal(provider.tokens, null);
     assert.equal(provider.providerConnectionId, "acct-google");
@@ -158,7 +158,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
     assert.equal(provider.tokens?.refresh_token, "refresh-shared-2");
   });
 
-  test("clearProviderConnection during an in-flight refresh rejects with AuthError without resurrecting tokens", async () => {
+  test("clearProviderConnection during an in-flight refresh rejects with ProviderAuthError without resurrecting tokens", async () => {
     await seedExpiredTokens("refresh-logout-race");
     let tokenRequested!: () => void;
     const waitTokenRequested = new Promise<void>((resolve) => {
@@ -188,7 +188,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       }),
     );
 
-    await assert.rejects(() => pending, AuthError);
+    await assert.rejects(() => pending, ProviderAuthError);
     assert.equal((await readProvider()).tokens, null);
   });
 
@@ -222,7 +222,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }),
     );
 
-    await assert.rejects(() => pending, AuthError);
+    await assert.rejects(() => pending, ProviderAuthError);
     const provider = await readProvider();
     assert.equal(provider.providerConnectionId, "acct-new");
     assert.equal(provider.tokens?.access_token, "new-access");

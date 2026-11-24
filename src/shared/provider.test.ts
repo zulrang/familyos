@@ -1,8 +1,3 @@
-/**
- * Provider Connection identity seam (#5).
- * Injected account ids — no live Google credentials.
- */
-
 import assert from "node:assert/strict";
 import {
   mkdir,

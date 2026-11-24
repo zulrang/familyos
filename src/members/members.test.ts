@@ -1,8 +1,3 @@
-/**
- * Member roster domain seam (#6) and Member Color surfaces (#20).
- * Pure parse/validate/retire/paint — no HTTP, no Settings UI.
- */
-
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {
@@ -257,7 +252,6 @@ describe("Household Members", () => {
   });
 
   test("custom #rrggbb Member Colors get readable soft and ink", () => {
-    // Mix fill with white 55% for soft, #1f2a33 72% for ink, #c5cdd4 45% for muted.
     assert.deepEqual(memberSurface("#4a90d9"), {
       fill: "#4a90d9",
       soft: "#aecdee",

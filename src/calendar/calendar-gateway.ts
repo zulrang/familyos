@@ -3,7 +3,6 @@ import type { CalEvent, SeriesScope } from "@/calendar/types";
 import { rethrowAsUnavailable } from "./calendar-error";
 import * as events from "./google-events";
 
-/** Port for Household Calendar event operations (Google adapter / Fake). */
 export type CalendarGateway = {
   listEvents: (
     calendarId: string,
@@ -45,7 +44,6 @@ function live<Args extends unknown[], Result>(
   };
 }
 
-/** Real Google Calendar adapter behind the CalendarGateway port. */
 export function googleCalendarGateway(): CalendarGateway {
   return {
     listEvents: live(events.listEvents),

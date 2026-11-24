@@ -445,10 +445,6 @@ export type LegacyBountyMigrationResult = Readonly<{
   definitions: number;
 }>;
 
-/**
- * Converts the immutable legacy archive without replaying work or credit writers.
- * The caller supplies the household date; unknown historical acceptance times stay null.
- */
 export function migrateLegacyOpenWork(input: {
   db: DatabaseSync;
   today: LocalDate;

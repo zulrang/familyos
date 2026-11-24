@@ -495,8 +495,6 @@ export function createLegacyBountyV2Fixture(
     db.exec(LEGACY_V1_SCHEMA);
     for (const definition of DEFINITIONS) insertDefinition(db, definition);
 
-    // These completions predate ADR 0007, so the v2 migration intentionally
-    // leaves them without completion-credit rows or balance changes.
     insertEvent(db, {
       task: "legacy-completed-missing-credit",
       window: "2026-09-08",

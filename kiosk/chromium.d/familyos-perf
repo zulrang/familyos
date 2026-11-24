@@ -1,4 +1,3 @@
-# Wall kiosk Chromium: skip the a11y tree Pi OS forces, more raster threads.
 # --force-renderer-accessibility is in /etc/chromium.d/00-rpi-vars; strip it here
 # (a package update may restore the source flag). That flag rebuilds an
 # accessibility tree on every tap and makes the calendar feel laggy.

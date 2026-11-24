@@ -1,4 +1,7 @@
 .screen {
+  --hour-gutter: 76px;
+  --columns-gap: 8px;
+  --grid-pad-block: 12px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -18,8 +21,8 @@
 .columns {
   position: relative;
   display: grid;
-  grid-template-columns: 76px repeat(var(--lanes), minmax(0, 1fr));
-  column-gap: 8px;
+  grid-template-columns: var(--hour-gutter) repeat(var(--lanes), minmax(0, 1fr));
+  column-gap: var(--columns-gap);
   padding-right: 20px;
 }
 .head {
@@ -94,8 +97,8 @@
 }
 .allDay {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  column-gap: 8px;
+  grid-template-columns: var(--hour-gutter) minmax(0, 1fr);
+  column-gap: var(--columns-gap);
   padding: 6px 20px 6px 0;
   border-bottom: 1px solid var(--surface-grid-line);
 }
@@ -150,7 +153,7 @@
   touch-action: pan-y;
 }
 .grid > .columns {
-  padding-block: 12px;
+  padding-block: var(--grid-pad-block);
 }
 .hours {
   position: relative;
@@ -209,9 +212,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* On one line the time gives way before the title does. */
 .eventTime {
-  flex-shrink: 1000;
+  --shrink-before-title: 1000;
+  flex-shrink: var(--shrink-before-title);
   min-width: 0;
   font: var(--type-card-meta);
   overflow: hidden;
@@ -232,12 +235,11 @@
   margin-left: auto;
   flex-shrink: 0;
 }
-/* Spans every lane, to the right of the hour gutter. */
 .bands {
   position: absolute;
-  top: 12px;
-  bottom: 12px;
-  left: 84px;
+  top: var(--grid-pad-block);
+  bottom: var(--grid-pad-block);
+  left: calc(var(--hour-gutter) + var(--columns-gap));
   right: 20px;
   pointer-events: none;
 }

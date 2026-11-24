@@ -32,17 +32,14 @@ export const LEGACY_TONE_COLOR_ID: Record<LegacyTone, string> = {
 
 export const MULTI_COLOR_ID = "8";
 
-/** @deprecated Legacy private prop; identity is PARTICIPANTS_PROP. Cleared on write. */
 export const LEGACY_TONES_PROP = "familyosTones";
 
-/** Presentation colorId for Google Calendar UI — never Event Participant identity. */
 export function colorIdForLegacyTones(tones: LegacyTone[]): string | null {
   if (tones.length === 1) return LEGACY_TONE_COLOR_ID[tones[0]];
   if (tones.length > 1) return MULTI_COLOR_ID;
   return null;
 }
 
-/** Legacy pastel names for Google colorId from Active Member colors. */
 export function legacyTonesForParticipants(
   members: Member[],
   participantIds: string[],
@@ -179,13 +176,11 @@ export function nowLineTop(now: Date, timeZone: string): number {
 
 export const NOW_LINE_PX = 3;
 
-/** Now-line offset in the day column, clamped so today always has a marker. */
-export function nowLineY(now: Date, timeZone: string): number {
+export function clampedNowLineTop(now: Date, timeZone: string): number {
   const max = Math.max(0, gridHeight() - NOW_LINE_PX);
   return Math.min(max, Math.max(0, nowLineTop(now, timeZone)));
 }
 
-/** Restore a prior grid scroll. First paint keeps the now-line in view. */
 export function mountGridScrollTop(
   saved: number | null,
   now: Date,
@@ -238,12 +233,10 @@ export function layoutColumns<T extends { startMs: number; endMs: number }>(
   return result;
 }
 
-/** Resolve Event Participants by stable ID — includes Retired Members. */
 export function peopleOf(members: Member[], event: CalEvent): Member[] {
   return resolveMembers(members, event.participantIds);
 }
 
-/** Household Events stay visible; otherwise any non-filtered resolved participant. */
 export function visibleUnderMemberFilter(
   event: CalEvent,
   members: Member[],
@@ -256,7 +249,6 @@ export function visibleUnderMemberFilter(
 
 /** How one event is drawn. `fill` and `soft` are CSS backgrounds, not always one colour. */
 export type EventPaint = {
-  /** Two or more Active participants: bands of each participant's Member Color. */
   multi: boolean;
   fill: string;
   soft: string;
@@ -274,7 +266,6 @@ function memberStripes(colors: string[]): string {
   return `repeating-linear-gradient(115deg, ${bands.join(", ")})`;
 }
 
-/** Retired participants hold no Member Color, so only Active ones paint. */
 export function eventPaint(people: Member[]): EventPaint {
   const active = people.filter((p) => p.status === "active");
   if (active.length > 1) {
@@ -294,7 +285,6 @@ export function eventPaint(people: Member[]): EventPaint {
   };
 }
 
-/** An event that has ended is drawn dimmed. */
 export function isPastEvent(event: CalEvent, nowMs: number): boolean {
   return event.endMs <= nowMs;
 }
@@ -317,6 +307,8 @@ export function timedOnDay(
   return !event.allDay && coversDay(event, day, timeZone);
 }
 
+const MAX_SPAN_DAYS = 4000;
+
 export function remainingDays(
   event: CalEvent,
   from: Date,
@@ -329,8 +321,7 @@ export function remainingDays(
   while (d.getTime() < event.endMs) {
     n += 1;
     d = addDays(d, 1, timeZone);
-    // ponytail: civil-day walk; 4000-day cap. Count from YMD if multi-year spans show up.
-    if (n > 4000) break;
+    if (n > MAX_SPAN_DAYS) break;
   }
   return Math.max(1, n);
 }

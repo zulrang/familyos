@@ -2,7 +2,6 @@ import type { CSSProperties } from "react";
 import type { MemberPastel } from "@/shared/member-pastel";
 import { AvatarStack } from "@/shared/ui/AvatarStack";
 
-/** Shared by every surface that draws an event that has ended. */
 export const PAST_EVENT_OPACITY = 0.55;
 
 export function EventCard({
@@ -22,7 +21,6 @@ export function EventCard({
   tone?: MemberPastel;
   fill?: string;
   ink?: string;
-  /** Dims an event that has already ended. */
   past?: boolean;
   people?: {
     name?: string;

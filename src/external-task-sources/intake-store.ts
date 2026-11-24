@@ -16,12 +16,6 @@ export type IntakeOutcome =
   | Readonly<{ kind: "created" | "already-created" }>
   | Readonly<{ kind: "refused"; refusal: IntakeRefusal }>;
 
-/**
- * Turn one External Task Source request into an assigned Task, at most once
- * per (source, request ID). A request already received is not planned again,
- * so a redelivery after the household changed still reports its first Task.
- * Throws when the household or Task store cannot be read or written.
- */
 export async function receiveExternalTask(
   source: string,
   request: ExternalTaskRequest,

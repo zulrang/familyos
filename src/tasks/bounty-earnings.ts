@@ -7,7 +7,6 @@ export type BountyEarningsQuery = Readonly<{
   before: Instant;
 }>;
 
-/** Sum effective Bounty credits by their completion time in [from, before). */
 export function bountyStarsEarned(
   claims: readonly ClaimedBounty[],
   query: BountyEarningsQuery,

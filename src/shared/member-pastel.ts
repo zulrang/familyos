@@ -1,4 +1,3 @@
-/** Design-skill `tone` CSS tokens (`--member-teal`, …). Not Member Color. */
 export const MEMBER_PASTELS = [
   "teal",
   "blush",

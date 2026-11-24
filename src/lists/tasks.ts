@@ -89,10 +89,6 @@ async function getTaskListMeta(
   return { id: g.id, title: g.title || "List" };
 }
 
-/**
- * Load only the selected Household Lists, preserving selection order.
- * Missing provider lists are skipped (deleted outside FamilyOS).
- */
 export async function listSelectedListsWithItems(
   listIds: string[],
 ): Promise<HouseholdList[]> {

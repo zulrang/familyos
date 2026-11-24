@@ -89,7 +89,6 @@ export function followingRecurrence(
 
 const WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
-/** Keep WEEKLY/MONTHLY rules aligned with a new DTSTART weekday or month-day. */
 export function shiftRecurrenceStart(
   recurrence: string[],
   toMs: number,

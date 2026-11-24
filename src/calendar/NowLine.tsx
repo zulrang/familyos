@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useState } from "react";
-import { NOW_LINE_PX, nowLineY } from "@/calendar/calendar";
+import { clampedNowLineTop, NOW_LINE_PX } from "@/calendar/calendar";
 
 export function NowLine({
   top,
@@ -10,10 +10,12 @@ export function NowLine({
   timeZone: string;
   style?: CSSProperties;
 }) {
-  const [live, setLive] = useState(() => top ?? nowLineY(new Date(), timeZone));
+  const [live, setLive] = useState(
+    () => top ?? clampedNowLineTop(new Date(), timeZone),
+  );
   useEffect(() => {
     if (top != null) return;
-    const tick = () => setLive(nowLineY(new Date(), timeZone));
+    const tick = () => setLive(clampedNowLineTop(new Date(), timeZone));
     tick();
     const id = setInterval(tick, 15000);
     return () => clearInterval(id);

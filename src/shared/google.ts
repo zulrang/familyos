@@ -1,5 +1,5 @@
 import path from "node:path";
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 import { dataDir } from "@/shared/data-path";
 import { googleClient } from "@/shared/google-env";
 import {
@@ -155,7 +155,7 @@ async function refreshAccessToken(
   if (!tok.ok) {
     if (tok.status === 400 && isInvalidGrant(tok.body)) {
       await clearProviderConnectionIfMatching(expected);
-      throw new AuthError();
+      throw new ProviderAuthError();
     }
     throw tokenError(tok.status, tok.body);
   }
@@ -165,15 +165,15 @@ async function refreshAccessToken(
     expiry: Date.now() + tok.expires_in * 1000,
   };
   const committed = await commitRefreshedTokens(expected, next);
-  if (!committed) throw new AuthError();
+  if (!committed) throw new ProviderAuthError();
   return next.access_token;
 }
 
 async function accessToken(timeoutMs = GOOGLE_API_TIMEOUT_MS): Promise<string> {
   const s = await readProvider();
-  if (!s.tokens?.access_token) throw new AuthError();
+  if (!s.tokens?.access_token) throw new ProviderAuthError();
   if (s.tokens.expiry - 60_000 > Date.now()) return s.tokens.access_token;
-  if (!s.tokens.refresh_token) throw new AuthError();
+  if (!s.tokens.refresh_token) throw new ProviderAuthError();
   const expected: RefreshTarget = {
     providerConnectionId: s.providerConnectionId,
     refreshToken: s.tokens.refresh_token,
@@ -194,7 +194,7 @@ async function accessToken(timeoutMs = GOOGLE_API_TIMEOUT_MS): Promise<string> {
   return promise;
 }
 
-export { AuthError } from "@/shared/auth-error";
+export { ProviderAuthError } from "@/shared/auth-error";
 
 export async function gfetch(
   url: string,
@@ -216,9 +216,9 @@ export async function gfetch(
       ...rest.headers,
     },
   });
-  if (res.status === 401) throw new AuthError();
+  if (res.status === 401) throw new ProviderAuthError();
   if (res.status === 403 && url.includes("tasks.googleapis.com")) {
-    throw new AuthError();
+    throw new ProviderAuthError();
   }
   return res;
 }

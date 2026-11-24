@@ -3,28 +3,26 @@ import path from "node:path";
 import { displayCredentialCookie } from "@/shared/display-auth";
 import { pairWithCode, resolveTrustedDisplay } from "@/shared/pairing";
 
-function householdBuildId(): string | null {
-  // ponytail: FAMILYOS_BUILD_ID is the test seam. Ceiling: production is
-  // .next/BUILD_ID from next build; no second version channel.
-  const override = process.env.FAMILYOS_BUILD_ID;
-  if (override !== undefined) return override || null;
+function householdBuildId(buildDir = process.cwd()): string | null {
   try {
     return (
-      readFileSync(path.join(process.cwd(), ".next/BUILD_ID"), "utf8").trim() ||
-      null
+      readFileSync(path.join(buildDir, ".next/BUILD_ID"), "utf8").trim() || null
     );
   } catch {
     return null;
   }
 }
 
-export async function handleReady(request: Request): Promise<Response> {
+export async function handleReady(
+  request: Request,
+  options?: { buildDir?: string },
+): Promise<Response> {
   const display = await resolveTrustedDisplay(request.headers.get("cookie"));
   return Response.json(
     {
       ready: true,
       paired: Boolean(display),
-      buildId: householdBuildId(),
+      buildId: householdBuildId(options?.buildDir),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

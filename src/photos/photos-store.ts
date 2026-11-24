@@ -30,9 +30,7 @@ export async function writePhotosConnection(
   await writeAtomicJson(file(), connection, { mode: 0o600 });
 }
 
-// One server process serves all Displays. Serialize OAuth polls, refreshes and
-// disconnects so an in-flight request cannot restore a disconnected account.
-export function withPhotosConnection<T>(
+export function withPhotosConnectionWriteLock<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   return withFileQueue(file(), operation);

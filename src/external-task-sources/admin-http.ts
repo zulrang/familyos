@@ -21,7 +21,6 @@ export type AdminTaskSourcesRead = Readonly<{
 function deruptStatus(): AdminTaskSource["status"] {
   const status = sourceStatus("derupt");
   if (status) return status;
-  // Polling starts with the server; until then report what it will do.
   const config = deruptConfig(process.env);
   return config.state === "disabled" ? config : { state: "starting" };
 }

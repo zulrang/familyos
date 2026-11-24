@@ -1,3 +1,4 @@
+import errno
 import importlib.machinery
 import importlib.util
 import json
@@ -18,7 +19,6 @@ VID, PID = "27c6", "0529"
 
 
 def fake_panel(root, touch_driver: "str | None" = "hid-multitouch"):
-    """A sysfs and /dev tree shaped like the reference Pi: interfaces 0 (multitouch), 1, 2 (mouse mode)."""
     sys_root, dev_root = Path(root, "sys"), Path(root, "dev")
     devices, drivers = sys_root / "bus/hid/devices", sys_root / "bus/hid/drivers"
     devices.mkdir(parents=True)
@@ -44,15 +44,15 @@ class GuardTest(unittest.TestCase):
     def test_fallback_report_after_quiet_multitouch_rebinds_once_per_cooldown(self):
         guard = guard_module.Guard(quiet_s=2, cooldown_s=30)
         guard.touch_report(100)
-        self.assertFalse(guard.fallback_report(101))  # multitouch is live
+        self.assertFalse(guard.should_rebind_on_fallback(101))
         self.assertEqual(guard.mode, "multitouch")
-        self.assertTrue(guard.fallback_report(105))
+        self.assertTrue(guard.should_rebind_on_fallback(105))
         self.assertEqual(guard.mode, "fallback")
         guard.rebound(105)
         self.assertEqual(guard.mode, "unknown")
-        self.assertFalse(guard.fallback_report(110))  # cooldown
+        self.assertFalse(guard.should_rebind_on_fallback(110))
         self.assertEqual(guard.mode, "fallback")
-        self.assertTrue(guard.fallback_report(136))
+        self.assertTrue(guard.should_rebind_on_fallback(136))
         guard.rebound(136)
         guard.touch_report(140)
         state = guard.state(141, 1_000_000, "present")
@@ -63,11 +63,11 @@ class GuardTest(unittest.TestCase):
 
     def test_fallback_report_with_no_touch_ever_seen_rebinds(self):
         guard = guard_module.Guard()
-        self.assertTrue(guard.fallback_report(5))
+        self.assertTrue(guard.should_rebind_on_fallback(5))
 
     def test_absent_device_reports_unknown_mode(self):
         guard = guard_module.Guard()
-        guard.fallback_report(5)
+        guard.should_rebind_on_fallback(5)
         self.assertEqual(guard.state(6, 0, "absent")["mode"], "unknown")
 
 
@@ -133,23 +133,23 @@ class RunTest(unittest.TestCase):
                     time.sleep(0.02)
                 return False
 
-            def writer(name):
+            def open_fifo_writer_when_ready(name):
                 deadline = time.monotonic() + 3
                 while True:
                     try:
                         return os.open(dev_root / name, os.O_WRONLY | os.O_NONBLOCK)
-                    except OSError:  # guard has not opened its end yet
-                        if time.monotonic() > deadline:
+                    except OSError as error:
+                        if error.errno != errno.ENXIO or time.monotonic() > deadline:
                             raise
                         time.sleep(0.02)
 
             try:
-                touch, fallback = writer("hidraw0"), writer("hidraw6")
+                touch, fallback = open_fifo_writer_when_ready("hidraw0"), open_fifo_writer_when_ready("hidraw6")
                 os.write(touch, b"\x01SECRET-TOUCH")
-                os.write(fallback, b"\x05SECRET-MOUSE")  # within quiet window: no re-bind
+                os.write(fallback, b"\x05SECRET-MOUSE")
                 time.sleep(0.4)
                 self.assertEqual(unbind.read_text(), "")
-                os.write(fallback, b"\x05SECRET-MOUSE")  # multitouch quiet: fell back
+                os.write(fallback, b"\x05SECRET-MOUSE")
                 self.assertTrue(wait_for(lambda: unbind.read_text() == "0003:27C6:0529.0005"))
                 os.close(touch)
                 os.close(fallback)

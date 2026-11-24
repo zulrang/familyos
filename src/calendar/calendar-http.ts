@@ -5,7 +5,7 @@ import { parseScope } from "@/calendar/recurrence";
 import type { CalEvent, CalendarRead, SeriesScope } from "@/calendar/types";
 import { readHousehold } from "@/settings/settings";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
-import { AuthError } from "@/shared/google";
+import { ProviderAuthError } from "@/shared/google";
 import { readProvider } from "@/shared/provider";
 import {
   getCalendarEventsCache,
@@ -14,20 +14,15 @@ import {
   putCalendarEventsCache,
 } from "./calendar-cache";
 import { calendarError, ProviderUnavailableError } from "./calendar-error";
-import type { CalendarGateway } from "./calendar-gateway";
+import {
+  type CalendarGateway,
+  googleCalendarGateway,
+} from "./calendar-gateway";
 
 export type { CalendarGateway };
 
-// ponytail: lazy default so tests can inject a Fake without loading Google.
-async function defaultGateway(): Promise<CalendarGateway> {
-  const { googleCalendarGateway } = await import("./calendar-gateway.ts");
-  return googleCalendarGateway();
-}
-
-async function resolveGateway(
-  gateway?: CalendarGateway,
-): Promise<CalendarGateway> {
-  return gateway ?? (await defaultGateway());
+function resolveGateway(gateway?: CalendarGateway): CalendarGateway {
+  return gateway ?? googleCalendarGateway();
 }
 
 function jsonError(error: string, status: number) {
@@ -100,7 +95,7 @@ async function rejectIfReadOnly(calendarId: string): Promise<Response | null> {
     ? await listCalendarCacheRanges(provider.providerConnectionId, calendarId)
     : [];
   if (ranges.length) return calendarError(new ProviderUnavailableError());
-  return calendarError(new AuthError());
+  return calendarError(new ProviderAuthError());
 }
 
 async function cachedEvents(
@@ -213,9 +208,7 @@ async function bestEffortRefreshNamespaceCache(
         );
       }),
     );
-  } catch {
-    /* live write already succeeded */
-  }
+  } catch {}
 }
 
 async function bestEffortRefreshEventsCache(
@@ -228,9 +221,7 @@ async function bestEffortRefreshEventsCache(
   if (!connectionId) return;
   try {
     await putCalendarEventsCache(connectionId, calendarId, from, to, events);
-  } catch {
-    /* live events already in hand */
-  }
+  } catch {}
 }
 
 export async function handleListEvents(
@@ -246,11 +237,11 @@ export async function handleListEvents(
   const provider = await readProvider();
   let events: CalendarRead["events"];
   try {
-    if (!provider.tokens?.access_token) throw new AuthError();
+    if (!provider.tokens?.access_token) throw new ProviderAuthError();
     const gw = await resolveGateway(gateway);
     events = await gw.listEvents(gate.calendarId, from, to, gate.timeZone);
   } catch (e) {
-    if (e instanceof AuthError) return calendarError(e);
+    if (e instanceof ProviderAuthError) return calendarError(e);
     const cached = await cachedEvents(
       provider.providerConnectionId,
       gate.calendarId,

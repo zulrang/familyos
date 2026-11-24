@@ -1,8 +1,3 @@
-/**
- * HTTP acceptance seam for Display pairing (#2).
- * Isolated data dir; no live Google credentials.
- */
-
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -105,22 +100,20 @@ describe("Display pairing HTTP", () => {
   });
 
   test("readiness exposes the production BUILD_ID without caching", async () => {
-    const previous = process.env.FAMILYOS_BUILD_ID;
-    process.env.FAMILYOS_BUILD_ID = "build-from-test";
+    const buildDir = await mkdtemp(path.join(tmpdir(), "familyos-build-"));
+    await mkdir(path.join(buildDir, ".next"), { recursive: true });
+    await writeFile(path.join(buildDir, ".next/BUILD_ID"), "build-from-test\n");
     try {
       const res = await handleReady(
         new Request("http://familyos.test/api/ready"),
+        { buildDir },
       );
       assert.equal(res.status, 200);
       assert.equal(res.headers.get("cache-control"), "no-store");
       const body = (await res.json()) as { buildId: string | null };
       assert.equal(body.buildId, "build-from-test");
     } finally {
-      if (previous === undefined) {
-        delete process.env.FAMILYOS_BUILD_ID;
-      } else {
-        process.env.FAMILYOS_BUILD_ID = previous;
-      }
+      await rm(buildDir, { recursive: true, force: true });
     }
   });
 

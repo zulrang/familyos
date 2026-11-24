@@ -1,10 +1,4 @@
-/**
- * DESIGN-DEVIATION: hand-authored Google Tasks HTTP shapes, not cassettes from a
- * live capture and not a live lane. Code-design Parity allows recorded responses
- * or a manual live run; this stands in until either exists, so the real
- * `tasks.ts` adapter still shares `assertListsGatewayContract` with the Fake.
- * Upgrade: replay captured cassettes, or gate a live run on env.
- */
+/** DESIGN-DEVIATION: hand-authored Tasks HTTP fixtures stand in for live Google / captured cassettes. */
 
 const TASKS_ORIGIN = "https://tasks.googleapis.com/tasks/v1";
 

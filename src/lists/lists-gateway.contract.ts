@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import { ListItemConflictError } from "./lists-error";
 import type { ListsGateway } from "./lists-gateway";
 
-/**
- * Shared ListsGateway contract: Fake (unit lane) and Google adapter
- * (contract lane / recorded Tasks HTTP) must both pass.
- */
 export async function assertListsGatewayContract(
   gateway: ListsGateway,
 ): Promise<void> {

@@ -8,7 +8,6 @@ import { AdminEditorScreen } from "@/shared/AdminEditorScreen";
 import { AdminStars } from "@/tasks/AdminStars";
 import { AdminTasks } from "@/tasks/AdminTasks";
 
-// jsdom lacks native dialog methods; browser checks cover modality and scrolling.
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;

@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { parseCreateTaskDraft, parseLocalDate, parseTaskId } from "./types";
+import {
+  parseCreateTaskDraft,
+  parseLocalDate,
+  parseTaskId,
+  TASK_TITLE_MAX_LENGTH,
+} from "./types";
 
 export const taskIdSchema = z
   .string()
@@ -20,7 +25,7 @@ export const dateSchema = z.string().transform((value, ctx) => {
 export const memberSchema = z.string().min(1).max(200);
 export const draftSchema = z
   .strictObject({
-    title: z.string().trim().min(1).max(500),
+    title: z.string().trim().min(1).max(TASK_TITLE_MAX_LENGTH),
     type: z.enum(["chore", "routine"]),
     recurrence: z.discriminatedUnion("kind", [
       z.strictObject({ kind: z.literal("daily") }),
