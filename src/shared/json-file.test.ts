@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, test } from "vitest";
+import { afterAll, beforeAll, describe, test, vi } from "vitest";
 import { withFileQueue, writeAtomicJson } from "./json-file";
 
 describe("shared JSON file helpers", () => {
@@ -97,5 +97,52 @@ describe("shared JSON file helpers", () => {
     assert.equal(await opB, "b-done");
     releaseA();
     await opA;
+  });
+
+  test("withFileQueue serializes across separate module graphs on the same resolved path", async () => {
+    vi.resetModules();
+    const modA = await import("./json-file");
+    vi.resetModules();
+    const modB = await import("./json-file");
+    assert.notEqual(modA.withFileQueue, modB.withFileQueue);
+
+    const target = path.join(dir, "cross-graph.json");
+    const nonCanonicalTarget = `${dir}${path.sep}.${path.sep}cross-graph.json`;
+    assert.notEqual(nonCanonicalTarget, target);
+    assert.equal(path.resolve(nonCanonicalTarget), path.resolve(target));
+
+    const events: string[] = [];
+    let opAStarted!: () => void;
+    const waitOpAStarted = new Promise<void>((resolve) => {
+      opAStarted = resolve;
+    });
+    let releaseOpA!: () => void;
+    const gateOpA = new Promise<void>((resolve) => {
+      releaseOpA = resolve;
+    });
+
+    const opA = modA.withFileQueue(target, async () => {
+      events.push("A:start");
+      opAStarted();
+      await gateOpA;
+      events.push("A:end");
+      return "from-A";
+    });
+
+    await waitOpAStarted;
+
+    const opB = modB.withFileQueue(nonCanonicalTarget, async () => {
+      events.push("B:start");
+      events.push("B:end");
+      return "from-B";
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ["A:start"]);
+
+    releaseOpA();
+    const results = await Promise.all([opA, opB]);
+    assert.deepEqual(results, ["from-A", "from-B"]);
+    assert.deepEqual(events, ["A:start", "A:end", "B:start", "B:end"]);
   });
 });

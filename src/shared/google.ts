@@ -117,7 +117,26 @@ export async function exchangeCode(
   await establishProviderConnection(accountId, tokens);
 }
 
-const inFlightRefreshes = new Map<string, Promise<string>>();
+type InFlightRefreshes = Map<string, Promise<string>>;
+
+const IN_FLIGHT_REFRESHES_KEY = Symbol.for(
+  "familyos.shared.googleInFlightRefreshes",
+);
+
+/**
+ * Stored on `globalThis` because Next.js bundles `instrumentation.ts`
+ * separately from route handlers; a module-scoped Map would not deduplicate
+ * concurrent OAuth refreshes across bundles in the same Node process.
+ */
+function inFlightRefreshes(): InFlightRefreshes {
+  const store = globalThis as typeof globalThis &
+    Record<symbol, InFlightRefreshes | undefined>;
+  const existing = store[IN_FLIGHT_REFRESHES_KEY];
+  if (existing) return existing;
+  const created: InFlightRefreshes = new Map();
+  store[IN_FLIGHT_REFRESHES_KEY] = created;
+  return created;
+}
 
 async function refreshAccessToken(
   expected: RefreshTarget,
@@ -160,17 +179,18 @@ async function accessToken(timeoutMs = GOOGLE_API_TIMEOUT_MS): Promise<string> {
     refreshToken: s.tokens.refresh_token,
   };
   const key = `${path.resolve(dataDir())}\0${s.providerConnectionId ?? ""}\0${s.tokens.refresh_token}`;
-  const existing = inFlightRefreshes.get(key);
+  const refreshes = inFlightRefreshes();
+  const existing = refreshes.get(key);
   if (existing) return existing;
   const promise = refreshAccessToken(
     expected,
     Math.min(timeoutMs, GOOGLE_API_TIMEOUT_MS),
   ).finally(() => {
-    if (inFlightRefreshes.get(key) === promise) {
-      inFlightRefreshes.delete(key);
+    if (refreshes.get(key) === promise) {
+      refreshes.delete(key);
     }
   });
-  inFlightRefreshes.set(key, promise);
+  refreshes.set(key, promise);
   return promise;
 }
 
