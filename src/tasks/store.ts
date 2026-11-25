@@ -174,7 +174,6 @@ export function tasksDatabase(): DatabaseSync {
   return db;
 }
 
-/** Close the process-local handle; the next access reopens persistent storage. */
 export function closeTasksDatabase(): void {
   cached?.db.close();
   cached = null;
@@ -386,7 +385,6 @@ export function loadEvents(): TaskEvent[] {
   });
 }
 
-/** Raw events retained for legacy definitions that were converted to Bounties. */
 export function loadLegacyBountyArchiveEvents(): TaskEvent[] {
   const rows = tasksDatabase()
     .prepare(
@@ -552,7 +550,18 @@ export function loadCompletionCorrections(): CompletionCorrection[] {
     });
 }
 
-/** Apply corrections to the projection without changing any original event. */
+function retractedCompletionAsTerminalSkip(
+  event: Extract<TaskEvent, { kind: "completed" }>,
+  reason: string,
+): Extract<TaskEvent, { kind: "skipped" }> {
+  return {
+    kind: "skipped",
+    task: event.task,
+    window: event.window,
+    reason: `Completion corrected: ${reason}`,
+  };
+}
+
 export function loadEffectiveEvents(): TaskEvent[] {
   const corrections = new Map(
     loadCompletionCorrections().map((row) => [
@@ -565,17 +574,8 @@ export function loadEffectiveEvents(): TaskEvent[] {
     if (!correction) return [event];
     if (event.kind === "verified") return [];
     if (event.kind !== "completed") return [event];
-    // Keep an undone occurrence terminal on the wall: its original unique
-    // completion receipt cannot be inserted again. Parents can restore it here.
     return correction.by === null
-      ? [
-          {
-            kind: "skipped",
-            task: event.task,
-            window: event.window,
-            reason: `Completion corrected: ${correction.reason}`,
-          },
-        ]
+      ? [retractedCompletionAsTerminalSkip(event, correction.reason)]
       : [{ ...event, by: correction.by }];
   });
 }

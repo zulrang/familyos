@@ -50,8 +50,7 @@ function parseEvent(raw: unknown): CalEvent | null {
     startMs: o.startMs,
     endMs: o.endMs,
     participantIds: o.participantIds,
-    // DESIGN-DEVIATION: pre-version cache rows still display; empty token
-    // cannot mutate because HTTP requires a non-empty expectedVersion.
+    // DESIGN-DEVIATION: empty expectedVersion renders pre-version cache rows read-only.
     expectedVersion:
       typeof o.expectedVersion === "string" ? o.expectedVersion : "",
   };

@@ -1,4 +1,4 @@
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 import { readProvider } from "@/shared/provider";
 import {
   createPickerSession,
@@ -12,11 +12,12 @@ import {
 import type { PhotosConnection, PhotosStatus } from "./photos";
 import {
   readPhotosConnection,
-  withPhotosConnection,
+  withPhotosConnectionWriteLock,
   writePhotosConnection,
 } from "./photos-store";
 
 const MEDIA_INTERVAL = 50 * 60_000;
+const PHOTO_CACHE_MAX_AGE_SECONDS = Math.floor(MEDIA_INTERVAL / 1000);
 const MEDIA_RETRY_INTERVAL = 60_000;
 const DIAGNOSTIC_INTERVAL = 60 * 60_000;
 const lastDiagnostic = new Map<string, number>();
@@ -55,7 +56,7 @@ function diagnostic(details: PhotoDiagnostic, interval = 0) {
 }
 
 function failureDetails(error: unknown): FailureDetail {
-  if (error instanceof AuthError) return { failure: "auth" };
+  if (error instanceof ProviderAuthError) return { failure: "auth" };
   if (error instanceof PhotosError) {
     if (error.code === "google_transport")
       return {
@@ -110,7 +111,7 @@ function publicStatus(
   };
 }
 export function getPhotosStatus() {
-  return withPhotosConnection(async () => {
+  return withPhotosConnectionWriteLock(async () => {
     const connection = await readPhotosConnection();
     if (connection.state === "ready" && Date.now() >= connection.mediaExpiresAt)
       diagnostic(
@@ -128,7 +129,7 @@ export function getPhotosStatus() {
   });
 }
 export function connectPhotos() {
-  return withPhotosConnection(async () => {
+  return withPhotosConnectionWriteLock(async () => {
     if (!(await signedIn())) return { state: "unconfigured" } as const;
     const current = await readPhotosConnection();
     if (current.state !== "disconnected") return publicStatus(current, true);
@@ -149,7 +150,7 @@ export function pollPhotos() {
   pollCount += 1;
   lastPollReceivedAt = new Date().toISOString();
   diagnostic({ event: "poll_received", pollCount }, DIAGNOSTIC_INTERVAL);
-  return withPhotosConnection(async () => {
+  return withPhotosConnectionWriteLock(async () => {
     const connection = await readPhotosConnection();
     if (!(await signedIn())) return { state: "unconfigured" } as const;
     if (connection.state === "disconnected") return connection;
@@ -218,69 +219,54 @@ export function pollPhotos() {
   });
 }
 export function disconnectPhotos() {
-  return withPhotosConnection(async () => {
+  return withPhotosConnectionWriteLock(async () => {
     const connection = await readPhotosConnection();
     await writePhotosConnection({ state: "disconnected" });
     if (connection.state !== "disconnected") {
       try {
         await deletePickerSession(connection.sessionId);
-      } catch {
-        /* local disconnect remains authoritative */
-      }
+      } catch {}
     }
     return { state: "disconnected" } as const;
   });
 }
-export function readPhoto(id: string) {
-  // Read-only: does not mutate the connection file, so it skips the
-  // write-serialization queue that status polls and media refreshes share.
-  return (async () => {
-    const connection = await readPhotosConnection();
-    if (
-      connection.state !== "ready" ||
-      connection.mediaExpiresAt <= Date.now()
-    ) {
-      if (connection.state === "ready")
-        diagnostic(
-          {
-            event: "expired_image",
-            overdueMs: Date.now() - connection.mediaExpiresAt,
-            refreshOverdueMs: Date.now() - connection.nextMediaPollAt,
-            photoCount: connection.photos.length,
-            pollCount,
-            lastPollReceivedAt,
-          },
-          DIAGNOSTIC_INTERVAL,
-        );
-      throw new PhotosError("photo_unavailable", 404);
-    }
-    const photo = connection.photos.find((p) => p.id === id);
-    if (!photo) throw new PhotosError("photo_unavailable", 404);
-    try {
-      const response = await fetchPhoto(photo.baseUrl);
-      const mime = response.headers.get("content-type")?.split(";")[0];
-      if (
-        !response.ok ||
-        !mime?.startsWith("image/") ||
-        mime === "image/svg+xml"
-      )
-        throw new PhotosError("photo_unavailable", 502);
-      return new Response(response.body, {
-        headers: {
-          "Content-Type": mime,
-          // v= in the URL is mediaExpiresAt, stable until the next media
-          // refresh (~50 min), so the wall Chromium cache can hold photos.
-          "Cache-Control": "private, max-age=3000",
-          "X-Content-Type-Options": "nosniff",
-        },
-      });
-    } catch (error) {
+export async function readPhoto(id: string) {
+  const connection = await readPhotosConnection();
+  if (connection.state !== "ready" || connection.mediaExpiresAt <= Date.now()) {
+    if (connection.state === "ready")
       diagnostic(
-        { event: "image_fetch_failed", ...failureDetails(error) },
+        {
+          event: "expired_image",
+          overdueMs: Date.now() - connection.mediaExpiresAt,
+          refreshOverdueMs: Date.now() - connection.nextMediaPollAt,
+          photoCount: connection.photos.length,
+          pollCount,
+          lastPollReceivedAt,
+        },
         DIAGNOSTIC_INTERVAL,
       );
-      if (error instanceof AuthError) throw error;
+    throw new PhotosError("photo_unavailable", 404);
+  }
+  const photo = connection.photos.find((p) => p.id === id);
+  if (!photo) throw new PhotosError("photo_unavailable", 404);
+  try {
+    const response = await fetchPhoto(photo.baseUrl);
+    const mime = response.headers.get("content-type")?.split(";")[0];
+    if (!response.ok || !mime?.startsWith("image/") || mime === "image/svg+xml")
       throw new PhotosError("photo_unavailable", 502);
-    }
-  })();
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": mime,
+        "Cache-Control": `private, max-age=${PHOTO_CACHE_MAX_AGE_SECONDS}`,
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch (error) {
+    diagnostic(
+      { event: "image_fetch_failed", ...failureDetails(error) },
+      DIAGNOSTIC_INTERVAL,
+    );
+    if (error instanceof ProviderAuthError) throw error;
+    throw new PhotosError("photo_unavailable", 502);
+  }
 }

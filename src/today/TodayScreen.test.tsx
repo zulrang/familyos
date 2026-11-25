@@ -50,12 +50,13 @@ const settings: PublicSettings = {
   configVersion: 1,
 };
 
-/** Thu Oct 8 2026, 3:10 PM in New York. */
-const NOW = new Date("2026-10-08T19:10:00.000Z");
+const OCT_8_EDT_UTC_OFFSET_HOURS = 4;
 
-function at(hour: number, minute = 0): number {
-  return Date.UTC(2026, 9, 8, hour + 4, minute);
+function oct8EdtMs(hour: number, minute = 0): number {
+  return Date.UTC(2026, 9, 8, hour + OCT_8_EDT_UTC_OFFSET_HOURS, minute);
 }
+
+const OCT_8_3_10_PM_EDT = new Date(oct8EdtMs(15, 10));
 
 function event(
   title: string,
@@ -67,8 +68,8 @@ function event(
     id: title,
     title,
     allDay: false,
-    startMs: at(startHour),
-    endMs: at(endHour),
+    startMs: oct8EdtMs(startHour),
+    endMs: oct8EdtMs(endHour),
     participantIds,
     expectedVersion: "v1",
   };
@@ -145,7 +146,6 @@ function urlOf(input: RequestInfo | URL): string {
 
 type Call = { method: string; url: string; body: unknown };
 
-/** An in-memory server: completing a Task changes what the next read returns. */
 function installServer(overrides: Partial<PublicSettings> = {}) {
   const view = tasksView();
   const calls: Call[] = [];
@@ -185,7 +185,7 @@ function installServer(overrides: Partial<PublicSettings> = {}) {
 
 async function renderToday(overrides: Partial<PublicSettings> = {}) {
   vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(NOW);
+  vi.setSystemTime(OCT_8_3_10_PM_EDT);
   const calls = installServer(overrides);
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   render(<TodayScreen />);
@@ -342,7 +342,7 @@ describe("Today editing", () => {
 
   test("without a Household Calendar, events are read-only and tasks still work", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW);
+    vi.setSystemTime(OCT_8_3_10_PM_EDT);
     installServer({ calendarId: null });
     render(<TodayScreen />);
     await screen.findByRole("button", { name: "Ellie’s day" });
@@ -353,5 +353,13 @@ describe("Today editing", () => {
     expect(
       screen.getByRole("button", { name: "Add task" }),
     ).toBeInTheDocument();
+  });
+
+  test("measures grid height once Household Time Zone loads", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+    await renderToday();
+    expect(screen.getByRole("button", { name: /Dentist/ })).toHaveStyle({
+      top: "96px",
+    });
   });
 });

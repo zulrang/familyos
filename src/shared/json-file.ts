@@ -2,16 +2,30 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const queues = new Map<string, Promise<unknown>>();
+type FileQueues = Map<string, Promise<unknown>>;
+
+const FILE_QUEUES_KEY = Symbol.for("familyos.shared.fileQueues");
 
 /**
- * Serialize async read-modify-write operations on the same file path so
- * concurrent requests in one server process cannot clobber each other.
+ * Stored on `globalThis` because Next.js bundles `instrumentation.ts`
+ * separately from route handlers; a module-scoped Map would not serialize
+ * writes across bundles in the same Node process.
  */
+function fileQueues(): FileQueues {
+  const store = globalThis as typeof globalThis &
+    Record<symbol, FileQueues | undefined>;
+  const existing = store[FILE_QUEUES_KEY];
+  if (existing) return existing;
+  const created: FileQueues = new Map();
+  store[FILE_QUEUES_KEY] = created;
+  return created;
+}
+
 export async function withFileQueue<T>(
   filePath: string,
   operation: () => Promise<T>,
 ): Promise<T> {
+  const queues = fileQueues();
   const key = path.resolve(filePath);
   const previous = queues.get(key) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(operation);
@@ -23,10 +37,6 @@ export async function withFileQueue<T>(
   }
 }
 
-/**
- * Write JSON via a sibling temp file and atomic rename so readers never observe
- * a truncated file. Cleans up the temp file if writing or renaming fails.
- */
 export async function writeAtomicJson(
   filePath: string,
   data: unknown,

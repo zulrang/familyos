@@ -27,36 +27,37 @@ export function IdlePhotos({
       clearTimeout(timer);
       timer = setTimeout(() => setState("automatic"), afterMs);
     }
+    function wakeFromIdle(event: Event) {
+      if (
+        state === "automatic" &&
+        !document.querySelector("[data-idle-dialog]")
+      ) {
+        setState("active");
+        return;
+      }
+      const insideDialog =
+        event.target instanceof Element &&
+        !!event.target.closest("[data-idle-dialog]");
+      const slideshowTarget =
+        event.target instanceof Element &&
+        !!event.target.closest("[data-idle-slideshow]");
+      if (
+        event.type === "keydown" &&
+        (!insideDialog ||
+          state === "automatic" ||
+          slideshowTarget ||
+          (event instanceof KeyboardEvent && event.key === "Escape"))
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setState("active");
+      } else if (!insideDialog) {
+        setState("active");
+      }
+    }
     function activity(event: Event) {
-      // Keep the overlay through pointer-up so the wake-up tap cannot click
-      // a control on the screen underneath. Its click handler dismisses it.
       if (state !== "active") {
-        if (
-          state === "automatic" &&
-          !document.querySelector("[data-idle-dialog]")
-        ) {
-          setState("active");
-          return;
-        }
-        const insideDialog =
-          event.target instanceof Element &&
-          !!event.target.closest("[data-idle-dialog]");
-        const slideshowTarget =
-          event.target instanceof Element &&
-          !!event.target.closest("[data-idle-slideshow]");
-        if (
-          event.type === "keydown" &&
-          (!insideDialog ||
-            state === "automatic" ||
-            slideshowTarget ||
-            (event instanceof KeyboardEvent && event.key === "Escape"))
-        ) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          setState("active");
-        } else if (!insideDialog) {
-          setState("active");
-        }
+        wakeFromIdle(event);
         return;
       }
       restart();

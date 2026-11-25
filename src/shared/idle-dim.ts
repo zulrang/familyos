@@ -46,7 +46,5 @@ export async function applyIdleDim(dim: IdleDim): Promise<void> {
       body: JSON.stringify(dim),
       signal: AbortSignal.timeout(800),
     });
-  } catch {
-    /* best-effort; laptop and down listener are normal */
-  }
+  } catch {}
 }

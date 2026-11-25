@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""Put the wall touchscreen back into multitouch mode when it falls back to mouse mode.
-
-The reference panel (Goodix 27c6:0529) exposes a multitouch interface, which
-hid-multitouch drives and the kiosk uses, and a mouse-mode interface, which
-udev hides from libinput because it would double taps. After an in-place USB
-reset the panel can come back reporting only on the mouse-mode interface, so
-every tap reaches the kernel and none reach the kiosk. Re-binding hid-multitouch
-makes it send the multitouch mode switch again.
-
-The guard reads raw reports from both interfaces (contents are never logged or
-stored). A report on the mouse-mode interface while the multitouch interface
-has been quiet means the panel fell back, so the guard re-binds hid-multitouch.
-It publishes counters to a small state file that familyos-observe records.
-"""
 
 import argparse
 import json
@@ -21,21 +7,22 @@ import select
 import sys
 import time
 from pathlib import Path
+from typing import Literal, NamedTuple, Optional
 
-QUIET_S = 2.0  # multitouch silence that makes a mouse-mode report mean "fell back"
-COOLDOWN_S = 30.0  # minimum gap between re-binds, so a stubborn panel cannot loop
-RESCAN_S = 5.0  # how often to look for the panel when it is missing
-PUBLISH_S = 10.0  # state file refresh while nothing happens
+QUIET_S = 2.0
+COOLDOWN_S = 30.0
+RESCAN_S = 5.0
+PUBLISH_S = 10.0
 DRIVER = "hid-multitouch"
+
+Mode = Literal["multitouch", "fallback", "unknown"]
 
 
 class Guard:
-    """Decides when to re-bind. Times are monotonic seconds."""
-
     def __init__(self, quiet_s=QUIET_S, cooldown_s=COOLDOWN_S):
         self.quiet_s = quiet_s
         self.cooldown_s = cooldown_s
-        self.mode = "unknown"  # multitouch | fallback | unknown (no report since start or re-bind)
+        self.mode: Mode = "unknown"
         self.last_touch = None
         self.last_fallback = None
         self.last_rebind = None
@@ -46,12 +33,11 @@ class Guard:
         self.last_touch = now
         self.mode = "multitouch"
 
-    def fallback_report(self, now):
-        """Returns True when the caller should re-bind hid-multitouch now."""
+    def should_rebind_on_fallback(self, now):
         self.fallback_reports += 1
         self.last_fallback = now
         if self.last_touch is not None and now - self.last_touch < self.quiet_s:
-            return False  # multitouch is live; this is not the fallback state
+            return False
         self.mode = "fallback"
         if self.last_rebind is not None and now - self.last_rebind < self.cooldown_s:
             return False
@@ -79,8 +65,6 @@ class Guard:
 
 
 class Panel:
-    """The two HID interfaces of one panel, found by VID:PID and USB interface number."""
-
     def __init__(self, hid_id, touch_hidraw, fallback_hidraw, touch_driver):
         self.hid_id = hid_id
         self.touch_hidraw = touch_hidraw
@@ -88,10 +72,20 @@ class Panel:
         self.touch_driver = touch_driver
 
 
+class HidInterface(NamedTuple):
+    hid_id: str
+    hidraw: Optional[str]
+    driver: Optional[str]
+
+
+def hidraw_pending(touch: HidInterface) -> bool:
+    return touch.driver == DRIVER and touch.hidraw is None
+
+
 def find_panel(sys_root, vid, pid, touch_interface, fallback_interface):
     devices = Path(sys_root, "bus/hid/devices")
     prefix = f"0003:{vid.upper()}:{pid.upper()}."
-    by_interface = {}
+    by_interface: dict[int, HidInterface] = {}
     for entry in sorted(devices.glob(prefix + "*")):
         try:
             interface = int((entry.resolve().parent / "bInterfaceNumber").read_text().strip(), 16)
@@ -100,12 +94,12 @@ def find_panel(sys_root, vid, pid, touch_interface, fallback_interface):
         hidraw_dir = entry / "hidraw"
         hidraws = sorted(p.name for p in hidraw_dir.iterdir()) if hidraw_dir.is_dir() else []
         driver = (entry / "driver").resolve().name if (entry / "driver").exists() else None
-        by_interface[interface] = (entry.name, hidraws[0] if hidraws else None, driver)
+        by_interface[interface] = HidInterface(entry.name, hidraws[0] if hidraws else None, driver)
     touch = by_interface.get(touch_interface)
     fallback = by_interface.get(fallback_interface)
-    if not touch or not fallback or not fallback[1] or (touch[2] == DRIVER and not touch[1]):
-        return None  # missing, or mid re-bind (driver bound, hidraw not created yet)
-    return Panel(touch[0], touch[1], fallback[1], touch[2])
+    if not touch or not fallback or not fallback.hidraw or hidraw_pending(touch):
+        return None
+    return Panel(touch.hid_id, touch.hidraw, fallback.hidraw, touch.driver)
 
 
 def rebind(sys_root, panel):
@@ -137,7 +131,7 @@ def open_nodes(dev_root, panel):
             if name:
                 fds[os.open(os.path.join(dev_root, name), os.O_RDONLY | os.O_NONBLOCK)] = kind
     except OSError:
-        close_nodes(fds)  # do not leak the node that did open
+        close_nodes(fds)
         raise
     return fds
 
@@ -200,14 +194,14 @@ def run(args, clock=time.monotonic, wall=time.time, stop=lambda: False):
                     break
                 if fds[fd] == "touch":
                     guard.touch_report(now)
-                elif guard.fallback_report(now):
+                elif guard.should_rebind_on_fallback(now):
                     log(f"panel fell back to mouse mode; re-binding {DRIVER} for {panel.hid_id}")
                     try:
                         rebind(args.sys_root, panel)
                         guard.rebound(now)
                     except OSError as error:
                         log(f"re-bind failed: {error.strerror}")
-                        guard.rebound(now)  # still start the cooldown
+                        guard.rebound(now)
                     lost = True  # hidraw nodes are recreated by the re-bind
                     break
             if lost:
@@ -216,13 +210,15 @@ def run(args, clock=time.monotonic, wall=time.time, stop=lambda: False):
                 last_scan = None
                 last_publish = None
             elif ready:
-                last_publish = None  # publish promptly after activity
+                last_publish = None
     finally:
         close_nodes(fds)
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Put the wall touchscreen back into multitouch mode when it falls back to mouse mode.",
+    )
     parser.add_argument("--vid", default=os.environ.get("TOUCH_VID", "27c6"))
     parser.add_argument("--pid", default=os.environ.get("TOUCH_PID", "0529"))
     parser.add_argument("--touch-interface", type=int, default=int(os.environ.get("TOUCH_INTERFACE", "0")))

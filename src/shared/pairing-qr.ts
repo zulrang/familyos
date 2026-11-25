@@ -1,5 +1,3 @@
-/** Short-lived pairing secret as a scannable URL — never credentials or household data. */
-
 export function pairingUrl(origin: string, code: string): string {
   const url = new URL("/", origin);
   url.searchParams.set("code", code);

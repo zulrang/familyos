@@ -530,7 +530,6 @@ const GUARDS_V9 = `
     BEGIN SELECT RAISE(ABORT, 'legacy Bounty correction receipts are immutable'); END;
 `;
 
-/** Adds explicit work subjects and provenance without changing public Claim shapes. */
 export function migrateBountyLifecycleToV9(db: DatabaseSync): void {
   const claims = db.prepare("PRAGMA table_info(bounty_claims)").all();
   if (claims.some((column) => column.name === "acceptance_provenance")) {

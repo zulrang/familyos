@@ -1087,9 +1087,12 @@ describe("parent administration", () => {
         })
       ).status,
     ).toBe(400);
-    // Recovery after a repeated read cannot create additional replacements.
-    await snapshot();
-    await snapshot();
+    async function readAdminSnapshotRepeatedly(times: number) {
+      for (let i = 0; i < times; i += 1) {
+        await snapshot();
+      }
+    }
+    await readAdminSnapshotRepeatedly(2);
     expect(loadDefinitions()).toHaveLength(3);
     expect(
       loadBountyClaims(tasksDatabase()).filter(

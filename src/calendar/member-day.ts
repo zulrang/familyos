@@ -3,7 +3,6 @@ import { msToZonedDate } from "@/shared/time";
 import { coversDay, formatTimeRange } from "./calendar";
 import type { CalEvent } from "./types";
 
-/** Events occupying any part of the member's civil day, including household events. */
 export function memberDayEvents(
   events: readonly CalEvent[],
   memberId: MemberId,
@@ -27,7 +26,6 @@ export function memberDayEvents(
     );
 }
 
-/** An overnight event carries both dates so its range is not mistaken for today only. */
 export function memberDayTime(event: CalEvent, timeZone: string): string {
   if (event.allDay) return "All day";
   const startDate = msToZonedDate(event.startMs, timeZone);

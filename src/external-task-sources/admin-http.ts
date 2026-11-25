@@ -19,10 +19,7 @@ import {
   saveDeruptToken,
 } from "./token-store";
 
-/**
- * Which token is in use, never the token: `ending` is its last four
- * characters when it is well formed, so a parent can tell tokens apart.
- */
+// Never the token itself: `ending` is its last four characters.
 export type TokenSummary = Readonly<{
   source: DeruptTokenSource | null;
   ending: string | null;
@@ -48,8 +45,6 @@ function derupt(): AdminTaskSource {
   const saved = readSavedDeruptToken();
   const config = deruptConfig(process.env, saved);
   const chosen = deruptToken(process.env, saved);
-  // The poller's status counts only once it runs with this configuration;
-  // until then (startup, or just after a token change) report what it will do.
   const status: AdminTaskSource["status"] =
     sourceStatusFor("derupt", deruptConfigKey(config)) ??
     (config.state === "disabled"
@@ -118,10 +113,6 @@ export async function handleAdminTaskSources(
   return adminJson(await read());
 }
 
-/**
- * PUT `{ token }` saves or replaces the Derupt token; DELETE clears it. Either
- * applies at once. Responses carry the token summary, never the token.
- */
 export async function handleAdminDeruptToken(
   request: Request,
 ): Promise<Response> {

@@ -1,11 +1,3 @@
-/**
- * What parents see about each External Task Source: whether it runs, when it
- * last reached its source, and the last problem's code. Never request text.
- *
- * The status lives on `globalThis` because Next.js bundles instrumentation
- * (which runs the poller) separately from route handlers (which read the
- * status); module-level state would not be shared between them.
- */
 export type SourceProblem = Readonly<{ code: string; at: string }>;
 
 export type SourceStatus =
@@ -28,10 +20,8 @@ export type SourceStatus =
 
 export type ExternalTaskSourceId = "derupt";
 
-/** A status and the configuration key (see `deruptConfigKey`) it describes. */
 type Entry = { status: SourceStatus; configKey: string };
 
-/** The running poll loop: `wake` re-reads the configuration now. */
 export type PollerLoop = Readonly<{ wake: () => void; stop: () => void }>;
 
 type Registry = {
@@ -40,6 +30,11 @@ type Registry = {
   statuses: Map<ExternalTaskSourceId, Entry>;
 };
 
+/**
+ * The status lives on `globalThis` because Next.js bundles instrumentation
+ * (which runs the poller) separately from route handlers (which read the
+ * status); module-level state would not be shared between them.
+ */
 const REGISTRY_KEY = "__familyosExternalTaskSources";
 
 function registry(): Registry {
@@ -54,7 +49,6 @@ function registry(): Registry {
   return global[REGISTRY_KEY];
 }
 
-/** True the first time only: one poller per server process. */
 export function claimPollerStart(): boolean {
   const current = registry();
   if (current.started) return false;
@@ -66,7 +60,6 @@ export function registerPollerLoop(loop: PollerLoop): void {
   registry().loop = loop;
 }
 
-/** Apply a changed token now instead of at the next scheduled poll. */
 export function wakeExternalTaskSources(): void {
   registry().loop?.wake();
 }
@@ -75,7 +68,6 @@ export function sourceStatus(id: ExternalTaskSourceId): SourceStatus | null {
   return registry().statuses.get(id)?.status ?? null;
 }
 
-/** The status, if it describes the configuration with this key. */
 export function sourceStatusFor(
   id: ExternalTaskSourceId,
   configKey: string,
@@ -97,8 +89,7 @@ function updateSourceStatus(id: ExternalTaskSourceId, status: SourceStatus) {
   if (entry) entry.status = status;
 }
 
-/** Stop the loop, forget every source and allow a new start (tests only). */
-export function resetExternalTaskSources(): void {
+export function resetExternalTaskSourcesForTests(): void {
   const current = registry();
   current.loop?.stop();
   current.loop = null;

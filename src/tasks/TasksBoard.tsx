@@ -280,7 +280,6 @@ function MemberTasksSection({
   );
 }
 
-/** One member's Tasks for today, usable outside the Family Board. */
 export function MemberTasks({
   member,
   tasks,

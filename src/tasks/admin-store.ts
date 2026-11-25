@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import type { HouseholdMember } from "@/members/members";
 import type { CompletionCorrection } from "./admin-types";
 import { releaseBountiesForRetiredMembers } from "./bounty-store";
@@ -47,7 +48,6 @@ function retirement(task: TaskId, today: LocalDate) {
     .run(today, task);
 }
 
-/** Preserve the next surviving person's turn when a rotation is replaced. */
 export function preserveRotationTurn(
   previous: AssignmentPolicy,
   next: AssignmentPolicy,
@@ -129,7 +129,6 @@ export function retireAdminTask(task: TaskId, today: LocalDate) {
   return taskTransaction(() => retirement(task, today));
 }
 
-/** Idempotent recovery: a durable roster retirement is reconciled before task reads/writes. */
 export function reconcileRetiredMembers(
   members: HouseholdMember[],
   today: LocalDate,
@@ -223,6 +222,21 @@ export function adjustAdminStars(adjustment: StarAdjustment) {
   });
 }
 
+// Pre-ADR 0007 completions have no completion_credits row; reverse 0 stars.
+function recordedCompletionStars(
+  db: DatabaseSync,
+  task: TaskId,
+  window: LocalDate,
+): number {
+  return Number(
+    db
+      .prepare(
+        "SELECT stars FROM completion_credits WHERE task = ? AND window = ?",
+      )
+      .get(task, window)?.stars ?? 0,
+  );
+}
+
 export function correctAdminCompletion(correction: CompletionCorrection) {
   taskTransaction(() => {
     const db = tasksDatabase();
@@ -264,13 +278,10 @@ export function correctAdminCompletion(correction: CompletionCorrection) {
       throw new TaskAdminError(
         "Choose a different outcome for this completion.",
       );
-    // Legacy completions before ADR 0007 have no stored credit to reverse.
-    const stars = Number(
-      db
-        .prepare(
-          "SELECT stars FROM completion_credits WHERE task = ? AND window = ?",
-        )
-        .get(correction.task, correction.window)?.stars ?? 0,
+    const stars = recordedCompletionStars(
+      db,
+      correction.task,
+      correction.window,
     );
     if (previousMember) changeBalance(previousMember, -stars);
     if (correction.by) changeBalance(correction.by, stars);
@@ -288,7 +299,6 @@ export function correctAdminCompletion(correction: CompletionCorrection) {
   });
 }
 
-/** The receipt and definition edit commit together, including retire-and-replace edits. */
 export function writeAgentTask(
   command: AgentTaskWrite,
   today: LocalDate,

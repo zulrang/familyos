@@ -8,9 +8,6 @@ export type FakeListsGateway = ListsGateway & {
   offline: boolean;
 };
 
-/**
- * In-memory ListsGateway. Lives beside the Google Tasks adapter (`tasks.ts`).
- */
 export function createFakeListsGateway(
   seed: Iterable<HouseholdList> = [],
 ): FakeListsGateway {

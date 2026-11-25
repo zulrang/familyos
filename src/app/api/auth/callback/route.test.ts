@@ -1,9 +1,3 @@
-/**
- * Google's callback must use the Host the Display actually loaded, not
- * localhost / GOOGLE_REDIRECT_URI. Pairing cookies are origin-scoped.
- * CSRF is oauthState, not the Display cookie (Google's return may omit it).
- */
-
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

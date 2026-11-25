@@ -1,13 +1,8 @@
 import { createHash } from "node:crypto";
 import { DERUPT_DEFAULT_ENDPOINT } from "./derupt";
 
-/**
- * Where the token in use came from. A token saved in admin takes precedence
- * over `FAMILYOS_DERUPT_TOKEN`; clearing it falls back to the variable.
- */
 export type DeruptTokenSource = "saved" | "environment";
 
-/** How the Derupt adapter is configured from admin and the server environment. */
 export type DeruptConfig =
   | Readonly<{ state: "disabled"; reason: "not_configured" }>
   | Readonly<{
@@ -30,7 +25,6 @@ export function isDeruptToken(value: string): boolean {
   return TOKEN_PATTERN.test(value);
 }
 
-/** The token in use and where it came from: saved first, then the variable. */
 export function deruptToken(
   env: Env,
   savedToken: string | null,
@@ -40,11 +34,6 @@ export function deruptToken(
   return fromEnv ? { token: fromEnv, source: "environment" } : null;
 }
 
-/**
- * A saved token, else `FAMILYOS_DERUPT_TOKEN`, enables the source.
- * `FAMILYOS_DERUPT_ENDPOINT` overrides the processor URL for tests and local
- * Derupt stacks.
- */
 export function deruptConfig(
   env: Env,
   savedToken: string | null = null,
@@ -63,7 +52,6 @@ export function deruptConfig(
     return { state: "disabled", reason: "invalid_endpoint", tokenSource };
   }
   const local = url.hostname === "127.0.0.1" || url.hostname === "localhost";
-  // The token is a password: send it over HTTPS except to this machine.
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local))
     return { state: "disabled", reason: "invalid_endpoint", tokenSource };
   return {
@@ -74,10 +62,7 @@ export function deruptConfig(
   };
 }
 
-/**
- * Identifies what the poller runs with, so a status can be matched to the
- * configuration it describes. A digest, so the token itself is not kept.
- */
+// A digest, so the status registry never holds the token.
 export function deruptConfigKey(config: DeruptConfig): string {
   if (config.state === "disabled") return `disabled:${config.reason}`;
   return createHash("sha256")

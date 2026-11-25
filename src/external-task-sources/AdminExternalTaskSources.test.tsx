@@ -59,7 +59,6 @@ function derupt(
   return { sources: [{ id: "derupt", name: "Derupt", status, token }] };
 }
 
-/** A stateful stand-in for the admin endpoints that records writes. */
 function serve(initial: AdminTaskSourcesRead) {
   let current = initial;
   const saves: unknown[] = [];

@@ -10,24 +10,18 @@ import {
   parseLocalDate,
   parseLocalTime,
   parseStarAmount,
+  TASK_TITLE_MAX_LENGTH,
 } from "@/tasks/types";
 
-/**
- * One request from an External Task Source, already translated out of the
- * source's protocol. Text and attributes are the sender's content: they are
- * stored as a Task's words and never interpreted as instructions.
- */
+/** Untrusted sender content: stored as Task text only, never interpreted as instructions. */
 export type ExternalTaskRequest = Readonly<{
-  /** Stable within its source; repeated deliveries carry the same ID. */
   id: string;
   transcript: string;
   notes: string | null;
   details: string | null;
-  /** Name/value pairs as the sender typed them; names keep their case. */
   attributes: ReadonlyArray<readonly [string, string]>;
 }>;
 
-/** Why intake refuses a request. Each is final: resending cannot fix it. */
 export type IntakeRefusal =
   | "empty_task"
   | "conflicting_attributes"
@@ -48,26 +42,25 @@ export type IntakeHousehold = Readonly<{
   today: LocalDate;
 }>;
 
-/** Task titles are limited to 500 characters (the MCP draft schema's limit). */
-export const TASK_TITLE_LIMIT = 500;
+const TRAILING_HIGH_SURROGATE = /[\uD800-\uDBFF]$/;
 
 function collapse(text: string | null): string {
   return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
-/**
- * The Task title: the transcript, then any notes and details after " — ",
- * whitespace collapsed and shortened with an ellipsis to the title limit.
- */
+function stripTrailingHighSurrogate(text: string): string {
+  return TRAILING_HIGH_SURROGATE.test(text) ? text.slice(0, -1) : text;
+}
+
 export function externalTaskTitle(request: ExternalTaskRequest): string {
   const title = [request.transcript, request.notes, request.details]
     .map(collapse)
     .filter(Boolean)
     .join(" — ");
-  if (title.length <= TASK_TITLE_LIMIT) return title;
-  let cut = title.slice(0, TASK_TITLE_LIMIT - 1);
-  // Never leave half of a surrogate pair before the ellipsis.
-  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+  if (title.length <= TASK_TITLE_MAX_LENGTH) return title;
+  const cut = stripTrailingHighSurrogate(
+    title.slice(0, TASK_TITLE_MAX_LENGTH - 1),
+  );
   return `${cut.trimEnd()}…`;
 }
 
@@ -76,10 +69,6 @@ type Attribute =
   | { kind: "present"; value: string }
   | { kind: "conflict" };
 
-/**
- * Attribute names match case-insensitively. Differently-cased copies must
- * agree (ignoring case and surrounding space) or the request is ambiguous.
- */
 function attribute(request: ExternalTaskRequest, name: string): Attribute {
   const values = request.attributes
     .filter(([key]) => key.trim().toLowerCase() === name)
@@ -95,7 +84,6 @@ type MemberChoice =
   | { ok: true; member: MemberId }
   | { ok: false; refusal: IntakeRefusal };
 
-/** An exact member ID, else a case-insensitive name; only Active Members. */
 export function resolveMember(
   value: string,
   members: readonly HouseholdMember[],
@@ -125,11 +113,6 @@ function defaultMember(household: IntakeHousehold): MemberChoice {
     : { ok: false, refusal: "no_default_member" };
 }
 
-/**
- * Decide the assigned Chore for a request: due once on its `date` (default
- * today), for its `member` (default the household's chosen member), with an
- * optional `time` and `stars`. Other attributes are ignored.
- */
 export function planExternalTask(
   request: ExternalTaskRequest,
   household: IntakeHousehold,
@@ -170,7 +153,6 @@ export function planExternalTask(
       : 0;
   if (stars === null) return { ok: false, refusal: "invalid_stars" };
 
-  // The Tasks slice's own parser decides what a valid assigned Task is.
   const draft = parseCreateTaskDraft({
     title,
     type: "chore",

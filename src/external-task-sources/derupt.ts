@@ -63,10 +63,6 @@ const replySchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-/**
- * A claimed work item. `unreadable` keeps only the lease when the rest does
- * not decode, so the item can still be failed instead of left to expire.
- */
 export type DeruptWork =
   | Readonly<{
       kind: "execute";
@@ -136,7 +132,6 @@ export function encodeMessage(message: DeruptMessage): string {
   });
 }
 
-/** One exchange. Transport problems are values; nothing here throws. */
 export type DeruptExchange =
   | Readonly<{ kind: "reply"; reply: DeruptReply }>
   | Readonly<{ kind: "unauthorized" }>

@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
-# Household Mac: KeepAlive production on :3000 and deploy origin/main
-# continuously. Every deploy is a git worktree under releases/<sha> with its own
-# node_modules and .next; `current` and `previous` symlinks pick the live one,
-# so a build never touches the running server and rollback is a symlink swap.
-# ponytail: nvm.sh at start (this Mac's node lives there); bake PATH into the
-# plist if we ever run as a LaunchDaemon without a user profile.
-# ponytail: user/ domain from SSH (gui/ returns 125 without Aqua). Background is
-# the parent of every login type; LaunchDaemon if we ever need no-login boot.
 set -euo pipefail
 
-# A release's copy of this script (invoked by the running server through
-# process.cwd()) must operate on the checkout that owns releases/, not on itself.
 SELF_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 if [[ "$(basename "$(dirname "$SELF_ROOT")")" == releases &&
   -f "$(dirname "$(dirname "$SELF_ROOT")")/scripts/macos-server" ]]; then
@@ -93,7 +83,6 @@ launchd_domain() {
 }
 
 load_node() {
-  # Homebrew/system first so launchd has git/lsof; nvm then prepends Node.
   export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   if [[ -s "$NVM_DIR/nvm.sh" ]]; then
@@ -116,7 +105,6 @@ xml_escape() {
   printf '%s' "$s"
 }
 
-# write_job <dest> <label> <command> <log-out> <log-err> <keepalive-xml> [interval]
 write_job() {
   local dest=$1 label=$2 command=$3 log_out=$4 log_err=$5 keepalive=$6 interval=${7:-}
   local root_xml log_out_xml log_err_xml script_xml run_at_load interval_xml=""
@@ -224,8 +212,9 @@ start_agent() {
   domain=$(launchd_domain)
   stop_agent
   wait_unloaded "$domain" || die "Could not unload ${LABEL}. Try: launchctl bootout ${domain}/${LABEL}"
-  if ! launchctl bootstrap "$domain" "$PLIST"; then
-    st=$?
+  st=0
+  launchctl bootstrap "$domain" "$PLIST" || st=$?
+  if [[ $st -ne 0 ]]; then
     # 5 = already loaded (bootout lost the race)
     if [[ $st -eq 5 ]]; then
       launchctl kickstart -k "${domain}/${LABEL}"
@@ -248,12 +237,12 @@ bootstrap_user_job() {
     launchctl print "$target" >/dev/null 2>&1 || break
     sleep 0.25
   done
-  if ! launchctl bootstrap "$domain" "$plist"; then
-    st=$?
-    # 5 = already loaded (bootout lost the race)
-    if [[ $st -ne 5 ]]; then
-      die "Could not bootstrap ${label} into ${domain} (exit ${st})."
-    fi
+  st=0
+  launchctl bootstrap "$domain" "$plist" || st=$?
+  # 5 = already loaded (bootout lost the race)
+  if [[ $st -ne 0 && $st -ne 5 ]]; then
+    printf 'Could not bootstrap %s into %s (exit %s).\n' "$label" "$domain" "$st" >&2
+    exit "$st"
   fi
   launchctl enable "$target" 2>/dev/null || true
 }
@@ -295,9 +284,6 @@ wait_for_port() {
   die "Timed out waiting for :3000. See ${LOG_ERR}"
 }
 
-# The server answers /api/ready with its build id once it can serve requests.
-# Match the current release's id: right after kickstart the old process may
-# still be answering on :3000.
 wait_for_ready() {
   local i build_id
   build_id=$(cat "$CURRENT/.next/BUILD_ID")
@@ -310,8 +296,6 @@ wait_for_ready() {
   return 1
 }
 
-# --- releases ---------------------------------------------------------------
-
 current_sha() {
   [[ -L "$CURRENT" ]] || return 1
   basename "$(readlink "$CURRENT")"
@@ -322,8 +306,6 @@ previous_sha() {
   basename "$(readlink "$PREVIOUS")"
 }
 
-# What the poller compares origin/main against: the live release, or local
-# main on a checkout that has never deployed a release.
 deployed_sha() {
   current_sha 2>/dev/null ||
     git -C "$ROOT" rev-parse --verify --quiet refs/heads/main ||
@@ -336,7 +318,6 @@ record() {
   log "$*"
 }
 
-# One deploy at a time: the poller and a manual deploy must not build together.
 acquire_lock() {
   local holder
   mkdir -p "$RELEASES"
@@ -355,13 +336,9 @@ acquire_lock() {
 fetch_main() {
   cd "$ROOT"
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Not a git checkout: ${ROOT}"
-  # Refresh the remote-tracking ref explicitly, even with a custom fetch refspec.
-  # Do not switch branches or touch the working tree while fetching.
   GIT_TERMINAL_PROMPT=0 git fetch --quiet origin +refs/heads/main:refs/remotes/origin/main
 }
 
-# Keep the control checkout (this script, the plists' WorkingDirectory) on the
-# verified release so the poller runs the deploy tooling of what it ships.
 advance_control_checkout() {
   local sha=$1
   cd "$ROOT"
@@ -377,7 +354,6 @@ advance_control_checkout() {
   git merge --ff-only --quiet "$sha" || log "Control checkout could not fast-forward; leaving it alone."
 }
 
-# Link the checkout's env files into a release so secrets stay in one place.
 link_env_files() {
   local release=$1 name
   for name in .env .env.local .env.production.local; do
@@ -414,7 +390,6 @@ build_release() {
   [[ -f "$release/.next/BUILD_ID" ]] || die "Build of ${sha} produced no .next/BUILD_ID."
 }
 
-# Point current (and previous) at a built release; no restart.
 activate_release() {
   local sha=$1 old
   [[ -f "$RELEASES/$sha/.next/BUILD_ID" ]] || die "Release ${sha} is not built."
@@ -425,7 +400,6 @@ activate_release() {
   ln -sfn "$RELEASES/$sha" "$CURRENT"
 }
 
-# Restart into the current release and wait until it serves /api/ready.
 restart_into_current() {
   if [[ ! -f "$PLIST" ]]; then
     log "LaunchAgent not installed; not restarting. Run: $0 install"
@@ -452,7 +426,6 @@ prune_releases() {
     keep+="$sha "
     limit=$((limit - 1))
   done
-  # Newest first by directory mtime (set when the worktree was added).
   while IFS= read -r dir; do
     sha=$(basename "$dir")
     [[ "$keep" == *" $sha "* ]] && continue
@@ -466,7 +439,6 @@ prune_releases() {
   git -C "$ROOT" worktree prune
 }
 
-# deploy_sha <sha> <reason>: build, switch, restart, verify, or roll back.
 deploy_sha() {
   local sha=$1 reason=$2 old
   old=$(current_sha 2>/dev/null || true)
@@ -479,8 +451,6 @@ deploy_sha() {
   activate_release "$sha"
   if restart_into_current; then
     record "deploy ${sha} ok"
-    # Only now: a release that never got ready must not replace the script
-    # that the automatic rollback below relies on.
     advance_control_checkout "$sha"
     prune_releases
     return 0
@@ -498,15 +468,12 @@ deploy_sha() {
   die "Release ${sha} never became ready. See ${LOG_ERR}"
 }
 
-# --- commands ---------------------------------------------------------------
-
 cmd_run() {
   load_node
   export FAMILYOS_DATA_DIR="${FAMILYOS_DATA_DIR:-$ROOT/data}"
   if [[ -L "$CURRENT" ]]; then
     cd "$CURRENT/"
   elif [[ -f "$ROOT/.next/BUILD_ID" ]]; then
-    # A checkout from before releases/: serve its own build until the first deploy.
     cd "$ROOT"
   else
     die "Nothing deployed. Run: $0 install"
@@ -588,8 +555,6 @@ cmd_check_update() {
   fi
 }
 
-# deploy [ref]: a manual deploy always builds and switches, even to a commit
-# the poller already tried.
 cmd_deploy() {
   require_darwin
   require_not_root
@@ -615,8 +580,6 @@ cmd_auto_deploy() {
   local sha
   sha=$(git rev-parse refs/remotes/origin/main)
   [[ "$(current_sha 2>/dev/null || true)" == "$sha" ]] && exit 0
-  # After a failed deploy or a rollback, wait for a new commit on main rather
-  # than retrying the same one every interval.
   [[ "$(cat "$LAST_ATTEMPT" 2>/dev/null || true)" == "$sha" ]] && exit 0
   deploy_sha "$sha" "auto"
 }

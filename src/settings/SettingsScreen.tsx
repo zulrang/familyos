@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   activeMembers,
   LEGACY_TONE_COLORS,
@@ -104,7 +104,7 @@ export function SettingsScreen() {
     { kind: "idle" } | { kind: "starting" } | { kind: "started" }
   >({ kind: "idle" });
 
-  async function loadDisplays() {
+  const loadDisplays = useCallback(async () => {
     const res = await fetch("/api/displays");
     if (await redirectIfPairingRequired(res)) return;
     if (!res.ok) throw new Error("displays");
@@ -114,9 +114,9 @@ export function SettingsScreen() {
     };
     setDisplays(data.displays);
     setCurrentDisplayId(data.currentDisplayId);
-  }
+  }, []);
 
-  async function applyPublicSettings(s: PublicSettings) {
+  const applyPublicSettings = useCallback((s: PublicSettings) => {
     setSettings(s);
     setFamilyName(s.familyName);
     setMembers(s.members);
@@ -126,13 +126,13 @@ export function SettingsScreen() {
     setUiScale(parseUiScale(s.uiScale));
     setIdleDimAfterMs(parseIdleDimAfterMs(s.idleDimAfterMs));
     setIdleDimTo(parseIdleDimTo(s.idleDimTo));
-  }
+  }, []);
 
-  async function load() {
+  const load = useCallback(async () => {
     const sRes = await fetch("/api/settings");
     if (await redirectIfPairingRequired(sRes)) return;
     const s = (await sRes.json()) as PublicSettings;
-    await applyPublicSettings(s);
+    applyPublicSettings(s);
     await loadDisplays();
     if (s.signedIn) {
       const [calRes, listsRes] = await Promise.all([
@@ -153,15 +153,13 @@ export function SettingsScreen() {
       setCalendars([]);
       setTasklists([]);
     }
-  }
+  }, [applyPublicSettings, loadDisplays]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fetch settings once on mount
   useEffect(() => {
     load().catch(() => setError("Could not load settings."));
-  }, []);
+  }, [load]);
 
-  async function save() {
-    setError(null);
+  async function saveHouseholdConfiguration(): Promise<boolean> {
     const householdDirty =
       !settings ||
       familyName !== settings.familyName ||
@@ -169,75 +167,83 @@ export function SettingsScreen() {
       JSON.stringify(listIds) !== JSON.stringify(settings.listIds) ||
       timeZone !== settings.timeZone ||
       JSON.stringify(members) !== JSON.stringify(settings.members);
+    if (!householdDirty) return true;
+
+    const householdRes = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        familyName,
+        members,
+        calendarId: calendarId || null,
+        listIds,
+        timeZone,
+        expectedVersion: settings?.configVersion,
+      }),
+    });
+    if (householdRes.status === 409) {
+      const newer = (await householdRes.json()) as PublicSettings;
+      applyPublicSettings(newer);
+      setError(
+        "Settings changed on another Display. Reloaded the current values — review and save again.",
+      );
+      return false;
+    }
+    if (!householdRes.ok) {
+      const body = (await householdRes.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (body?.error === "duplicate_active_color") {
+        setError("Each Active Member needs a different Member Color.");
+        return false;
+      }
+      if (body?.error === "too_many_active") {
+        setError("At most six Active Members.");
+        return false;
+      }
+      setError("Could not save.");
+      return false;
+    }
+    const savedHousehold = (await householdRes.json()) as PublicSettings;
+    applyPublicSettings(savedHousehold);
+    return true;
+  }
+
+  async function saveDisplayConfiguration(): Promise<boolean> {
     const scaleDirty = !settings || uiScale !== settings.uiScale;
     const idleDimDirty =
       !settings ||
       idleDimAfterMs !== settings.idleDimAfterMs ||
       idleDimTo !== settings.idleDimTo;
+    if (!scaleDirty && !idleDimDirty) return true;
 
-    if (householdDirty) {
-      const householdRes = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          familyName,
-          members,
-          calendarId: calendarId || null,
-          listIds,
-          timeZone,
-          expectedVersion: settings?.configVersion,
-        }),
-      });
-      if (householdRes.status === 409) {
-        const newer = (await householdRes.json()) as PublicSettings;
-        await applyPublicSettings(newer);
-        setError(
-          "Settings changed on another Display. Reloaded the current values — review and save again.",
-        );
-        return;
-      }
-      if (!householdRes.ok) {
-        const body = (await householdRes.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        if (body?.error === "duplicate_active_color") {
-          setError("Each Active Member needs a different Member Color.");
-          return;
-        }
-        if (body?.error === "too_many_active") {
-          setError("At most six Active Members.");
-          return;
-        }
-        setError("Could not save.");
-        return;
-      }
-      const savedHousehold = (await householdRes.json()) as PublicSettings;
-      await applyPublicSettings(savedHousehold);
+    const displayRes = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(scaleDirty ? { uiScale } : {}),
+        ...(idleDimDirty ? { idleDimAfterMs, idleDimTo } : {}),
+      }),
+    });
+    if (!displayRes.ok) {
+      setError("Could not save Display Configuration.");
+      return false;
     }
+    const savedDisplay = (await displayRes.json()) as PublicSettings;
+    setSettings(savedDisplay);
+    setUiScale(parseUiScale(savedDisplay.uiScale));
+    setIdleDimAfterMs(parseIdleDimAfterMs(savedDisplay.idleDimAfterMs));
+    setIdleDimTo(parseIdleDimTo(savedDisplay.idleDimTo));
+    if (idleDimDirty) {
+      void applyIdleDim({ idleDimAfterMs, idleDimTo });
+    }
+    return true;
+  }
 
-    if (scaleDirty || idleDimDirty) {
-      // Display Configuration — never bundle it into Household Configuration writes.
-      const displayRes = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(scaleDirty ? { uiScale } : {}),
-          ...(idleDimDirty ? { idleDimAfterMs, idleDimTo } : {}),
-        }),
-      });
-      if (!displayRes.ok) {
-        setError("Could not save Display Configuration.");
-        return;
-      }
-      const savedDisplay = (await displayRes.json()) as PublicSettings;
-      setSettings(savedDisplay);
-      setUiScale(parseUiScale(savedDisplay.uiScale));
-      setIdleDimAfterMs(parseIdleDimAfterMs(savedDisplay.idleDimAfterMs));
-      setIdleDimTo(parseIdleDimTo(savedDisplay.idleDimTo));
-      if (idleDimDirty) {
-        void applyIdleDim({ idleDimAfterMs, idleDimTo });
-      }
-    }
+  async function save() {
+    setError(null);
+    if (!(await saveHouseholdConfiguration())) return;
+    if (!(await saveDisplayConfiguration())) return;
 
     setSaved(true);
     setTimeout(() => setSaved(false), 1600);

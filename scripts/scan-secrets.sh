@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
-# ponytail: regex scan only; upgrade path is gitleaks/detect-secrets if patterns grow.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-# High-confidence patterns — not test placeholders like "test-secret" or "secret-access".
 PATTERN='GOCSPX-[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|ya29\.[0-9A-Za-z_-]{20,}|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|[0-9]{12,}-[a-z0-9]+\.apps\.googleusercontent\.com'
 
 scan_range() {

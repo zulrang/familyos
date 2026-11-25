@@ -22,11 +22,6 @@ const SLICES = new Set([
   "admin",
   "rewards",
 ]);
-/**
- * Slices whose capability is built on other feature slices (ADR 0011): Today
- * views Calendar and Tasks; External Task Sources writes Tasks (ADR 0013).
- * They may import any slice; no slice may import them.
- */
 const COMPOSING_SLICES = new Set(["today", "external-task-sources"]);
 const SETTINGS_HTTP = "src/settings/settings-http.ts";
 const LIST_CALENDARS = "src/calendar/google-events";
@@ -89,8 +84,7 @@ export function forbiddenReason(
   if (isKioskOrSkill(to)) {
     return `${from} must not import ${to}`;
   }
-  // DESIGN-DEVIATION: HTTP tests compose pairing via displays/pairing-http.
-  // Slice rules apply to production sources; kiosk/skill bans still apply above.
+  // DESIGN-DEVIATION: test files compose cross-slice fixtures; kiosk and skill bans still apply.
   if (isTestFile(from)) return null;
   const fromSlice = srcDirOf(from);
   const toSlice = srcDirOf(to);

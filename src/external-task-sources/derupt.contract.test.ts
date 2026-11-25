@@ -1,10 +1,3 @@
-/**
- * Derupt adapter half of a shared contract. Derupt is an authenticated SaaS
- * that cannot run in CI, so the decoder and encoder are pinned against the
- * messages recorded in Derupt's destination guide
- * (docs/integrating-a-destination.md, protocol derupt.processing/2), and the
- * test Fake's claims are checked against the same recorded shape.
- */
 import { describe, expect, test } from "vitest";
 import { CLAIM, type DeruptLease, decodeReply, encodeMessage } from "./derupt";
 import { claimedBody } from "./derupt-fake.test-support";

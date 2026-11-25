@@ -50,7 +50,6 @@ export function EventSheet({
 }) {
   const set = (patch: Partial<EventDraft>) => onChange({ ...draft, ...patch });
   const assignable = members.filter((m) => m.status === "active");
-  // Historical Event Participants (Retired) stay visible but not newly choosable.
   const historical = members.filter(
     (m) => m.status === "retired" && draft.memberIds.includes(m.id),
   );

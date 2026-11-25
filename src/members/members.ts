@@ -1,8 +1,5 @@
-/** Household Member roster: Active / Retired, Member Color, no email. */
-
 export const MAX_ACTIVE_MEMBERS = 6;
 
-/** Design-skill pastel fills — migration from legacy `tone` only. */
 export const LEGACY_TONE_COLORS = {
   teal: "#a9d8d2",
   blush: "#f6c9c5",
@@ -34,7 +31,6 @@ export type RetiredMember = {
 
 export type HouseholdMember = ActiveMember | RetiredMember;
 
-/** Public roster element (Active or Retired). */
 export type Member = HouseholdMember;
 
 export type RosterError =
@@ -73,7 +69,6 @@ function parseOne(raw: unknown): HouseholdMember | RosterError {
   if (typeof o.id !== "string" || o.id.length === 0) return "invalid_member";
   if (typeof o.name !== "string") return "invalid_member";
 
-  // Legacy rows have no status → active.
   let resolved: "active" | "retired";
   if (o.status === undefined) resolved = "active";
   else if (o.status === "active") resolved = "active";
@@ -158,7 +153,6 @@ export function memberById(
   return roster.find((m) => m.id === id);
 }
 
-/** Resolve by stable IDs — includes Retired Members (historical events). */
 export function resolveMembers(
   roster: HouseholdMember[],
   ids: MemberId[],
@@ -189,15 +183,10 @@ const COLOR_TO_LEGACY_TONE = Object.fromEntries(
   Object.entries(LEGACY_TONE_COLORS).map(([tone, color]) => [color, tone]),
 ) as Record<MemberColor, LegacyTone>;
 
-/**
- * Map a Member Color back onto the design-skill pastel name when it matches.
- * Custom colors have no legacy tone — Google colorId mapping still uses this.
- */
 export function legacyToneForColor(color: MemberColor): LegacyTone | null {
   return COLOR_TO_LEGACY_TONE[color] ?? null;
 }
 
-/** Wall fill / soft / ink / muted for a Member Color. Palette hexes keep design tokens. */
 export type MemberSurface = {
   fill: MemberColor;
   soft: MemberColor;
@@ -205,7 +194,6 @@ export type MemberSurface = {
   muted: MemberColor;
 };
 
-/** An expanded palette for task cards; the chosen color remains the accent. */
 export type MemberTaskPalette = {
   accent: MemberColor;
   panel: MemberColor;
@@ -226,7 +214,6 @@ const LEGACY_SURFACES: Record<LegacyTone, SurfaceBase> = {
   sand: { fill: "#f7e3c8", soft: "#fbf1e3", ink: "#7a5a2c" },
 };
 
-/** Mix fill toward this gray so done chips lose chroma without a CSS filter. */
 const MUTED_NEUTRAL = "#c5cdd4";
 const MUTED_MIX = 0.45;
 
@@ -249,8 +236,6 @@ function withMuted(base: SurfaceBase): MemberSurface {
 export function memberSurface(color: MemberColor): MemberSurface {
   const tone = legacyToneForColor(color);
   if (tone) return withMuted(LEGACY_SURFACES[tone]);
-  // ponytail: linear sRGB mix; switch to relative luminance if a custom fill
-  // fails contrast on the wall.
   return withMuted({
     fill: color,
     soft: mixHex(color, "#ffffff", 0.55),
@@ -258,7 +243,6 @@ export function memberSurface(color: MemberColor): MemberSurface {
   });
 }
 
-/** Text on a Member Color fill. `MemberSurface.ink` is for `soft`, not fill. */
 const ON_FILL_DARK = "#1f2a33";
 const ON_FILL_LIGHT = "#ffffff";
 
@@ -268,7 +252,6 @@ export function onFillInk(fill: MemberColor): MemberColor {
     : ON_FILL_LIGHT;
 }
 
-/** Done-state check on a Member Color fill. Palette inks are tuned for fill; custom colors use contrast. */
 export function checkInkOnFill(surface: MemberSurface): MemberColor {
   if (legacyToneForColor(surface.fill) != null) return surface.ink;
   return onFillInk(surface.fill);

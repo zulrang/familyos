@@ -20,7 +20,7 @@ import {
   startExternalTaskSources,
 } from "./poller";
 import {
-  resetExternalTaskSources,
+  resetExternalTaskSourcesForTests,
   setSourceStatus,
   sourceStatus,
   wakeExternalTaskSources,
@@ -28,7 +28,7 @@ import {
 import { clearDeruptToken, saveDeruptToken } from "./token-store";
 
 const TOKEN = "derupt_test_token_0123456789abcdef";
-const NOW = new Date("2026-11-15T17:00:00Z"); // 12:00 in New York
+const NOW = new Date("2026-11-15T17:00:00Z");
 
 let dir: string;
 let derupt: FakeDerupt;
@@ -71,7 +71,7 @@ beforeEach(async () => {
   derupt = new FakeDerupt(TOKEN);
   await derupt.listen();
   logs = [];
-  resetExternalTaskSources();
+  resetExternalTaskSourcesForTests();
   setSourceStatus(
     "derupt",
     { state: "enabled", lastSuccessAt: null, lastProblem: null },
@@ -80,11 +80,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // Every message FamilyOS sent decoded under Derupt's strict rules.
   expect(derupt.strictViolations).toEqual([]);
   await derupt.close();
   closeTasksDatabase();
-  resetExternalTaskSources();
+  resetExternalTaskSourcesForTests();
   vi.unstubAllEnvs();
   await rm(dir, { recursive: true, force: true });
 });
@@ -118,7 +117,6 @@ describe("Derupt hand-offs become assigned Tasks", () => {
       lastSuccessAt: NOW.toISOString(),
       lastProblem: null,
     });
-    // Capture text never reaches the log.
     expect(logs.join("\n")).not.toMatch(/cat|scoops/);
   });
 
@@ -189,14 +187,13 @@ describe("Derupt hand-offs become assigned Tasks", () => {
 
   test("a lost acknowledgement backs off; the redelivery acknowledges the same Task", async () => {
     derupt.queue.push(task(workId(1)));
-    derupt.interceptions.push(() => ({ status: 500 }));
+    derupt.queuedLeaseReplyOverrides.push(() => ({ status: 500 }));
     expect(await pollDerupt(deps())).toBe("backoff");
     expect(loadDefinitions()).toHaveLength(1);
     expect(sourceStatus("derupt")).toMatchObject({
       lastSuccessAt: null,
       lastProblem: { code: "server_error" },
     });
-    // The lease lapsed; Derupt hands the work out again.
     derupt.queue.push(task(workId(1)));
     expect(await pollDerupt(deps())).toBe("drained");
     expect(loadDefinitions()).toHaveLength(1);
@@ -207,7 +204,7 @@ describe("Derupt hand-offs become assigned Tasks", () => {
 
   test("a stale lease drops that attempt and keeps claiming", async () => {
     derupt.queue.push(task(workId(1)), task(workId(2)));
-    derupt.interceptions.push(() => ({
+    derupt.queuedLeaseReplyOverrides.push(() => ({
       status: 200,
       body: {
         protocolVersion: "derupt.processing/2",
@@ -261,7 +258,6 @@ describe("Derupt hand-offs become assigned Tasks", () => {
         generation: 1,
       },
     ]);
-    // The rest of the queue waits for the next poll.
     expect(derupt.queue).toHaveLength(1);
   });
 });
@@ -269,7 +265,7 @@ describe("Derupt hand-offs become assigned Tasks", () => {
 describe("source failures", () => {
   test("a 5xx backs off without losing work", async () => {
     derupt.queue.push(task(workId(1)));
-    derupt.serverErrors = 1;
+    derupt.remainingServerErrorResponses = 1;
     expect(await pollDerupt(deps())).toBe("backoff");
     expect(sourceStatus("derupt")).toMatchObject({
       lastProblem: { code: "server_error" },
@@ -328,7 +324,7 @@ describe("source failures", () => {
 
 describe("starting", () => {
   test("without a token the source is disabled and nothing polls", () => {
-    resetExternalTaskSources();
+    resetExternalTaskSourcesForTests();
     startExternalTaskSources({});
     expect(sourceStatus("derupt")).toEqual({
       state: "disabled",
@@ -337,7 +333,7 @@ describe("starting", () => {
   });
 
   test("a malformed token disables the source", () => {
-    resetExternalTaskSources();
+    resetExternalTaskSourcesForTests();
     startExternalTaskSources({ FAMILYOS_DERUPT_TOKEN: "short" });
     expect(sourceStatus("derupt")).toEqual({
       state: "disabled",
@@ -346,7 +342,7 @@ describe("starting", () => {
   });
 
   test("a plain-HTTP endpoint off this machine is refused", () => {
-    resetExternalTaskSources();
+    resetExternalTaskSourcesForTests();
     startExternalTaskSources({
       FAMILYOS_DERUPT_TOKEN: TOKEN,
       FAMILYOS_DERUPT_ENDPOINT: "http://derupt.example/processor",
@@ -358,7 +354,7 @@ describe("starting", () => {
   });
 
   test("only the first start in a process takes effect", () => {
-    resetExternalTaskSources();
+    resetExternalTaskSourcesForTests();
     startExternalTaskSources({});
     startExternalTaskSources({
       FAMILYOS_DERUPT_TOKEN: TOKEN,
@@ -371,7 +367,7 @@ describe("starting", () => {
   });
 
   test("the production build does not start polling", () => {
-    resetExternalTaskSources();
+    resetExternalTaskSourcesForTests();
     startExternalTaskSources({
       NEXT_PHASE: "phase-production-build",
       FAMILYOS_DERUPT_TOKEN: TOKEN,
@@ -382,7 +378,7 @@ describe("starting", () => {
   test("a configured source polls on its own after startup", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
-      resetExternalTaskSources();
+      resetExternalTaskSourcesForTests();
       derupt.queue.push(task(workId(1)));
       startExternalTaskSources({
         FAMILYOS_DERUPT_TOKEN: TOKEN,
@@ -419,7 +415,7 @@ describe("changing the token without a restart", () => {
   test("a saved token starts polling, and clearing it stops", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      resetExternalTaskSources();
+      resetExternalTaskSourcesForTests();
       startExternalTaskSources({ FAMILYOS_DERUPT_ENDPOINT: derupt.url });
       expect(sourceStatus("derupt")).toEqual({
         state: "disabled",
@@ -450,7 +446,7 @@ describe("changing the token without a restart", () => {
   test("replacing a rejected token resumes a halted source", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      resetExternalTaskSources();
+      resetExternalTaskSourcesForTests();
       await saveDeruptToken(OTHER);
       startExternalTaskSources({ FAMILYOS_DERUPT_ENDPOINT: derupt.url });
       await vi.advanceTimersByTimeAsync(5_000);
@@ -475,7 +471,7 @@ describe("changing the token without a restart", () => {
   test("a saved token takes precedence over FAMILYOS_DERUPT_TOKEN", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      resetExternalTaskSources();
+      resetExternalTaskSourcesForTests();
       // Derupt accepts only TOKEN; the variable holds a different one.
       await saveDeruptToken(TOKEN);
       startExternalTaskSources({

@@ -4,15 +4,10 @@ import path from "node:path";
 import { dataDir } from "@/shared/data-path";
 import { withFileQueue, writeAtomicJson } from "@/shared/json-file";
 
-/**
- * The Derupt connection token a parent saved in admin. It is a password: the
- * file is owner-only and the value never leaves the server.
- */
 function tokenFile(): string {
   return path.join(dataDir(), "derupt-token.json");
 }
 
-/** The saved token, or null when none is saved or the file is unreadable. */
 export function readSavedDeruptToken(): string | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(tokenFile(), "utf8"));

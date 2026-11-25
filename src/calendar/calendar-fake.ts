@@ -33,14 +33,6 @@ function fromWrite(
   };
 }
 
-/**
- * In-memory CalendarGateway. Lives beside the Google Calendar adapter
- * (`google-events.ts`).
- *
- * ponytail: one store, calendarId ignored; series scope is a no-op (non-recurring
- * CRUD) but still version-checks. Expand per calendar / recurrence when cache
- * and series splits need it.
- */
 export function createFakeCalendarGateway(
   seed: Iterable<CalEvent> = [],
 ): FakeCalendarGateway {

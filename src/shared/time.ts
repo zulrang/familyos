@@ -1,9 +1,6 @@
-/** Household Time Zone: IANA identifier that every Display uses for dates. */
-
 export function isIanaTimeZone(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
   if (value === "UTC") return true;
-  // ponytail: DateTimeFormat accepts POSIX abbreviations (EST); IANA ids have a '/'.
   if (!value.includes("/")) return false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value });
@@ -13,7 +10,6 @@ export function isIanaTimeZone(value: unknown): value is string {
   }
 }
 
-/** Server host zone when called on the Server Installation. */
 export function fallbackTimeZone(): string {
   const z = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return isIanaTimeZone(z) ? z : "UTC";

@@ -1,6 +1,3 @@
-# Treat the FullPageOS kiosk URL as a secure origin.
-# http://*.local and LAN IPs are not secure contexts (no crypto.randomUUID, etc.).
-# Origin is derived from /boot/firmware/fullpageos.txt so it tracks URL changes.
 # --user-data-dir must be set or Chromium ignores the insecure-origin flag.
 
 url="$(head -n 1 /boot/firmware/fullpageos.txt 2>/dev/null | tr -d '\r' | awk '{print $1}')"

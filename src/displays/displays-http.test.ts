@@ -1,15 +1,18 @@
-/**
- * HTTP acceptance seam for Trusted Display management (#3).
- * Isolated data dir; no live Google credentials.
- */
-
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, test } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  test,
+} from "vitest";
 
 describe("Trusted Display HTTP", () => {
+  let previousDataDir: string | undefined;
   let dataRoot: string;
   let DISPLAY_COOKIE: typeof import("@/shared/pairing").DISPLAY_COOKIE;
   let emitStartupPairingCode: typeof import("@/shared/pairing").emitStartupPairingCode;
@@ -20,16 +23,8 @@ describe("Trusted Display HTTP", () => {
   let handleReady: typeof import("@/displays/pairing-http").handleReady;
   let requireTrustedDisplay: typeof import("@/shared/display-auth").requireTrustedDisplay;
 
-  // ponytail: suite shares Display credentials across ordered cases (same
-  // narrative as the former single assert script). Ceiling: cases are not
-  // independently runnable; upgrade by pairing in each test or beforeEach.
-  let first: { cookie: string; displayId: string };
-  let second: { cookie: string; displayId: string };
-
   beforeAll(async () => {
-    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-displays-"));
-    process.env.FAMILYOS_DATA_DIR = dataRoot;
-
+    previousDataDir = process.env.FAMILYOS_DATA_DIR;
     ({ emitStartupPairingCode, DISPLAY_COOKIE } = await import(
       "@/shared/pairing"
     ));
@@ -37,13 +32,30 @@ describe("Trusted Display HTTP", () => {
       await import("./displays-http.ts"));
     ({ handlePair, handleReady } = await import("@/displays/pairing-http"));
     ({ requireTrustedDisplay } = await import("@/shared/display-auth"));
-
-    await mkdir(dataRoot, { recursive: true });
   });
 
-  afterAll(async () => {
+  beforeEach(async () => {
+    dataRoot = await mkdtemp(path.join(tmpdir(), "familyos-displays-"));
+    process.env.FAMILYOS_DATA_DIR = dataRoot;
+  });
+
+  afterEach(async () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
+
+  afterAll(() => {
+    if (previousDataDir === undefined) {
+      delete process.env.FAMILYOS_DATA_DIR;
+    } else {
+      process.env.FAMILYOS_DATA_DIR = previousDataDir;
+    }
+  });
+
+  async function pairFirstDisplay() {
+    const startupCode = await emitStartupPairingCode();
+    assert.ok(startupCode);
+    return pairWithCode(startupCode);
+  }
 
   function cookieFrom(res: Response): string | null {
     const raw = res.headers.getSetCookie?.() ?? [];
@@ -93,9 +105,7 @@ describe("Trusted Display HTTP", () => {
   });
 
   test("Trusted Display lists peers without credentials or secrets", async () => {
-    const startupCode = await emitStartupPairingCode();
-    assert.ok(startupCode);
-    first = await pairWithCode(startupCode);
+    const first = await pairFirstDisplay();
 
     const res = await handleListDisplays(
       new Request("http://familyos.test/api/displays", {
@@ -129,6 +139,7 @@ describe("Trusted Display HTTP", () => {
   });
 
   test("Trusted Display mints a short-lived code that expires and cannot be reused", async () => {
+    const first = await pairFirstDisplay();
     const minted = await handleCreatePairingCode(
       new Request("http://familyos.test/api/displays/pairing-code", {
         method: "POST",
@@ -144,7 +155,7 @@ describe("Trusted Display HTTP", () => {
     assert.ok(expiresAt > Date.now());
     assert.ok(expiresAt <= Date.now() + 10 * 60 * 1000 + 1000);
 
-    second = await pairWithCode(code);
+    const second = await pairWithCode(code);
 
     const reuse = await handlePair(
       new Request("http://familyos.test/api/pair", {
@@ -188,6 +199,7 @@ describe("Trusted Display HTTP", () => {
   });
 
   test("unpaired Displays cannot revoke", async () => {
+    const first = await pairFirstDisplay();
     const denied = await handleRevokeDisplay(
       new Request("http://familyos.test/api/displays/x", { method: "DELETE" }),
       first.displayId,
@@ -196,6 +208,7 @@ describe("Trusted Display HTTP", () => {
   });
 
   test("revocation immediately rejects the revoked credential", async () => {
+    const first = await pairFirstDisplay();
     const third = await pairWithCode(await mintCode(first.cookie));
 
     const revoked = await handleRevokeDisplay(
@@ -238,6 +251,8 @@ describe("Trusted Display HTTP", () => {
   });
 
   test("any Trusted Display can revoke another", async () => {
+    const first = await pairFirstDisplay();
+    const second = await pairWithCode(await mintCode(first.cookie));
     const revoked = await handleRevokeDisplay(
       new Request(`http://familyos.test/api/displays/${first.displayId}`, {
         method: "DELETE",

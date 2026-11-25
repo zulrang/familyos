@@ -4,6 +4,7 @@ import type { CalEvent } from "@/calendar/types";
 import { LEGACY_TONE_COLORS, type Member } from "@/members/members";
 import {
   addDays,
+  clampedNowLineTop,
   colorIdForLegacyTones,
   coversDay,
   DAY_COUNT,
@@ -25,7 +26,6 @@ import {
   msToTimeInput,
   NOW_LINE_PX,
   nowLineTop,
-  nowLineY,
   pageFiveDays,
   peopleOf,
   remainingDays,
@@ -373,10 +373,10 @@ describe("Household Calendar", () => {
 
   test("clamps the now line to the grid and restores scroll position", () => {
     const morning = new Date(2026, 7, 17, 11, 20);
-    assert.equal(nowLineY(morning, HOST), nowLineTop(morning, HOST));
-    assert.equal(nowLineY(new Date(2026, 7, 17, 6, 0), HOST), 0);
+    assert.equal(clampedNowLineTop(morning, HOST), nowLineTop(morning, HOST));
+    assert.equal(clampedNowLineTop(new Date(2026, 7, 17, 6, 0), HOST), 0);
     assert.equal(
-      nowLineY(new Date(2026, 7, 17, 22, 0), HOST),
+      clampedNowLineTop(new Date(2026, 7, 17, 22, 0), HOST),
       gridHeight() - NOW_LINE_PX,
     );
 

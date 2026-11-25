@@ -23,9 +23,7 @@ afterEach(async () => {
     await new Promise((r) => setTimeout(r, 50));
     try {
       process.kill(-child.pid, "SIGKILL");
-    } catch {
-      /* already gone */
-    }
+    } catch {}
   }
   child = undefined;
 });

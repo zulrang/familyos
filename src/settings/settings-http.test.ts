@@ -1,8 +1,3 @@
-/**
- * HTTP acceptance seam for Settings: per-Display UI scale (#4) and
- * versioned Household Configuration (#5). Isolated data dir; no live Google.
- */
-
 import assert from "node:assert/strict";
 import {
   chmod,
@@ -495,7 +490,6 @@ describe("Household Configuration HTTP", () => {
   });
 
   describe("Household server update", () => {
-    const previousScript = process.env.FAMILYOS_MACOS_SERVER;
     let stubDir: string;
     let receipt: string;
 
@@ -507,50 +501,42 @@ describe("Household Configuration HTTP", () => {
 
     afterEach(async () => {
       await writeFile(receipt, "");
-      if (previousScript === undefined) {
-        delete process.env.FAMILYOS_MACOS_SERVER;
-      } else {
-        process.env.FAMILYOS_MACOS_SERVER = previousScript;
-      }
     });
 
     afterAll(async () => {
-      if (previousScript === undefined) {
-        delete process.env.FAMILYOS_MACOS_SERVER;
-      } else {
-        process.env.FAMILYOS_MACOS_SERVER = previousScript;
-      }
       if (stubDir) await rm(stubDir, { recursive: true, force: true });
     });
 
-    async function stubMacosServer(body: string) {
+    async function stubMacosServer(body: string): Promise<string> {
       const script = path.join(stubDir, "macos-server");
       await writeFile(
         script,
         `#!/bin/bash\nprintf '%s\\n' "$*" >> "${receipt}"\n${body}\n`,
       );
       await chmod(script, 0o755);
-      process.env.FAMILYOS_MACOS_SERVER = script;
+      return script;
     }
 
     test("unpaired clients cannot start an update", async () => {
-      await stubMacosServer("exit 0");
+      const serverPath = await stubMacosServer("exit 0");
       const res = await handleKickUpdate(
         new Request("http://familyos.test/api/settings/update", {
           method: "POST",
         }),
+        { serverPath },
       );
       assert.equal(res.status, 401);
       assert.equal((await readFile(receipt, "utf8")).trim(), "");
     });
 
     test("a Trusted Display submits kick-update and the job is accepted", async () => {
-      await stubMacosServer("exit 0");
+      const serverPath = await stubMacosServer("exit 0");
       const res = await handleKickUpdate(
         new Request("http://familyos.test/api/settings/update", {
           method: "POST",
           headers: { cookie: first.cookie },
         }),
+        { serverPath },
       );
       assert.equal(res.status, 202);
       const body = (await res.json()) as { ok: boolean };
@@ -560,12 +546,13 @@ describe("Household Configuration HTTP", () => {
     });
 
     test("a kick-update failure is returned without claiming success", async () => {
-      await stubMacosServer("exit 1");
+      const serverPath = await stubMacosServer("exit 1");
       const res = await handleKickUpdate(
         new Request("http://familyos.test/api/settings/update", {
           method: "POST",
           headers: { cookie: first.cookie },
         }),
+        { serverPath },
       );
       assert.equal(res.status, 500);
       const body = (await res.json()) as { error: string };

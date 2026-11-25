@@ -72,12 +72,9 @@ type RecurrenceRequest =
   | { kind: "weekly"; days: Weekday[] }
   | { kind: "monthly"; day: number };
 
-/**
- * Fixed holds every chosen member: a new Task is created once per member, while
- * an existing Task keeps exactly one (the editor replaces rather than adds).
- */
 type DraftAssignment =
-  | { kind: "fixed"; members: string[] }
+  | { kind: "fixed"; member: string | null }
+  | { kind: "each"; members: string[] }
   | { kind: "rotation"; order: string[] };
 
 type Draft = DraftFields & {
@@ -153,17 +150,50 @@ function sheetFromDefinition(definition: LegacyTaskDefinition): Draft | null {
     recurrence: toDraftRecurrence(definition.recurrence),
     assignment:
       definition.assignment.kind === "fixed"
-        ? { kind: "fixed", members: [definition.assignment.member] }
+        ? { kind: "fixed", member: definition.assignment.member }
         : definition.assignment,
     time: definition.time ?? "",
     stars: String(definition.stars),
   };
 }
 
-/**
- * The assignment the API receives, or null while the sheet cannot be saved. A
- * new fixed Task asks for one Task per chosen member; an edit keeps one member.
- */
+function chosenAssignmentMembers(assignment: DraftAssignment): string[] {
+  switch (assignment.kind) {
+    case "fixed":
+      return assignment.member ? [assignment.member] : [];
+    case "each":
+      return assignment.members;
+    case "rotation":
+      return assignment.order;
+  }
+}
+
+function createAssignmentRequest(
+  assignment: DraftAssignment,
+):
+  | { kind: "each"; members: string[] }
+  | { kind: "rotation"; order: string[] }
+  | null {
+  if (assignment.kind === "rotation") {
+    return assignment.order.length > 0 ? assignment : null;
+  }
+  const members = chosenAssignmentMembers(assignment);
+  return members.length > 0 ? { kind: "each", members } : null;
+}
+
+function editAssignmentRequest(
+  assignment: DraftAssignment,
+):
+  | { kind: "fixed"; member: string }
+  | { kind: "rotation"; order: string[] }
+  | null {
+  if (assignment.kind === "rotation") {
+    return assignment.order.length > 0 ? assignment : null;
+  }
+  const [member] = chosenAssignmentMembers(assignment);
+  return member ? { kind: "fixed", member } : null;
+}
+
 function assignmentRequest(
   draft: Draft,
 ):
@@ -171,19 +201,9 @@ function assignmentRequest(
   | { kind: "each"; members: string[] }
   | { kind: "rotation"; order: string[] }
   | null {
-  const { assignment } = draft;
-  if (assignment.kind === "rotation") {
-    return assignment.order.length > 0 ? assignment : null;
-  }
-  if (draft.task) {
-    const [member] = assignment.members;
-    return member && assignment.members.length === 1
-      ? { kind: "fixed", member }
-      : null;
-  }
-  return assignment.members.length > 0
-    ? { kind: "each", members: assignment.members }
-    : null;
+  return draft.task
+    ? editAssignmentRequest(draft.assignment)
+    : createAssignmentRequest(draft.assignment);
 }
 
 type MemberAction = { kind: "claim-bounty"; bounty: AvailableBounty };
@@ -267,7 +287,6 @@ export function skipOccurrence(
   };
 }
 
-/** Today's Tasks as one screen reads and changes them. */
 export type TasksWorkspace = {
   now: Date;
   settings: PublicSettings | null;
@@ -275,9 +294,7 @@ export type TasksWorkspace = {
   tasks: TasksViewRead;
   error: string | null;
   actions: TaskActions;
-  /** Opens the editor for a new assigned Task, for `member` when given. */
   newTask: (member?: MemberId) => void;
-  /** Open editors, pickers, and the celebration. Render inside a positioned screen. */
   dialogs: ReactNode;
 };
 
@@ -686,7 +703,7 @@ export function useTasksWorkspace(): TasksWorkspace {
           title: "",
           type: "chore",
           recurrence: { kind: "daily" },
-          assignment: { kind: "fixed", members: member ? [member] : [] },
+          assignment: { kind: "each", members: member ? [member] : [] },
           time: "",
           stars: "0",
         },
@@ -757,7 +774,6 @@ function CreateSheet({
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // The kiosk extension overlays the viewport instead of resizing it.
     const update = () => {
       const keyboard = document.getElementById("familyos-osk");
       const viewport = window.visualViewport;
@@ -876,22 +892,17 @@ function CreateSheet({
             <div style={{ display: "flex", gap: 10 }}>
               <Button
                 variant={
-                  draft.assignment.kind === "fixed" ? "primary" : "secondary"
+                  draft.assignment.kind !== "rotation" ? "primary" : "secondary"
                 }
-                onClick={() =>
+                onClick={() => {
+                  const chosen = chosenAssignmentMembers(draft.assignment);
                   onChange({
                     ...draft,
-                    assignment: {
-                      kind: "fixed",
-                      members:
-                        draft.assignment.kind === "fixed"
-                          ? draft.assignment.members
-                          : draft.task
-                            ? draft.assignment.order.slice(0, 1)
-                            : draft.assignment.order,
-                    },
-                  })
-                }
+                    assignment: draft.task
+                      ? { kind: "fixed", member: chosen[0] ?? null }
+                      : { kind: "each", members: chosen },
+                  });
+                }}
                 style={{ flex: 1 }}
               >
                 Fixed
@@ -905,10 +916,7 @@ function CreateSheet({
                     ...draft,
                     assignment: {
                       kind: "rotation",
-                      order:
-                        draft.assignment.kind === "rotation"
-                          ? draft.assignment.order
-                          : draft.assignment.members,
+                      order: chosenAssignmentMembers(draft.assignment),
                     },
                   })
                 }
@@ -917,7 +925,7 @@ function CreateSheet({
                 Rotation
               </Button>
             </div>
-            {!draft.task && draft.assignment.kind === "fixed" ? (
+            {draft.assignment.kind === "each" ? (
               <p
                 style={{
                   font: "var(--type-card-meta)",
@@ -930,10 +938,7 @@ function CreateSheet({
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {members.map((member) => {
                 const surface = memberSurface(member.color);
-                const chosen =
-                  draft.assignment.kind === "fixed"
-                    ? draft.assignment.members
-                    : draft.assignment.order;
+                const chosen = chosenAssignmentMembers(draft.assignment);
                 const position = chosen.indexOf(member.id);
                 const selected = position >= 0;
                 return (
@@ -949,12 +954,11 @@ function CreateSheet({
                       onChange({
                         ...draft,
                         assignment:
-                          draft.assignment.kind === "rotation"
-                            ? { kind: "rotation", order: toggled }
-                            : {
-                                kind: "fixed",
-                                members: draft.task ? [member.id] : toggled,
-                              },
+                          draft.assignment.kind === "fixed"
+                            ? { kind: "fixed", member: member.id }
+                            : draft.assignment.kind === "rotation"
+                              ? { kind: "rotation", order: toggled }
+                              : { kind: "each", members: toggled },
                       });
                     }}
                     style={{
@@ -1099,7 +1103,7 @@ function CreateSheet({
           >
             {draft.task
               ? "Save"
-              : draft.assignment.kind === "fixed" &&
+              : draft.assignment.kind === "each" &&
                   draft.assignment.members.length > 1
                 ? `Add ${draft.assignment.members.length} tasks`
                 : "Add"}

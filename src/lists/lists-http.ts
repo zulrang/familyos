@@ -3,7 +3,7 @@ import {
   readHousehold,
   updateHousehold,
 } from "@/settings/settings";
-import { AuthError } from "@/shared/auth-error";
+import { ProviderAuthError } from "@/shared/auth-error";
 import { isUnauthorized, requireTrustedDisplay } from "@/shared/display-auth";
 import { readProvider } from "@/shared/provider";
 import {
@@ -12,7 +12,7 @@ import {
   readSelectedListsCache,
 } from "./lists-cache";
 import { listsError, ProviderUnavailableError } from "./lists-error";
-import type { ListsGateway } from "./lists-gateway";
+import { googleListsGateway, type ListsGateway } from "./lists-gateway";
 import type { ListsRead } from "./types";
 
 export type { ListsGateway };
@@ -87,14 +87,8 @@ function notSelected(): Response {
   return Response.json({ error: "not a Household List" }, { status: 404 });
 }
 
-// ponytail: lazy default so tests can inject a Fake without loading Google.
-async function defaultGateway(): Promise<ListsGateway> {
-  const { googleListsGateway } = await import("./lists-gateway.ts");
-  return googleListsGateway();
-}
-
-async function resolveGateway(gateway?: ListsGateway): Promise<ListsGateway> {
-  return gateway ?? (await defaultGateway());
+function resolveGateway(gateway?: ListsGateway): ListsGateway {
+  return gateway ?? googleListsGateway();
 }
 
 async function requireSelectedList(listId: string): Promise<Response | null> {
@@ -148,7 +142,7 @@ async function rejectIfReadOnly(): Promise<Response | null> {
     listIds,
   );
   if (cached.length) return listsError(new ProviderUnavailableError());
-  return listsError(new AuthError());
+  return listsError(new ProviderAuthError());
 }
 
 async function requireListsWrite(request: Request): Promise<Response | null> {
@@ -165,9 +159,7 @@ async function bestEffortRefreshSelectedCache(
   if (!connectionId) return;
   try {
     await refreshSelectedListsCache(connectionId, listIds, lists);
-  } catch {
-    /* live lists already in hand */
-  }
+  } catch {}
 }
 
 async function bestEffortRefreshListCache(
@@ -180,9 +172,7 @@ async function bestEffortRefreshListCache(
     const lists = await gw.listSelected([listId]);
     const list = lists[0];
     if (list) await putHouseholdListCache(providerConnectionId, list);
-  } catch {
-    /* live write already succeeded */
-  }
+  } catch {}
 }
 
 export async function handleGetLists(
@@ -195,11 +185,11 @@ export async function handleGetLists(
   const provider = await readProvider();
   let lists: ListsRead["lists"];
   try {
-    if (!provider.tokens?.access_token) throw new AuthError();
-    const gw = await resolveGateway(gateway);
+    if (!provider.tokens?.access_token) throw new ProviderAuthError();
+    const gw = resolveGateway(gateway);
     lists = await gw.listSelected(listIds);
   } catch (e) {
-    if (e instanceof AuthError) return listsError(e);
+    if (e instanceof ProviderAuthError) return listsError(e);
     const cached = await cachedSelectedLists(
       provider.providerConnectionId,
       listIds,
@@ -235,13 +225,12 @@ export async function handleCreateList(
     ) {
       return versionConflict(household);
     }
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     const list = await gw.createList(body.title);
     const result = await updateHousehold(body.expectedVersion, {
       listIds: [...household.listIds, list.id],
     });
     if (!result.ok) {
-      // Race after pre-check: provider list may exist; do not return it (unselected).
       return versionConflict(result.config);
     }
     await bestEffortRefreshListCache(gw, list.id);
@@ -267,7 +256,7 @@ export async function handleRenameList(
   const title = parseRequiredTitle(await readJson(request));
   if (!title) return jsonError("title required", 400);
   try {
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     const list = await gw.renameList(listId, title);
     await bestEffortRefreshListCache(gw, listId);
     return Response.json({ list });
@@ -276,9 +265,6 @@ export async function handleRenameList(
   }
 }
 
-/**
- * Remove a Household List panel: unselect only. Never deletes provider data.
- */
 export async function handleUnselectList(
   request: Request,
   listId: string,
@@ -298,7 +284,7 @@ export async function handleUnselectList(
   }
 
   try {
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     await gw.listSelected([listId]);
   } catch (e) {
     return listsError(e);
@@ -329,7 +315,7 @@ export async function handleAddItem(
   const title = parseRequiredTitle(await readJson(request));
   if (!title) return jsonError("title required", 400);
   try {
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     const item = await gw.addItem(listId, title);
     await bestEffortRefreshListCache(gw, listId);
     return Response.json({ item });
@@ -354,7 +340,7 @@ export async function handlePatchItem(
   const expectedVersion = parseExpectedVersion(raw);
   if (!expectedVersion) return jsonError("expectedVersion required", 400);
   try {
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     const item = await gw.patchItem(
       listId,
       itemId,
@@ -378,7 +364,7 @@ export async function handleClearCompleted(
   const denied = await requireSelectedList(listId);
   if (denied) return denied;
   try {
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     await gw.clearCompleted(listId);
     await bestEffortRefreshListCache(gw, listId);
     return Response.json({ ok: true });
@@ -400,7 +386,7 @@ export async function handleDeleteItem(
   const expectedVersion = parseExpectedVersion(await readJson(request));
   if (!expectedVersion) return jsonError("expectedVersion required", 400);
   try {
-    const gw = await resolveGateway(gateway);
+    const gw = resolveGateway(gateway);
     await gw.deleteItem(listId, itemId, expectedVersion);
     await bestEffortRefreshListCache(gw, listId);
     return Response.json({ ok: true });

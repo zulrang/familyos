@@ -64,11 +64,7 @@
     focused = e.target;
     lastField = e.target;
     lastFocusAt = Date.now();
-    try {
-      focused.scrollIntoView({ block: "center", inline: "nearest" });
-    } catch {
-      /* ignore */
-    }
+    focused.scrollIntoView?.({ block: "center", inline: "nearest" });
     send({ type: "show", numeric: prefersNumeric(focused) });
   }
 
@@ -251,11 +247,7 @@
             : el.value.slice(0, start) + el.value.slice(end);
         setVal(el, next);
         const pos = start === end ? Math.max(0, start - 1) : start;
-        try {
-          el.setSelectionRange(pos, pos);
-        } catch {
-          /* some types reject selection */
-        }
+        setCaret(el, pos);
       }
       fire(el, "deleteContentBackward");
       return;
@@ -290,13 +282,17 @@
       const start = el.selectionStart ?? el.value.length;
       const end = el.selectionEnd ?? el.value.length;
       setVal(el, el.value.slice(0, start) + key + el.value.slice(end));
-      try {
-        el.setSelectionRange(start + key.length, start + key.length);
-      } catch {
-        /* ignore */
-      }
+      setCaret(el, start + key.length);
     }
     fire(el, "insertText");
+  }
+
+  function setCaret(el, pos) {
+    try {
+      el.setSelectionRange(pos, pos);
+    } catch {
+      /* some types reject selection */
+    }
   }
 
   function setVal(el, v) {

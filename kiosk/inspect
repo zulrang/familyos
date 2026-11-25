@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""LAN console for the wall kiosk Chromium (iPad / laptop). CDP stays on loopback."""
 
 import base64
 import fcntl

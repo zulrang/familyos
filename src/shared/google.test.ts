@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, describe, test } from "vitest";
-import { AuthError } from "@/shared/auth-error";
+import { afterAll, afterEach, beforeAll, describe, test, vi } from "vitest";
+import { ProviderAuthError } from "@/shared/auth-error";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CALENDAR_URL =
@@ -86,7 +86,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
     await rm(dataRoot, { recursive: true, force: true });
   });
 
-  test("invalid_grant on refresh signs out and throws AuthError", async () => {
+  test("invalid_grant on refresh signs out and throws ProviderAuthError", async () => {
     await seedExpiredTokens();
     globalThis.fetch = async (input) => {
       const url = String(input);
@@ -98,7 +98,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       return new Response("{}", { status: 200 });
     };
 
-    await assert.rejects(() => gfetch(CALENDAR_URL), AuthError);
+    await assert.rejects(() => gfetch(CALENDAR_URL), ProviderAuthError);
     const provider = await readProvider();
     assert.equal(provider.tokens, null);
     assert.equal(provider.providerConnectionId, "acct-google");
@@ -158,7 +158,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
     assert.equal(provider.tokens?.refresh_token, "refresh-shared-2");
   });
 
-  test("clearProviderConnection during an in-flight refresh rejects with AuthError without resurrecting tokens", async () => {
+  test("clearProviderConnection during an in-flight refresh rejects with ProviderAuthError without resurrecting tokens", async () => {
     await seedExpiredTokens("refresh-logout-race");
     let tokenRequested!: () => void;
     const waitTokenRequested = new Promise<void>((resolve) => {
@@ -188,7 +188,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       }),
     );
 
-    await assert.rejects(() => pending, AuthError);
+    await assert.rejects(() => pending, ProviderAuthError);
     assert.equal((await readProvider()).tokens, null);
   });
 
@@ -222,7 +222,7 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }),
     );
 
-    await assert.rejects(() => pending, AuthError);
+    await assert.rejects(() => pending, ProviderAuthError);
     const provider = await readProvider();
     assert.equal(provider.providerConnectionId, "acct-new");
     assert.equal(provider.tokens?.access_token, "new-access");
@@ -263,5 +263,72 @@ describe("Google refresh grant, single-flight, and timeouts", () => {
       () => pending,
       (err: unknown) => err instanceof Error && err.name === "AbortError",
     );
+  });
+
+  test("gfetch shares a single in-flight OAuth refresh across separate module graphs and cleans up afterwards", async () => {
+    await seedExpiredTokens("refresh-cross-graph");
+
+    vi.resetModules();
+    const modA = await import("@/shared/google");
+    vi.resetModules();
+    const modB = await import("@/shared/google");
+    assert.notEqual(modA.gfetch, modB.gfetch);
+
+    let tokenCalls = 0;
+    const authHeaders: Array<string | null> = [];
+    let tokenRequested!: () => void;
+    const waitTokenRequested = new Promise<void>((resolve) => {
+      tokenRequested = resolve;
+    });
+    let releaseToken!: () => void;
+    const tokenGate = new Promise<void>((resolve) => {
+      releaseToken = resolve;
+    });
+    let nextAccessToken = "fresh-cross-graph";
+    let nextRefreshToken = "refresh-cross-graph-2";
+
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === TOKEN_URL) {
+        tokenCalls += 1;
+        tokenRequested();
+        await tokenGate;
+        return Response.json({
+          access_token: nextAccessToken,
+          refresh_token: nextRefreshToken,
+          expires_in: 3600,
+        });
+      }
+      authHeaders.push(new Headers(init?.headers).get("Authorization"));
+      return Response.json({ ok: true });
+    };
+
+    const reqA = modA.gfetch(`${CALENDAR_URL}?graph=a`);
+    await waitTokenRequested;
+
+    const reqB = modB.gfetch(`${CALENDAR_URL}?graph=b`);
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(tokenCalls, 1);
+
+    releaseToken();
+    const [resA, resB] = await Promise.all([reqA, reqB]);
+    assert.equal(resA.status, 200);
+    assert.equal(resB.status, 200);
+    assert.equal(tokenCalls, 1);
+    assert.deepEqual(authHeaders, [
+      "Bearer fresh-cross-graph",
+      "Bearer fresh-cross-graph",
+    ]);
+    const provider = await readProvider();
+    assert.equal(provider.tokens?.access_token, "fresh-cross-graph");
+    assert.equal(provider.tokens?.refresh_token, "refresh-cross-graph-2");
+
+    await seedExpiredTokens("refresh-cross-graph");
+    nextAccessToken = "fresh-cross-graph-next";
+    nextRefreshToken = "refresh-cross-graph-3";
+    const resC = await modB.gfetch(`${CALENDAR_URL}?graph=c`);
+    assert.equal(resC.status, 200);
+    assert.equal(tokenCalls, 2);
+    assert.equal(authHeaders[2], "Bearer fresh-cross-graph-next");
   });
 });

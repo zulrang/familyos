@@ -1,15 +1,4 @@
-/**
- * DESIGN-DEVIATION: hand-authored Google Calendar HTTP shapes, not cassettes from a
- * live capture and not a live lane. Code-design Parity allows recorded responses
- * or a manual live run; this stands in until either exists, so the real
- * `google-events.ts` adapter still shares `assertCalendarGatewayContract` with the Fake.
- * Upgrade: replay captured cassettes, or gate a live run on env.
- *
- * ponytail: all-day overlap uses the calendar TZ from timed writes (else
- * America/New_York). Live Google uses the calendar's own zone.
- * PATCH merges start/end like live Google and 400s "Invalid start time."
- * when both date and dateTime remain.
- */
+/** DESIGN-DEVIATION: hand-authored Calendar HTTP fixtures stand in for live Google / captured cassettes. */
 
 import { fromDateOnly } from "@/calendar/calendar";
 import { zonedDateTimeToMs } from "@/shared/time";

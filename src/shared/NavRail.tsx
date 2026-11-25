@@ -69,7 +69,6 @@ export function NavRail({
         {items.map((it) => {
           const on = it.id === active;
           const { ink, soft } = toneColors(it.tone);
-          // Rows share the rail height so all ten fit at the largest UI Scale.
           const itemStyle: CSSProperties = {
             position: "relative",
             flex: "1 1 0",

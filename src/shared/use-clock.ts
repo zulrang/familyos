@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-/** The current instant, refreshed every `everyMs`. */
 export function useClock(everyMs: number): Date {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {

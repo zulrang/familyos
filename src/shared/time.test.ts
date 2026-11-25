@@ -17,6 +17,11 @@ describe("Household Time Zone", () => {
   test("accepts IANA identifiers and rejects invalid zones", () => {
     assert.equal(isIanaTimeZone("America/New_York"), true);
     assert.equal(isIanaTimeZone("Pacific/Auckland"), true);
+    assert.equal(isIanaTimeZone("Asia/Kolkata"), true);
+    assert.equal(isIanaTimeZone("Europe/Kyiv"), true);
+    assert.equal(isIanaTimeZone("America/Argentina/Buenos_Aires"), true);
+    assert.equal(isIanaTimeZone("Asia/Ho_Chi_Minh"), true);
+    assert.equal(isIanaTimeZone("Etc/GMT+5"), true);
     assert.equal(isIanaTimeZone("UTC"), true);
     assert.equal(isIanaTimeZone("Not/A_Zone"), false);
     assert.equal(isIanaTimeZone("EST"), false);

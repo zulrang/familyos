@@ -1,4 +1,4 @@
-import { readFile, unlink } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import type { HouseholdList, ListItem } from "@/lists/types";
 import { dataDir } from "@/shared/data-path";
@@ -29,8 +29,7 @@ function parseItem(raw: unknown): ListItem | null {
     id: o.id,
     title: o.title,
     done: o.done,
-    // DESIGN-DEVIATION: pre-version cache rows still display; empty token
-    // cannot mutate because HTTP requires a non-empty expectedVersion.
+    // DESIGN-DEVIATION: empty expectedVersion renders pre-version cache rows read-only.
     expectedVersion:
       typeof o.expectedVersion === "string" ? o.expectedVersion : "",
   };
@@ -76,11 +75,7 @@ export async function dropHouseholdListCache(
   connectionId: string,
   listId: string,
 ): Promise<void> {
-  try {
-    await unlink(listFile(connectionId, listId));
-  } catch {
-    /* no cached list */
-  }
+  await rm(listFile(connectionId, listId), { force: true });
 }
 
 export async function readSelectedListsCache(
