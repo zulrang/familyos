@@ -1,13 +1,36 @@
 import { activeMembers, type HouseholdMember } from "@/members/members";
 import { readHousehold, updateHousehold } from "@/settings/settings";
 import { adminJson, requireAdmin } from "@/shared/admin-auth";
-import { deruptConfig } from "./config";
-import { type SourceStatus, sourceStatus } from "./source-status";
+import {
+  type DeruptTokenSource,
+  deruptConfig,
+  deruptConfigKey,
+  deruptToken,
+  isDeruptToken,
+} from "./config";
+import {
+  type SourceStatus,
+  sourceStatusFor,
+  wakeExternalTaskSources,
+} from "./source-status";
+import {
+  clearDeruptToken,
+  readSavedDeruptToken,
+  saveDeruptToken,
+} from "./token-store";
+
+// Never the token itself: `ending` is its last four characters.
+export type TokenSummary = Readonly<{
+  source: DeruptTokenSource | null;
+  ending: string | null;
+  environmentSet: boolean;
+}>;
 
 export type AdminTaskSource = Readonly<{
   id: "derupt";
   name: string;
   status: SourceStatus | { state: "starting" };
+  token: TokenSummary;
 }>;
 
 export type AdminTaskSourcesRead = Readonly<{
@@ -18,11 +41,26 @@ export type AdminTaskSourcesRead = Readonly<{
   sources: AdminTaskSource[];
 }>;
 
-function deruptStatus(): AdminTaskSource["status"] {
-  const status = sourceStatus("derupt");
-  if (status) return status;
-  const config = deruptConfig(process.env);
-  return config.state === "disabled" ? config : { state: "starting" };
+function derupt(): AdminTaskSource {
+  const saved = readSavedDeruptToken();
+  const config = deruptConfig(process.env, saved);
+  const chosen = deruptToken(process.env, saved);
+  const status: AdminTaskSource["status"] =
+    sourceStatusFor("derupt", deruptConfigKey(config)) ??
+    (config.state === "disabled"
+      ? { state: "disabled", reason: config.reason }
+      : { state: "starting" });
+  return {
+    id: "derupt",
+    name: "Derupt",
+    status,
+    token: {
+      source: chosen?.source ?? null,
+      ending:
+        chosen && isDeruptToken(chosen.token) ? chosen.token.slice(-4) : null,
+      environmentSet: !!process.env.FAMILYOS_DERUPT_TOKEN?.trim(),
+    },
+  };
 }
 
 async function read(): Promise<AdminTaskSourcesRead> {
@@ -32,7 +70,7 @@ async function read(): Promise<AdminTaskSourcesRead> {
     defaultMember: household.externalTaskDefaultMember,
     timeZone: household.timeZone,
     version: household.configVersion,
-    sources: [{ id: "derupt", name: "Derupt", status: deruptStatus() }],
+    sources: [derupt()],
   };
 }
 
@@ -72,5 +110,36 @@ export async function handleAdminTaskSources(
       },
       result.reason === "version" ? 409 : 400,
     );
+  return adminJson(await read());
+}
+
+export async function handleAdminDeruptToken(
+  request: Request,
+): Promise<Response> {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+  if (request.method === "DELETE") {
+    await clearDeruptToken();
+  } else if (request.method === "PUT") {
+    const raw: unknown = await request.json().catch(() => null);
+    const token =
+      raw && typeof raw === "object" && "token" in raw
+        ? typeof raw.token === "string"
+          ? raw.token.trim()
+          : null
+        : null;
+    if (token === null || !isDeruptToken(token))
+      return adminJson(
+        {
+          error:
+            "That doesn’t look like a Derupt connection token. Copy it again from Derupt.",
+        },
+        400,
+      );
+    await saveDeruptToken(token);
+  } else {
+    return adminJson({ error: "Method not allowed." }, 405);
+  }
+  wakeExternalTaskSources();
   return adminJson(await read());
 }

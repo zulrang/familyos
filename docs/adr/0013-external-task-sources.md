@@ -30,7 +30,11 @@ draft parser decides what a valid assigned Task is.
 The code is the composing slice `src/external-task-sources/` (ADR 0011's rule:
 it may import Tasks; nothing imports it). It runs inside the server process,
 started from `src/instrumentation.ts`, one poller per process, and is
-disabled when `FAMILYOS_DERUPT_TOKEN` is not set.
+idle while no token is configured. The token is saved by a parent in admin
+(server-side, owner-only file) or, failing that, read from
+`FAMILYOS_DERUPT_TOKEN`; the saved one wins. The poller re-reads it on each
+poll and is woken when a parent saves or clears it, so changes need no
+restart.
 
 **Pull, not push.** Derupt never calls a destination; FamilyOS claims work
 about once a minute until Derupt reports none, backing off on network and

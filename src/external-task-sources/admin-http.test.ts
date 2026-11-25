@@ -1,24 +1,31 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { readHousehold, writeHousehold } from "@/settings/settings";
 import { handleAdminSession } from "@/shared/admin-auth";
 import {
   type AdminTaskSourcesRead,
+  handleAdminDeruptToken,
   handleAdminTaskSources,
 } from "./admin-http";
+import { deruptConfig, deruptConfigKey } from "./config";
 import {
   resetExternalTaskSourcesForTests,
   setSourceStatus,
 } from "./source-status";
+import { readSavedDeruptToken } from "./token-store";
+
+const SAVED = "fake_saved_token_0000000000wxyz";
+const REPLACEMENT = "fake_replacement_token_000000abcd";
+const FROM_ENV = "fake_env_token_00000000000000envv";
 
 let dir: string;
 let cookie: string;
 
-function request(body?: unknown) {
+function request(body?: unknown, method = body === undefined ? "GET" : "POST") {
   return new Request("http://familyos.test/admin/api/task-sources", {
-    method: body === undefined ? "GET" : "POST",
+    method,
     headers: {
       cookie,
       origin: "http://familyos.test",
@@ -90,13 +97,18 @@ test("reads no default and an unconfigured source", async () => {
 });
 
 test("reports the running poller's status without request text", async () => {
-  setSourceStatus("derupt", {
-    state: "halted",
-    reason: "connection_revoked",
-    at: "2026-11-15T17:00:00.000Z",
-    lastSuccessAt: "2026-11-15T16:59:00.000Z",
-    lastProblem: null,
-  });
+  vi.stubEnv("FAMILYOS_DERUPT_TOKEN", FROM_ENV);
+  setSourceStatus(
+    "derupt",
+    {
+      state: "halted",
+      reason: "connection_revoked",
+      at: "2026-11-15T17:00:00.000Z",
+      lastSuccessAt: "2026-11-15T16:59:00.000Z",
+      lastProblem: null,
+    },
+    deruptConfigKey(deruptConfig(process.env)),
+  );
   expect((await read()).sources[0].status).toEqual({
     state: "halted",
     reason: "connection_revoked",
@@ -133,4 +145,167 @@ test("refuses a retired or unknown member, a stale version, and no session", asy
   cookie = "";
   expect((await handleAdminTaskSources(request())).status).toBe(401);
   expect((await readHousehold()).externalTaskDefaultMember).toBeNull();
+});
+
+describe("the Derupt token", () => {
+  const put = (token: unknown) =>
+    handleAdminDeruptToken(request({ token }, "PUT"));
+  const clear = () => handleAdminDeruptToken(request(undefined, "DELETE"));
+  const derupt = async (response: Response) => {
+    const text = await response.text();
+    return {
+      text,
+      source: (JSON.parse(text) as AdminTaskSourcesRead).sources[0],
+    };
+  };
+
+  test("saves a token owner-only and shows only its last four characters", async () => {
+    const response = await put(SAVED);
+    expect(response.status).toBe(200);
+    const { text, source } = await derupt(response);
+    expect(text).not.toContain(SAVED);
+    expect(source.token).toEqual({
+      source: "saved",
+      ending: "wxyz",
+      environmentSet: false,
+    });
+    expect(source.status).toEqual({ state: "starting" });
+    expect(readSavedDeruptToken()).toBe(SAVED);
+    const file = path.join(dir, "derupt-token.json");
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(
+      await handleAdminTaskSources(request()).then((r) => r.text()),
+    ).not.toContain(SAVED);
+  });
+
+  test("replaces the saved token", async () => {
+    await put(SAVED);
+    const { text, source } = await derupt(await put(REPLACEMENT));
+    expect(text).not.toContain(REPLACEMENT);
+    expect(source.token.ending).toBe("abcd");
+    expect(readSavedDeruptToken()).toBe(REPLACEMENT);
+    expect(
+      await readFile(path.join(dir, "derupt-token.json"), "utf8"),
+    ).not.toContain(SAVED);
+  });
+
+  test("clears the saved token, and clearing nothing is fine", async () => {
+    await put(SAVED);
+    const { source } = await derupt(await clear());
+    expect(source.token).toEqual({
+      source: null,
+      ending: null,
+      environmentSet: false,
+    });
+    expect(source.status).toEqual({
+      state: "disabled",
+      reason: "not_configured",
+    });
+    expect(readSavedDeruptToken()).toBeNull();
+    expect((await clear()).status).toBe(200);
+  });
+
+  test("shows a status only for the token now in use", async () => {
+    vi.stubEnv("FAMILYOS_DERUPT_TOKEN", FROM_ENV);
+    setSourceStatus(
+      "derupt",
+      {
+        state: "halted",
+        reason: "token_rejected",
+        at: "2026-11-15T17:00:00.000Z",
+        lastSuccessAt: null,
+        lastProblem: null,
+      },
+      deruptConfigKey(deruptConfig(process.env)),
+    );
+    expect((await read()).sources[0].status.state).toBe("halted");
+    // A new token supersedes the rejected one before the poller runs again.
+    expect((await derupt(await put(SAVED))).source.status).toEqual({
+      state: "starting",
+    });
+  });
+
+  test("refuses a malformed token without echoing it", async () => {
+    for (const token of ["fake short", "x".repeat(600), 42, null]) {
+      const response = await put(token);
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      if (typeof token === "string") expect(text).not.toContain(token);
+    }
+    expect(readSavedDeruptToken()).toBeNull();
+  });
+
+  test("only a parent with a session may change it", async () => {
+    await put(SAVED);
+    cookie = "";
+    expect((await put(REPLACEMENT)).status).toBe(401);
+    expect((await clear()).status).toBe(401);
+    expect(readSavedDeruptToken()).toBe(SAVED);
+  });
+
+  test("refuses writes that don't come from the admin interface", async () => {
+    const forged = new Request(
+      "http://familyos.test/admin/api/task-sources/derupt-token",
+      {
+        method: "PUT",
+        headers: {
+          cookie,
+          origin: "http://evil.test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ token: REPLACEMENT }),
+      },
+    );
+    expect((await handleAdminDeruptToken(forged)).status).toBe(403);
+    expect(readSavedDeruptToken()).toBeNull();
+  });
+
+  describe("precedence with FAMILYOS_DERUPT_TOKEN", () => {
+    beforeEach(() => vi.stubEnv("FAMILYOS_DERUPT_TOKEN", FROM_ENV));
+
+    test("the variable is used when nothing is saved", async () => {
+      const { text, source } = await derupt(
+        await handleAdminTaskSources(request()),
+      );
+      expect(text).not.toContain(FROM_ENV);
+      expect(source.token).toEqual({
+        source: "environment",
+        ending: "envv",
+        environmentSet: true,
+      });
+      expect(source.status).toEqual({ state: "starting" });
+    });
+
+    test("a saved token wins, and clearing it falls back to the variable", async () => {
+      const saved = await derupt(await put(SAVED));
+      expect(saved.text).not.toContain(FROM_ENV);
+      expect(saved.source.token).toEqual({
+        source: "saved",
+        ending: "wxyz",
+        environmentSet: true,
+      });
+      expect((await derupt(await clear())).source.token).toEqual({
+        source: "environment",
+        ending: "envv",
+        environmentSet: true,
+      });
+    });
+
+    test("a malformed variable is reported, and a saved token replaces it", async () => {
+      vi.stubEnv("FAMILYOS_DERUPT_TOKEN", "short");
+      const before = (await read()).sources[0];
+      expect(before.status).toEqual({
+        state: "disabled",
+        reason: "invalid_token",
+      });
+      expect(before.token).toEqual({
+        source: "environment",
+        ending: null,
+        environmentSet: true,
+      });
+      expect((await derupt(await put(SAVED))).source.status).toEqual({
+        state: "starting",
+      });
+    });
+  });
 });

@@ -23,7 +23,9 @@ import {
   resetExternalTaskSourcesForTests,
   setSourceStatus,
   sourceStatus,
+  wakeExternalTaskSources,
 } from "./source-status";
+import { clearDeruptToken, saveDeruptToken } from "./token-store";
 
 const TOKEN = "derupt_test_token_0123456789abcdef";
 const NOW = new Date("2026-11-15T17:00:00Z");
@@ -70,11 +72,11 @@ beforeEach(async () => {
   await derupt.listen();
   logs = [];
   resetExternalTaskSourcesForTests();
-  setSourceStatus("derupt", {
-    state: "enabled",
-    lastSuccessAt: null,
-    lastProblem: null,
-  });
+  setSourceStatus(
+    "derupt",
+    { state: "enabled", lastSuccessAt: null, lastProblem: null },
+    "test",
+  );
 });
 
 afterEach(async () => {
@@ -390,6 +392,109 @@ describe("starting", () => {
         }),
       );
       expect(loadDefinitions()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("changing the token without a restart", () => {
+  const OTHER = "derupt_other_token_0123456789abcd";
+
+  async function settle() {
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(() =>
+      expect(sourceStatus("derupt")).not.toMatchObject({
+        state: "enabled",
+        lastSuccessAt: null,
+        lastProblem: null,
+      }),
+    );
+  }
+
+  test("a saved token starts polling, and clearing it stops", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      resetExternalTaskSourcesForTests();
+      startExternalTaskSources({ FAMILYOS_DERUPT_ENDPOINT: derupt.url });
+      expect(sourceStatus("derupt")).toEqual({
+        state: "disabled",
+        reason: "not_configured",
+      });
+      derupt.queue.push(task(workId(1)));
+      await saveDeruptToken(TOKEN);
+      wakeExternalTaskSources();
+      await settle();
+      expect(sourceStatus("derupt")).toMatchObject({
+        state: "enabled",
+        lastSuccessAt: expect.any(String),
+      });
+      expect(loadDefinitions()).toHaveLength(1);
+
+      await clearDeruptToken();
+      wakeExternalTaskSources();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sourceStatus("derupt")).toEqual({
+        state: "disabled",
+        reason: "not_configured",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("replacing a rejected token resumes a halted source", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      resetExternalTaskSourcesForTests();
+      await saveDeruptToken(OTHER);
+      startExternalTaskSources({ FAMILYOS_DERUPT_ENDPOINT: derupt.url });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() =>
+        expect(sourceStatus("derupt")).toMatchObject({
+          state: "halted",
+          reason: "token_rejected",
+        }),
+      );
+      await saveDeruptToken(TOKEN);
+      wakeExternalTaskSources();
+      await settle();
+      expect(sourceStatus("derupt")).toMatchObject({
+        state: "enabled",
+        lastSuccessAt: expect.any(String),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a saved token takes precedence over FAMILYOS_DERUPT_TOKEN", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      resetExternalTaskSourcesForTests();
+      // Derupt accepts only TOKEN; the variable holds a different one.
+      await saveDeruptToken(TOKEN);
+      startExternalTaskSources({
+        FAMILYOS_DERUPT_TOKEN: OTHER,
+        FAMILYOS_DERUPT_ENDPOINT: derupt.url,
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await settle();
+      expect(sourceStatus("derupt")).toMatchObject({
+        state: "enabled",
+        lastSuccessAt: expect.any(String),
+      });
+
+      // Clearing it falls back to the variable, which Derupt rejects.
+      await clearDeruptToken();
+      wakeExternalTaskSources();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() =>
+        expect(sourceStatus("derupt")).toMatchObject({
+          state: "halted",
+          reason: "token_rejected",
+        }),
+      );
     } finally {
       vi.useRealTimers();
     }
