@@ -86,6 +86,8 @@ function TokenForm({
   }
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (change.status !== "idle" && change.status !== "error") return;
+    if (!value.trim()) return;
     void run(() => saveDeruptToken(value), "Derupt token saved.");
   }
   const saved = token.source === "saved";

@@ -287,3 +287,22 @@ test("shows a refused token's error", async () => {
     "doesn’t look like a Derupt connection token",
   );
 });
+
+test("Return in the token field neither saves an empty token nor cancels a clear", async () => {
+  const saves = serve(household());
+  render(<AdminExternalTaskSources />);
+  const card = await screen.findByRole("article", { name: "Derupt status" });
+  const input = within(card).getByLabelText("New connection token");
+  fireEvent.submit(input);
+  expect(saves).toEqual([]);
+  fireEvent.click(within(card).getByRole("button", { name: "Clear token" }));
+  fireEvent.change(input, {
+    target: { value: "fake_typed_token_0000000009999" },
+  });
+  fireEvent.submit(input);
+  expect(saves).toEqual([]);
+  expect(card).toHaveTextContent("Clear the saved token?");
+  fireEvent.click(within(card).getByRole("button", { name: "Clear token" }));
+  expect(await screen.findByText("Derupt token cleared.")).toBeVisible();
+  expect(saves).toEqual([{ method: "DELETE", body: undefined }]);
+});
