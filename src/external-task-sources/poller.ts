@@ -1,4 +1,4 @@
-import { deruptConfig } from "./config";
+import { deruptConfig, deruptConfigKey } from "./config";
 import {
   CLAIM,
   type DeruptMessage,
@@ -13,8 +13,11 @@ import {
   recordHalt,
   recordProblem,
   recordSuccess,
+  registerPollerLoop,
   setSourceStatus,
+  sourceStatus,
 } from "./source-status";
+import { readSavedDeruptToken } from "./token-store";
 
 const SOURCE = "derupt";
 export const POLL_INTERVAL_MS = 60_000;
@@ -27,7 +30,7 @@ export const MAX_CLAIMS_PER_POLL = 100;
 /**
  * drained: the queue reported no_work. busy: the claim limit was reached.
  * backoff: the source or the Task store is unavailable. halted: the token was
- * rejected or the connection removed; polling stops until restart.
+ * rejected or the connection removed; polling stops until the token changes.
  */
 export type PollOutcome = "drained" | "busy" | "backoff" | "halted";
 
@@ -47,8 +50,8 @@ function halt(
   recordHalt(SOURCE, reason, deps.now());
   deps.log(
     reason === "token_rejected"
-      ? "Derupt rejected the token (401). Polling stopped until FamilyOS restarts with a new FAMILYOS_DERUPT_TOKEN."
-      : "The Derupt connection was removed. Polling stopped until FamilyOS restarts with a new FAMILYOS_DERUPT_TOKEN.",
+      ? "Derupt rejected the token (401). Polling stopped until a new token is saved."
+      : "The Derupt connection was removed. Polling stopped until a new token is saved.",
   );
   return "halted";
 }
@@ -192,52 +195,111 @@ function log(line: string) {
 }
 
 /**
- * Start polling every configured External Task Source, once per process. It
- * never throws and never blocks startup: the first poll runs after a delay.
+ * Start the poll loop, once per process. It never throws and never blocks
+ * startup: the first poll runs after a delay. Each poll re-reads the token
+ * (saved in admin, else `FAMILYOS_DERUPT_TOKEN`), and saving or clearing one
+ * wakes the loop, so a change applies without a restart.
  */
 export function startExternalTaskSources(
   env: Readonly<Record<string, string | undefined>> = process.env,
+  savedToken: () => string | null = readSavedDeruptToken,
 ): void {
   try {
     if (env.NEXT_PHASE === "phase-production-build") return;
     if (!claimPollerStart()) return;
-    const config = deruptConfig(env);
-    if (config.state === "disabled") {
-      setSourceStatus(SOURCE, config);
-      if (config.reason !== "not_configured")
-        log(`Derupt disabled: ${config.reason}`);
-      return;
-    }
-    setSourceStatus(SOURCE, {
-      state: "enabled",
-      lastSuccessAt: null,
-      lastProblem: null,
-    });
-    const deps: DeruptPollerDeps = {
-      send: deruptHttp(config.endpoint, config.token),
-      receive: (request) => receiveExternalTask(SOURCE, request, new Date()),
-      now: () => new Date(),
-      log,
-    };
+    let applied: string | null = null;
+    let deps: DeruptPollerDeps | null = null;
     let failures = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let running = false;
+    let wakeRequested = false;
+    let stopped = false;
+
+    /** Take up a changed configuration; true when the source should poll. */
+    const apply = (): boolean => {
+      const config = deruptConfig(env, savedToken());
+      const key = deruptConfigKey(config);
+      if (key !== applied) {
+        applied = key;
+        failures = 0;
+        if (config.state === "disabled") {
+          deps = null;
+          setSourceStatus(
+            SOURCE,
+            { state: "disabled", reason: config.reason },
+            key,
+          );
+          if (config.reason !== "not_configured")
+            log(`Derupt disabled: ${config.reason}`);
+        } else {
+          deps = {
+            send: deruptHttp(config.endpoint, config.token),
+            receive: (request) =>
+              receiveExternalTask(SOURCE, request, new Date()),
+            now: () => new Date(),
+            log,
+          };
+          setSourceStatus(
+            SOURCE,
+            { state: "enabled", lastSuccessAt: null, lastProblem: null },
+            key,
+          );
+          log("Derupt polling enabled");
+        }
+      }
+      return deps !== null && sourceStatus(SOURCE)?.state === "enabled";
+    };
     const schedule = (delay: number) => {
-      setTimeout(() => void run(), delay).unref();
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = null;
+        void run();
+      }, delay);
+      timer.unref?.();
     };
     const run = async () => {
-      let outcome: PollOutcome;
+      if (stopped) return;
+      running = true;
+      let delay: number | null;
       try {
-        outcome = await pollDerupt(deps);
+        if (!apply() || !deps) delay = null;
+        else {
+          let outcome: PollOutcome;
+          try {
+            outcome = await pollDerupt(deps);
+          } catch (error) {
+            console.error("External task polling failed", error);
+            recordProblem(SOURCE, "internal_error", new Date());
+            outcome = "backoff";
+          }
+          failures = outcome === "backoff" ? failures + 1 : 0;
+          delay = nextPollDelay(outcome, failures);
+        }
       } catch (error) {
         console.error("External task polling failed", error);
-        recordProblem(SOURCE, "internal_error", new Date());
-        outcome = "backoff";
+        delay = POLL_INTERVAL_MS;
+      } finally {
+        running = false;
       }
-      failures = outcome === "backoff" ? failures + 1 : 0;
-      const delay = nextPollDelay(outcome, failures);
-      if (delay !== null) schedule(delay);
+      if (wakeRequested) {
+        wakeRequested = false;
+        delay = 0;
+      }
+      if (delay !== null && !stopped) schedule(delay);
     };
-    schedule(FIRST_POLL_DELAY_MS);
-    log("Derupt polling enabled");
+    registerPollerLoop({
+      wake: () => {
+        // Re-apply even an unchanged token: saving it again retries a halt.
+        applied = null;
+        if (running) wakeRequested = true;
+        else schedule(0);
+      },
+      stop: () => {
+        stopped = true;
+        if (timer) clearTimeout(timer);
+      },
+    });
+    if (apply()) schedule(FIRST_POLL_DELAY_MS);
   } catch (error) {
     console.error("External task sources did not start", error);
   }

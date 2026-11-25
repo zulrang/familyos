@@ -28,9 +28,16 @@ export type SourceStatus =
 
 export type ExternalTaskSourceId = "derupt";
 
+/** A status and the configuration key (see `deruptConfigKey`) it describes. */
+type Entry = { status: SourceStatus; configKey: string };
+
+/** The running poll loop: `wake` re-reads the configuration now. */
+export type PollerLoop = Readonly<{ wake: () => void; stop: () => void }>;
+
 type Registry = {
   started: boolean;
-  statuses: Map<ExternalTaskSourceId, SourceStatus>;
+  loop: PollerLoop | null;
+  statuses: Map<ExternalTaskSourceId, Entry>;
 };
 
 const REGISTRY_KEY = "__familyosExternalTaskSources";
@@ -39,7 +46,11 @@ function registry(): Registry {
   const global = globalThis as typeof globalThis & {
     [REGISTRY_KEY]?: Registry;
   };
-  global[REGISTRY_KEY] ??= { started: false, statuses: new Map() };
+  global[REGISTRY_KEY] ??= {
+    started: false,
+    loop: null,
+    statuses: new Map(),
+  };
   return global[REGISTRY_KEY];
 }
 
@@ -51,20 +62,46 @@ export function claimPollerStart(): boolean {
   return true;
 }
 
+export function registerPollerLoop(loop: PollerLoop): void {
+  registry().loop = loop;
+}
+
+/** Apply a changed token now instead of at the next scheduled poll. */
+export function wakeExternalTaskSources(): void {
+  registry().loop?.wake();
+}
+
 export function sourceStatus(id: ExternalTaskSourceId): SourceStatus | null {
-  return registry().statuses.get(id) ?? null;
+  return registry().statuses.get(id)?.status ?? null;
+}
+
+/** The status, if it describes the configuration with this key. */
+export function sourceStatusFor(
+  id: ExternalTaskSourceId,
+  configKey: string,
+): SourceStatus | null {
+  const entry = registry().statuses.get(id);
+  return entry?.configKey === configKey ? entry.status : null;
 }
 
 export function setSourceStatus(
   id: ExternalTaskSourceId,
   status: SourceStatus,
+  configKey: string,
 ): void {
-  registry().statuses.set(id, status);
+  registry().statuses.set(id, { status, configKey });
 }
 
-/** Forget every source and allow a new start (tests only). */
+function updateSourceStatus(id: ExternalTaskSourceId, status: SourceStatus) {
+  const entry = registry().statuses.get(id);
+  if (entry) entry.status = status;
+}
+
+/** Stop the loop, forget every source and allow a new start (tests only). */
 export function resetExternalTaskSources(): void {
   const current = registry();
+  current.loop?.stop();
+  current.loop = null;
   current.started = false;
   current.statuses.clear();
 }
@@ -72,7 +109,7 @@ export function resetExternalTaskSources(): void {
 export function recordSuccess(id: ExternalTaskSourceId, at: Date): void {
   const status = sourceStatus(id);
   if (status?.state !== "enabled") return;
-  setSourceStatus(id, { ...status, lastSuccessAt: at.toISOString() });
+  updateSourceStatus(id, { ...status, lastSuccessAt: at.toISOString() });
 }
 
 export function recordProblem(
@@ -82,7 +119,7 @@ export function recordProblem(
 ): void {
   const status = sourceStatus(id);
   if (status?.state !== "enabled") return;
-  setSourceStatus(id, {
+  updateSourceStatus(id, {
     ...status,
     lastProblem: { code, at: at.toISOString() },
   });
@@ -95,7 +132,7 @@ export function recordHalt(
 ): void {
   const status = sourceStatus(id);
   if (status?.state !== "enabled") return;
-  setSourceStatus(id, {
+  updateSourceStatus(id, {
     state: "halted",
     reason,
     at: at.toISOString(),

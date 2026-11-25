@@ -61,8 +61,8 @@ Set a separate `FAMILYOS_MCP_TOKEN` to enable access; see the
 ## External Task Sources
 
 FamilyOS can pull Tasks handed off from [Derupt](https://github.com/zulrang/derupt.app)
-and add each as an assigned Chore. Set `FAMILYOS_DERUPT_TOKEN` and choose a
-default member in admin; see [External Task Sources](docs/external-task-sources.md).
+and add each as an assigned Chore. Paste a Derupt connection token and choose a
+default member in admin (or set `FAMILYOS_DERUPT_TOKEN`); see [External Task Sources](docs/external-task-sources.md).
 
 ## Touchscreen
 

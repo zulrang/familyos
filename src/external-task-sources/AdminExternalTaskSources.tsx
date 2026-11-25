@@ -6,8 +6,10 @@ import { useAdminData } from "@/shared/admin-client";
 import {
   type AdminTaskSource,
   type AdminTaskSourcesRead,
+  clearDeruptToken,
   readAdminTaskSources,
   saveDefaultMember,
+  saveDeruptToken,
 } from "./admin-client";
 
 function formatTime(iso: string, timeZone: string) {
@@ -20,12 +22,149 @@ function formatTime(iso: string, timeZone: string) {
   }).format(new Date(iso));
 }
 
+const ENV_TOKEN = "FAMILYOS_DERUPT_TOKEN";
+
+function statusLine(source: AdminTaskSource): string | null {
+  const { status, token } = source;
+  switch (status.state) {
+    case "starting":
+      return "Starting. The first check runs in a moment.";
+    case "disabled":
+      if (status.reason === "not_configured")
+        return "Not set up. Paste a connection token from Derupt to turn it on.";
+      if (status.reason === "invalid_token")
+        return token.source === "environment"
+          ? `${ENV_TOKEN} on the server is not a valid token. Save a token here to use instead.`
+          : "The saved token is not valid. Replace it with the token Derupt shows.";
+      return "The configured endpoint is not valid. Check FAMILYOS_DERUPT_ENDPOINT and restart FamilyOS.";
+    case "halted":
+      return status.reason === "token_rejected"
+        ? "Stopped: Derupt rejected the token. Save a new token to resume."
+        : "Stopped: this connection was removed in Derupt. Add a new connection there and save its token here.";
+    case "enabled":
+      return null;
+  }
+}
+
+function tokenLine(token: AdminTaskSource["token"]): string | null {
+  const ending = token.ending ? ` (ends in ••••${token.ending})` : "";
+  if (token.source === "saved")
+    return token.environmentSet
+      ? `Using the token saved here${ending}. ${ENV_TOKEN} is also set on the server; FamilyOS uses it if you clear this one.`
+      : `Using the token saved here${ending}.`;
+  if (token.source === "environment")
+    return `Using ${ENV_TOKEN} from the server${ending}. A token saved here takes its place.`;
+  return null;
+}
+
+type TokenChange =
+  | { status: "idle" }
+  | { status: "confirmClear" }
+  | { status: "saving" }
+  | { status: "error"; error: string };
+
+function TokenForm({
+  token,
+  onChanged,
+}: {
+  token: AdminTaskSource["token"];
+  onChanged: (notice: string) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [change, setChange] = useState<TokenChange>({ status: "idle" });
+  const busy = change.status === "saving";
+  async function run(action: () => Promise<unknown>, notice: string) {
+    setChange({ status: "saving" });
+    try {
+      await action();
+      setValue("");
+      setChange({ status: "idle" });
+      onChanged(notice);
+    } catch (error) {
+      setChange({ status: "error", error: (error as Error).message });
+    }
+  }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    void run(() => saveDeruptToken(value), "Derupt token saved.");
+  }
+  const saved = token.source === "saved";
+  return (
+    <form className={styles.form} onSubmit={submit}>
+      <label>
+        {saved ? "New connection token" : "Connection token"}
+        <input
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+      </label>
+      <p className={styles.muted}>
+        In Derupt, open Settings → Connections → Add, turn on the Task kind, and
+        copy the token it shows. It takes effect right away.
+      </p>
+      {change.status === "error" && (
+        <p role="alert" className={styles.error}>
+          {change.error}
+        </p>
+      )}
+      {change.status === "confirmClear" ? (
+        <>
+          <p role="alert" className={styles.muted}>
+            {token.environmentSet
+              ? `Clear the saved token? FamilyOS goes back to ${ENV_TOKEN} from the server.`
+              : "Clear the saved token? Tasks from Derupt stop arriving."}
+          </p>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className={styles.quiet}
+              onClick={() => setChange({ status: "idle" })}
+            >
+              Keep token
+            </button>
+            <button
+              type="button"
+              className={styles.danger}
+              onClick={() =>
+                void run(clearDeruptToken, "Derupt token cleared.")
+              }
+            >
+              Clear token
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className={styles.actions}>
+          {saved && (
+            <button
+              type="button"
+              className={styles.danger}
+              disabled={busy}
+              onClick={() => setChange({ status: "confirmClear" })}
+            >
+              Clear token
+            </button>
+          )}
+          <button type="submit" disabled={busy || !value.trim()}>
+            {busy ? "Saving…" : saved ? "Replace token" : "Save token"}
+          </button>
+        </div>
+      )}
+    </form>
+  );
+}
+
 function SourceCard({
   source,
   timeZone,
+  onTokenChanged,
 }: {
   source: AdminTaskSource;
   timeZone: string;
+  onTokenChanged: (notice: string) => void;
 }) {
   const status = source.status;
   const badge =
@@ -34,32 +173,9 @@ function SourceCard({
       : status.state === "halted"
         ? "Stopped"
         : "Off";
-  const lines: string[] = [];
-  switch (status.state) {
-    case "starting":
-      lines.push(
-        "Starting. The first check runs shortly after FamilyOS starts.",
-      );
-      break;
-    case "disabled":
-      lines.push(
-        status.reason === "not_configured"
-          ? "Not set up. Add FAMILYOS_DERUPT_TOKEN to the server's .env.local and restart FamilyOS."
-          : status.reason === "invalid_token"
-            ? "The configured token is not valid. Check FAMILYOS_DERUPT_TOKEN and restart FamilyOS."
-            : "The configured endpoint is not valid. Check FAMILYOS_DERUPT_ENDPOINT and restart FamilyOS.",
-      );
-      break;
-    case "halted":
-      lines.push(
-        status.reason === "token_rejected"
-          ? "Stopped: Derupt rejected the token. Put a new token in FAMILYOS_DERUPT_TOKEN and restart FamilyOS."
-          : "Stopped: this connection was removed in Derupt. Add a new connection, put its token in FAMILYOS_DERUPT_TOKEN, and restart FamilyOS.",
-      );
-      break;
-    case "enabled":
-      break;
-  }
+  const lines = [statusLine(source), tokenLine(source.token)].filter(
+    (line): line is string => line !== null,
+  );
   if (status.state === "enabled" || status.state === "halted") {
     lines.push(
       status.lastSuccessAt
@@ -82,6 +198,7 @@ function SourceCard({
           {line}
         </p>
       ))}
+      <TokenForm token={source.token} onChanged={onTokenChanged} />
     </article>
   );
 }
@@ -158,7 +275,11 @@ function DefaultMemberForm({
 
 export function AdminExternalTaskSources() {
   const { state, reload } = useAdminData(readAdminTaskSources);
-  const [saved, setSaved] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const changed = (message: string) => {
+    setNotice(message);
+    void reload();
+  };
   return (
     <div className={styles.stack}>
       <div className={styles.intro}>
@@ -168,9 +289,7 @@ export function AdminExternalTaskSources() {
           Tasks sent from other apps become assigned chores, due once.
         </p>
       </div>
-      {saved && (
-        <output className={styles.success}>Default member saved.</output>
-      )}
+      {notice && <output className={styles.success}>{notice}</output>}
       {state.status === "loading" && <output>Loading task sources…</output>}
       {state.status === "error" && (
         <>
@@ -187,16 +306,14 @@ export function AdminExternalTaskSources() {
           <DefaultMemberForm
             key={`${state.data.version}`}
             data={state.data}
-            onSaved={() => {
-              setSaved(true);
-              void reload();
-            }}
+            onSaved={() => changed("Default member saved.")}
           />
           {state.data.sources.map((source) => (
             <SourceCard
               key={source.id}
               source={source}
               timeZone={state.data.timeZone}
+              onTokenChanged={changed}
             />
           ))}
           <button

@@ -11,20 +11,35 @@ source today. The design and its trade-offs are in
 1. In Derupt, open **Settings → Connections → Add**, name the connection (for
    example “FamilyOS”), and turn on the **Task** kind only. Copy the token
    Derupt shows once.
-2. On the FamilyOS server, add it to `.env.local` (or the server environment):
+2. In parent admin, open **Task sources**, paste the token into the
+   **Derupt** card and choose **Save token**. It takes effect right away; no
+   restart.
+3. On the same page, choose the **Default member**: the person who gets tasks
+   that don't name anyone.
 
-   ```text
-   FAMILYOS_DERUPT_TOKEN=<the connection token>
-   ```
+Treat the token as a password. FamilyOS keeps it on the server in
+`data/derupt-token.json` (owner-only), never sends it back to the browser
+(admin shows only its last four characters), and sends it to Derupt only over
+HTTPS. Without a token the source is off and FamilyOS makes no requests. Every
+server process that has a token polls, so keep tokens out of development
+checkouts.
 
-3. Restart FamilyOS (on the household Mac, `./scripts/macos-server restart`;
-   release worktrees share the checkout's `.env.local`).
-4. In parent admin, open **Task sources** and choose the **Default member**:
-   the person who gets tasks that don't name anyone.
+**Replace token** swaps in a new one (for example after Derupt rejects the old
+one); **Clear token** removes the saved one. Both apply within seconds.
 
-Treat the token as a password. FamilyOS sends it only over HTTPS. Without the
-variable the source is off and FamilyOS makes no requests. Every server process
-that has the token polls, so keep it out of development checkouts.
+### The `FAMILYOS_DERUPT_TOKEN` variable
+
+The server environment (`.env.local`) can still provide the token instead:
+
+```text
+FAMILYOS_DERUPT_TOKEN=<the connection token>
+```
+
+A token saved in admin takes precedence over the variable. With both set,
+FamilyOS uses the saved one, and clearing it falls back to the variable. Admin
+says which one is in use. Changing the variable itself still needs a restart
+(on the household Mac, `./scripts/macos-server restart`; release worktrees
+share the checkout's `.env.local`).
 
 `FAMILYOS_DERUPT_ENDPOINT` overrides the processor URL for tests or a local
 Derupt stack. It must be HTTPS, or HTTP to `localhost`/`127.0.0.1`.
@@ -72,8 +87,8 @@ successfully, and the last problem code. FamilyOS checks about once a minute
 and waits longer (up to 15 minutes) while the source is unreachable.
 
 If Derupt rejects the token or the connection is removed, polling stops and the
-page says so. Create a new token or connection, update
-`FAMILYOS_DERUPT_TOKEN`, and restart FamilyOS.
+page says so. Create a new token or connection in Derupt and save it in the
+Derupt card; polling resumes without a restart.
 
 FamilyOS stores the Task, not the hand-off; the Task's title is the only copy of
 the text. Logs record work IDs and codes, never what was written.
@@ -82,7 +97,8 @@ the text. Logs record work IDs and codes, never what was written.
 
 The slice is `src/external-task-sources/`: `intake.ts` (pure planning rules),
 `intake-store.ts` (once-only Task creation), `derupt.ts` (protocol),
-`poller.ts` (claim loop and scheduling), and the admin page. Tests run the
+`poller.ts` (claim loop and scheduling), `config.ts` (which token is in use),
+`token-store.ts` (the saved token), and the admin page. Tests run the
 poller against a fake Derupt server (`derupt-fake.test-support.ts`) with a
 temporary household; `derupt.contract.test.ts` pins the protocol to the
 messages recorded in Derupt's destination guide.
