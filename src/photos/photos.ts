@@ -18,6 +18,7 @@ export type PhotosConnection =
       sessionId: string;
       pickerUrl: string;
       nextPollAt: number;
+      pickingEndsAt: number;
       expiresAt: number;
       pollAfterMs: number;
     }

@@ -16,7 +16,14 @@ export async function readPhotosConnection(): Promise<PhotosConnection> {
     const state = (value as { state?: unknown }).state;
     if (state !== "disconnected" && state !== "selecting" && state !== "ready")
       return { state: "disconnected" };
-    return value as PhotosConnection;
+    const connection = value as PhotosConnection;
+    // Selections saved before pickingEndsAt existed have already timed out.
+    if (
+      connection.state === "selecting" &&
+      typeof connection.pickingEndsAt !== "number"
+    )
+      return { ...connection, pickingEndsAt: 0 };
+    return connection;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
       return { state: "disconnected" };

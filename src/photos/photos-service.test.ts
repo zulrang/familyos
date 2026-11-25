@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -111,12 +111,58 @@ describe("Photos Picker connection", () => {
     });
   });
 
+  test("replaces a picker link whose picking window has closed", async () => {
+    const deleted: string[] = [];
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        deleted.push(input);
+        return new Response(null, { status: 204 });
+      }
+      if (input.endsWith("/sessions"))
+        return Response.json({
+          id: "fresh",
+          pickerUri: "https://photos.google.com/picker/fresh",
+          mediaItemsSet: false,
+          pollingConfig: { pollInterval: "5s", timeoutIn: "1800s" },
+          expireTime: "2030-01-01T00:00:00Z",
+        });
+      return Response.json({
+        id: "stale",
+        mediaItemsSet: false,
+        pollingConfig: { pollInterval: "5s", timeoutIn: "0s" },
+        expireTime: "2030-01-01T00:00:00Z",
+      });
+    });
+    await writeFile(
+      path.join(dir, "photos.json"),
+      JSON.stringify({
+        state: "selecting",
+        sessionId: "stale",
+        pickerUrl: "https://photos.google.com/picker/stale",
+        nextPollAt: Date.now() + 5000,
+        expiresAt: Date.now() + 3 * 86_400_000,
+        pollAfterMs: 5000,
+      }),
+    );
+    expect(await getPhotosStatus()).toMatchObject({
+      state: "selecting",
+      pickerUrl: "https://photos.google.com/picker/fresh",
+    });
+    expect(deleted).toEqual([
+      "https://photospicker.googleapis.com/v1/sessions/stale",
+    ]);
+    expect(await pollPhotos()).toMatchObject({
+      pickerUrl: "https://photos.google.com/picker/fresh",
+    });
+  });
+
   test("disconnect clears the session locally even if Google cleanup fails", async () => {
     await writePhotosConnection({
       state: "selecting",
       sessionId: "session",
       pickerUrl: "https://photos.google.com/picker",
       nextPollAt: 0,
+      pickingEndsAt: Date.now() + 10000,
       expiresAt: Date.now() + 10000,
       pollAfterMs: 5000,
     });
