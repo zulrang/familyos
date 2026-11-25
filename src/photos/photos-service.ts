@@ -113,6 +113,12 @@ function publicStatus(
 export function getPhotosStatus() {
   return withPhotosConnectionWriteLock(async () => {
     const connection = await readPhotosConnection();
+    if (
+      connection.state === "selecting" &&
+      connection.pickingEndsAt <= Date.now() &&
+      (await signedIn())
+    )
+      return publicStatus(await advanceSelection(connection), true);
     if (connection.state === "ready" && Date.now() >= connection.mediaExpiresAt)
       diagnostic(
         {
@@ -128,22 +134,60 @@ export function getPhotosStatus() {
     return publicStatus(connection, await signedIn());
   });
 }
+async function startSelection(): Promise<PhotosConnection> {
+  const session = await createPickerSession();
+  const connection: PhotosConnection = {
+    state: "selecting",
+    sessionId: session.id,
+    pickerUrl: session.pickerUrl,
+    nextPollAt: Date.now() + session.pollAfterMs,
+    pickingEndsAt: session.pickingEndsAt,
+    expiresAt: session.expiresAt,
+    pollAfterMs: session.pollAfterMs,
+  };
+  await writePhotosConnection(connection);
+  return connection;
+}
+async function advanceSelection(
+  connection: Extract<PhotosConnection, { state: "selecting" }>,
+): Promise<PhotosConnection> {
+  const session = await getPickerSession(connection.sessionId);
+  if (session.mediaItemsSet) {
+    const ready: PhotosConnection = {
+      state: "ready",
+      sessionId: connection.sessionId,
+      pickerUrl: connection.pickerUrl,
+      nextPollAt: Date.now() + MEDIA_INTERVAL,
+      expiresAt: session.expiresAt,
+      photos: await listPickerPhotos(connection.sessionId),
+      nextMediaPollAt: Date.now() + MEDIA_INTERVAL,
+      mediaExpiresAt: Date.now() + MEDIA_INTERVAL,
+    };
+    await writePhotosConnection(ready);
+    return ready;
+  }
+  if (session.pickingEndsAt <= Date.now()) {
+    try {
+      await deletePickerSession(connection.sessionId);
+    } catch {}
+    return startSelection();
+  }
+  const next: PhotosConnection = {
+    ...connection,
+    nextPollAt: Date.now() + session.pollAfterMs,
+    pickingEndsAt: session.pickingEndsAt,
+    expiresAt: session.expiresAt,
+    pollAfterMs: session.pollAfterMs,
+  };
+  await writePhotosConnection(next);
+  return next;
+}
 export function connectPhotos() {
   return withPhotosConnectionWriteLock(async () => {
     if (!(await signedIn())) return { state: "unconfigured" } as const;
     const current = await readPhotosConnection();
     if (current.state !== "disconnected") return publicStatus(current, true);
-    const session = await createPickerSession();
-    const connection: PhotosConnection = {
-      state: "selecting",
-      sessionId: session.id,
-      pickerUrl: session.pickerUrl,
-      nextPollAt: Date.now() + session.pollAfterMs,
-      expiresAt: session.expiresAt,
-      pollAfterMs: session.pollAfterMs,
-    };
-    await writePhotosConnection(connection);
-    return publicStatus(connection, true);
+    return publicStatus(await startSelection(), true);
   });
 }
 export function pollPhotos() {
@@ -159,29 +203,12 @@ export function pollPhotos() {
       return { state: "disconnected" } as const;
     }
     if (connection.state === "selecting") {
-      if (Date.now() < connection.nextPollAt)
+      if (
+        Date.now() < connection.nextPollAt &&
+        Date.now() < connection.pickingEndsAt
+      )
         return publicStatus(connection, true);
-      const session = await getPickerSession(connection.sessionId);
-      connection.nextPollAt = Date.now() + session.pollAfterMs;
-      connection.expiresAt = session.expiresAt;
-      connection.pollAfterMs = session.pollAfterMs;
-      if (!session.mediaItemsSet) {
-        await writePhotosConnection(connection);
-        return publicStatus(connection, true);
-      }
-      const photos = await listPickerPhotos(connection.sessionId);
-      const ready: PhotosConnection = {
-        state: "ready",
-        sessionId: connection.sessionId,
-        pickerUrl: connection.pickerUrl,
-        nextPollAt: Date.now() + MEDIA_INTERVAL,
-        expiresAt: connection.expiresAt,
-        photos,
-        nextMediaPollAt: Date.now() + MEDIA_INTERVAL,
-        mediaExpiresAt: Date.now() + MEDIA_INTERVAL,
-      };
-      await writePhotosConnection(ready);
-      return publicStatus(ready, true);
+      return publicStatus(await advanceSelection(connection), true);
     }
     if (Date.now() >= connection.nextMediaPollAt) {
       const startedAt = Date.now();

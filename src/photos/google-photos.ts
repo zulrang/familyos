@@ -78,6 +78,7 @@ export type PickerSession = {
   pickerUrl: string;
   mediaItemsSet: boolean;
   pollAfterMs: number;
+  pickingEndsAt: number;
   expiresAt: number;
 };
 
@@ -95,6 +96,13 @@ function parseDuration(value: unknown, fallbackMs: number): number {
   return Math.max(5000, Number.parseFloat(value) * 1000);
 }
 
+// Google stops accepting picks after `timeoutIn`, long before `expireTime`.
+function parseTimeout(value: unknown): number {
+  if (typeof value !== "string" || !/^\d+(\.\d+)?s$/.test(value))
+    return 30 * 60_000;
+  return Number.parseFloat(value) * 1000;
+}
+
 function parsePickerSessionStatus(
   raw: Record<string, unknown>,
 ): PickerSessionStatus {
@@ -109,6 +117,7 @@ function parsePickerSessionStatus(
     id: stringField(raw.id, "session"),
     mediaItemsSet: raw.mediaItemsSet === true,
     pollAfterMs: parseDuration(polling.pollInterval, 5000),
+    pickingEndsAt: Date.now() + parseTimeout(polling.timeoutIn),
     expiresAt: Number.isFinite(expiry) ? expiry : Date.now() + 30 * 60_000,
   };
 }
